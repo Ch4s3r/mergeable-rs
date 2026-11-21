@@ -66,16 +66,15 @@ pub async fn process_filter(
     let supported_settings = filter
         .supported_settings()
         .ok_or_else(|| JsError::error("Class extending filters must provide supported Settings"))?;
-    logging::info(
-        &format!("filter/{}", filter.name()),
+    logging::info(&format!("filter/{}", filter.name()), || {
         json!({
             "logType": "filter_process",
             "eventId": context.event_id,
             "repo": context.repository_full_name(),
             "filterName": filter.name(),
             "settings": js::stringify(settings),
-        }),
-    );
+        })
+    });
     if filter.checks_settings() {
         match crate::validators::validate_settings(
             &format!("filter/{}", filter.name()),

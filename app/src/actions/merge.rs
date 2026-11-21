@@ -78,7 +78,7 @@ async fn merge_unmerged_pull_request(
 fn log_detached_failure(context: &Context, error: &JsError) {
     logging::error(
         "action/merge",
-        json!({"eventId": context.event_id, "errors": error.to_string()}),
+        || json!({"eventId": context.event_id, "errors": error.to_string()}),
     );
 }
 

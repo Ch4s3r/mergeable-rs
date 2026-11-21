@@ -1,3 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["app", "replay"]
+
+[profile.release]
+lto = true
+codegen-units = 1

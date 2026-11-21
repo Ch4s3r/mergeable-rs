@@ -94,7 +94,7 @@ pub fn spawn_detached(
         if let Err(error) = future.await {
             logging::error(
                 task_name,
-                json!({"eventId": event_id, "errors": error.to_string()}),
+                || json!({"eventId": event_id, "errors": error.to_string()}),
             );
         }
     });

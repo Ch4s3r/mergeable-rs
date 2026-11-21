@@ -22,15 +22,14 @@ pub async fn execute_mergeable(mut context: Context) -> JsResult<()> {
         return log_and_process_config_errors(&context, &configuration).await;
     }
     if std::env::var("LOG_CONFIG").is_ok_and(|value| !value.is_empty()) {
-        logging::info(
-            "flex",
+        logging::info("flex", || {
             json!({
                 "logType": "config",
                 "eventId": context.event_id,
                 "repo": context.repository_full_name(),
                 "settings": js::stringify(&configuration.settings),
-            }),
-        );
+            })
+        });
     }
     process_workflow(&context, &registry, &configuration).await
 }
@@ -74,16 +73,15 @@ pub async fn log_and_process_config_errors(
         });
         log_type = "config_no_yml";
     }
-    logging::info(
-        "flex",
+    logging::info("flex", || {
         json!({
             "logType": log_type,
             "eventId": context.event_id,
             "repo": context.repository_full_name(),
             "event": event,
             "errors": configuration.errors.iter().map(|(code, message)| json!([code, message])).collect::<Vec<_>>(),
-        }),
-    );
+        })
+    });
     checks::run(context, &payload).await
 }
 
@@ -311,16 +309,15 @@ pub async fn process_workflow(
         }
         match filter_results(context, registry, &rule).await {
             Err(error) => {
-                logging::error(
-                    "flex",
+                logging::error("flex", || {
                     json!({
                         "logType": "unknown_error_filter",
                         "eventId": context.event_id,
                         "errors": error.to_string(),
                         "repo": context.repository_full_name(),
                         "event": event_name,
-                    }),
-                );
+                    })
+                });
                 spawn_cancelled_check(
                     context,
                     "Invalid Filters",
@@ -347,16 +344,15 @@ pub async fn process_workflow(
         let validation_results = match validator_results(context, registry, rule).await {
             Ok(outputs) => outputs,
             Err(error) => {
-                logging::error(
-                    "flex",
+                logging::error("flex", || {
                     json!({
                         "logType": "unknown_error_validator",
                         "eventId": context.event_id,
                         "errors": error.to_string(),
                         "repo": context.repository_full_name(),
                         "event": event_name,
-                    }),
-                );
+                    })
+                });
                 vec![internal_error_result(&error)]
             }
         };
@@ -369,16 +365,15 @@ pub async fn process_workflow(
                 let body = format!(
                     "####  :x: Error Occurred while executing an Action \n\n If you believe this is an unexpected error, please report it on our issue tracker: https://github.com/mergeability/mergeable/issues/new \n##### Error Details \n-------------------- \n{error}"
                 );
-                logging::error(
-                    "flex",
+                logging::error("flex", || {
                     json!({
                         "logType": "unknown_error_action",
                         "eventId": context.event_id,
                         "errors": error.to_string(),
                         "repo": context.repository_full_name(),
                         "event": event_name,
-                    }),
-                );
+                    })
+                });
                 if comment::is_supported(&event_name) {
                     let task_context = context.clone();
                     comment::spawn_detached(context, "flex", async move {

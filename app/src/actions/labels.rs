@@ -89,7 +89,7 @@ fn labels_to_keep(current: Vec<Value>, patterns: Option<&Value>) -> JsResult<Vec
 fn log_detached_failure(context: &Context, error: &JsError) {
     logging::error(
         "action/labels",
-        json!({"eventId": context.event_id, "errors": error.to_string()}),
+        || json!({"eventId": context.event_id, "errors": error.to_string()}),
     );
 }
 

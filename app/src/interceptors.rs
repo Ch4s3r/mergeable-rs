@@ -44,15 +44,14 @@ async fn check_rerun(context: &mut Context) -> JsResult<()> {
     let check_run_id = check_run.get("id").cloned().unwrap_or(Value::Null);
     let meta_id = meta.get("id").cloned().unwrap_or(Value::Null);
     if !js::strict_equals(&check_run_id, &meta_id) {
-        logging::warn(
-            "interceptors/checkReRun",
+        logging::warn("interceptors/checkReRun", || {
             json!({
                 "logType": "potential_injection",
                 "message": "ids in payload do not match. Potential injection.",
                 "checkRun": check_run,
                 "meta": meta,
-            }),
-        );
+            })
+        });
         return Ok(());
     }
     let pull_requests = js::read(Some(&check_run), "pull_requests")?

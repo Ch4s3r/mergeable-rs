@@ -353,7 +353,7 @@ fn log_event_received(context: &Context) -> JsResult<()> {
             }
         }
     }
-    logging::info("mergeable", Value::Object(entry));
+    logging::info("mergeable", move || Value::Object(entry));
     Ok(())
 }
 

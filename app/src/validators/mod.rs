@@ -108,16 +108,15 @@ pub async fn process_validate(
     let supported_settings = validator.supported_settings().ok_or_else(|| {
         JsError::error("Class extending validators must provide supported Settings")
     })?;
-    logging::info(
-        &format!("validator/{}", validator.name()),
+    logging::info(&format!("validator/{}", validator.name()), || {
         json!({
             "logType": "validator_process",
             "eventId": context.event_id,
             "repo": context.repository_full_name(),
             "validatorName": validator.name(),
             "settings": js::stringify(settings),
-        }),
-    );
+        })
+    });
     if validator.checks_settings() {
         match validate_settings(
             &format!("validator/{}", validator.name()),

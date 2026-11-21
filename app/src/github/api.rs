@@ -12,8 +12,7 @@ fn log_and_rethrow<T>(error: JsError, context: &Context, call_name: &str) -> JsR
         Some(404) => "http_not_found_error",
         _ => "unknown_github_api_error",
     };
-    logging::error(
-        &format!("GithubAPI/{call_name}"),
+    logging::error(&format!("GithubAPI/{call_name}"), || {
         json!({
             "logType": log_type,
             "eventId": context.event_id,
@@ -21,22 +20,21 @@ fn log_and_rethrow<T>(error: JsError, context: &Context, call_name: &str) -> JsR
             "event": context.event_with_action(),
             "callFn": call_name,
             "errors": error.to_string(),
-        }),
-    );
+        })
+    });
     Err(error)
 }
 
 fn debug_call(context: &Context, call_name: &str) {
-    logging::debug(
-        &format!("GithubAPI/{call_name}"),
+    logging::debug(&format!("GithubAPI/{call_name}"), || {
         json!({
             "logType": "github_api_debug",
             "eventId": context.event_id,
             "repo": context.repository_full_name(),
             "event": context.event_with_action(),
             "callFn": call_name,
-        }),
-    );
+        })
+    });
 }
 
 async fn call(
@@ -485,8 +483,7 @@ pub async fn merge_pull_request(
                 {
                     return Ok(None);
                 }
-                logging::info(
-                    "GithubAPI/pulls.merge",
+                logging::info("GithubAPI/pulls.merge", || {
                     json!({
                         "logType": "merge_fail_error",
                         "eventId": context.event_id,
@@ -494,8 +491,8 @@ pub async fn merge_pull_request(
                         "event": context.event_with_action(),
                         "callFn": "pulls.merge",
                         "errors": error.to_string(),
-                    }),
-                );
+                    })
+                });
             }
             log_and_rethrow(error, context, "pulls.merge")
         }
@@ -556,8 +553,7 @@ pub async fn request_reviewers(
     {
         Ok(response) => Ok(Some(response)),
         Err(error) => {
-            logging::info(
-                "GithubAPI/pulls.requestReview",
+            logging::info("GithubAPI/pulls.requestReview", || {
                 json!({
                     "logType": "request_review_fail_error",
                     "eventId": context.event_id,
@@ -565,8 +561,8 @@ pub async fn request_reviewers(
                     "event": context.event_with_action(),
                     "callFn": "pulls.requestReview",
                     "errors": error.to_string(),
-                }),
-            );
+                })
+            });
             Ok(None)
         }
     }

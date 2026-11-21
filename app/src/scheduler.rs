@@ -125,14 +125,14 @@ impl Scheduler {
         tokio::spawn(async move {
             while let Some(installation) = queued_installations.recv().await {
                 if let Err(error) = worker.schedule_each_repository(Some(&installation)).await {
-                    logging::error("scheduler", json!({"message": error.to_string()}));
+                    logging::error("scheduler", || json!({"message": error.to_string()}));
                 }
             }
         });
         let setup = Arc::clone(&scheduler);
         tokio::spawn(async move {
             if let Err(error) = setup.setup().await {
-                logging::error("scheduler", json!({"message": error.to_string()}));
+                logging::error("scheduler", || json!({"message": error.to_string()}));
             }
         });
         scheduler
@@ -173,13 +173,13 @@ impl Scheduler {
         if is_ignored_installation(&self.options.ignored_accounts, installation)? {
             logging::info(
                 "scheduler",
-                json!({"installation": installation, "msg": "Installation is ignored"}),
+                || json!({"installation": installation, "msg": "Installation is ignored"}),
             );
             return Ok(());
         }
         let queued_installation = installation.cloned().unwrap_or(Value::Null);
         if self.installation_queue.send(queued_installation).is_err() {
-            logging::error("scheduler", json!({"message": "scheduler queue closed"}));
+            logging::error("scheduler", || json!({"message": "scheduler queue closed"}));
         }
         Ok(())
     }
@@ -213,7 +213,7 @@ impl Scheduler {
         };
         logging::debug(
             "scheduler",
-            json!({"repository": repository, "delay": delay_milliseconds, "interval": interval_milliseconds, "msg": "Scheduling interval"}),
+            || json!({"repository": repository, "delay": delay_milliseconds, "interval": interval_milliseconds, "msg": "Scheduling interval"}),
         );
         let payload = scheduled_event_payload(installation, repository);
         let github = Arc::clone(&self.github);
@@ -231,7 +231,7 @@ impl Scheduler {
                     )
                     .await;
                     if let Err(error) = outcome {
-                        logging::error("scheduler", json!({"message": error.to_string()}));
+                        logging::error("scheduler", || json!({"message": error.to_string()}));
                     }
                 });
                 tokio::time::sleep(node_timer_duration(interval_milliseconds)).await;
@@ -243,7 +243,7 @@ impl Scheduler {
     pub fn stop(&self, repository: &Value) {
         logging::info(
             "scheduler",
-            json!({"repository": repository, "msg": "Canceling interval"}),
+            || json!({"repository": repository, "msg": "Canceling interval"}),
         );
         if let Ok(intervals) = self.intervals.lock()
             && let Some(timer) = intervals.get(&repository_key(repository))

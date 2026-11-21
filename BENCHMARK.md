@@ -31,3 +31,23 @@ unthrottled column shows the engine's own capacity and is not an apples-to-apple
 ## Footprint
 - Rust release binary: 16.5 MB, no runtime dependencies (distroless image, rust/Dockerfile).
 - Node: node_modules 138 MB plus the Node 22 runtime.
+
+## Rust-to-Rust: release profile tuning (2026-11-22)
+
+Method: `replay bench` with GITHUB_THROTTLE=false, 20,000 webhooks, 32 in flight, read set (10 GET-only cases)
+and write set (8 approvals cases, check run create + update). Throughput is limited by the load generator and mock
+GitHub on the same machine (all variants ~7,500 read / ~4,300 write webhooks/s), so the metric is the app process's
+own CPU time per webhook (sampled with ps), median of 5 interleaved runs.
+
+| Variant | Read µs CPU/webhook | Write µs CPU/webhook | Binary | Release build |
+|---|---|---|---|---|
+| Baseline (default release profile) | 404 | 697 | 16.5 MB | 24 s |
+| cargo-wizard fast-runtime + target-cpu=native | 392 | 663 | 10.2 MB | 61 s |
+| cargo-wizard fast-runtime, portable (no native) | 380 | 664 | 10.3 MB | 62 s |
+| fat LTO + codegen-units=1 + lazy log payloads, panic=unwind (**chosen**) | 392 (-3%) | 654 (-6%) | 12.1 MB (-27%) | 45 s |
+| same with panic=abort | 380 (-6%) | 649 (-7%) | 10.3 MB | 42 s |
+
+Chosen: `[profile.release] lto = true, codegen-units = 1` plus log payloads built only when the level is enabled.
+Not adopted: `-Ctarget-cpu=native` (no measurable gain, binaries would not run on other CPUs / in the Docker image),
+`panic = "abort"` (1-3% more, but a panic in one webhook would abort the whole server instead of failing that
+webhook). Replay after the change: 379/381 identical, 2 known diffs (unchanged).

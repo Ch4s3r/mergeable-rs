@@ -73,7 +73,7 @@ pub struct RedisCache {
 fn log_cache_error(operation: &str, error: impl std::fmt::Display) {
     logging::error(
         "cache",
-        json!({"operation": operation, "message": error.to_string()}),
+        || json!({"operation": operation, "message": error.to_string()}),
     );
 }
 
@@ -110,7 +110,7 @@ impl RedisCache {
             {
                 logging::warn(
                     "cache",
-                    json!({"message": "Redis server does not require a password, but a password was supplied"}),
+                    || json!({"message": "Redis server does not require a password, but a password was supplied"}),
                 );
                 self.open_connection(false).await?
             }

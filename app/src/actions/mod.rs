@@ -53,16 +53,15 @@ pub fn is_event_supported(action: &dyn Action, event_name: &str) -> bool {
 }
 
 fn log_usage(action: &dyn Action, context: &Context, settings: &Value, log_type: &str) {
-    logging::info(
-        &format!("action/{}", action.name()),
+    logging::info(&format!("action/{}", action.name()), || {
         json!({
             "logType": log_type,
             "eventId": context.event_id,
             "repo": context.repository_full_name(),
             "actionName": action.name(),
             "settings": js::stringify(settings),
-        }),
-    );
+        })
+    });
 }
 
 pub async fn process_before_validate(
