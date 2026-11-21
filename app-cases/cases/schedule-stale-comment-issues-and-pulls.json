@@ -1,0 +1,197 @@
+{
+  "name": "schedule-stale-comment-issues-and-pulls",
+  "description": "Synthetic schedule.repository webhook: stale search (query contains a now-relative updated:< timestamp that must be normalised) finds an issue and a PR, comment posted on both.",
+  "event": "schedule",
+  "payload": {
+    "action": "repository",
+    "installation": {
+      "id": 4242
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: schedule.repository\n    name: Stale\n    validate:\n      - do: stale\n        days: 30\n    pass:\n      - do: comment\n        payload:\n          body: 'This is stale, @author. Repo: @repository'\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/search/issues",
+      "status": 200,
+      "body": {
+        "total_count": 2,
+        "incomplete_results": false,
+        "items": [
+          {
+            "url": "https://api.github.com/repos/acme/app/issues/10",
+            "id": 800010,
+            "node_id": "I_10",
+            "number": 10,
+            "title": "Login fails on Safari",
+            "user": {
+              "login": "bob",
+              "id": 46254,
+              "node_id": "U_bob",
+              "type": "User",
+              "html_url": "https://github.com/bob"
+            },
+            "body": "Steps to reproduce: open the login page in Safari.",
+            "labels": [],
+            "state": "open",
+            "locked": false,
+            "assignee": null,
+            "assignees": [],
+            "milestone": null,
+            "comments": 0,
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-01-15T10:00:00Z",
+            "closed_at": null,
+            "html_url": "https://github.com/acme/app/issues/10"
+          },
+          {
+            "url": "https://api.github.com/repos/acme/app/issues/1",
+            "id": 900001,
+            "node_id": "I_10",
+            "number": 1,
+            "title": "Add login page",
+            "user": {
+              "login": "alice",
+              "id": 97097,
+              "node_id": "U_alice",
+              "type": "User",
+              "html_url": "https://github.com/alice"
+            },
+            "body": "Implements the login page.",
+            "labels": [],
+            "state": "open",
+            "locked": false,
+            "assignee": null,
+            "assignees": [],
+            "milestone": null,
+            "comments": 0,
+            "created_at": "2024-01-15T10:00:00Z",
+            "updated_at": "2024-01-15T10:00:00Z",
+            "closed_at": null,
+            "html_url": "https://github.com/acme/app/pull/1",
+            "pull_request": {
+              "url": "https://api.github.com/repos/acme/app/pulls/1",
+              "html_url": "https://github.com/acme/app/pull/1",
+              "diff_url": "https://github.com/acme/app/pull/1.diff",
+              "patch_url": "https://github.com/acme/app/pull/1.patch",
+              "merged_at": null
+            }
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/10/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/repos/acme/app/issues/10/comments",
+      "status": 201,
+      "body": {
+        "id": 9901,
+        "body": "created"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 201,
+      "body": {
+        "id": 9901,
+        "body": "created"
+      }
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/search/issues",
+        "query": {
+          "order": "desc",
+          "per_page": "20",
+          "q": "repo:acme/app is:open updated:<<timestamp>",
+          "sort": "updated"
+        },
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/issues/10/comments",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/issues/1/comments",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "POST",
+        "path": "/repos/acme/app/issues/10/comments",
+        "query": {},
+        "body": {
+          "body": "This is stale, bob. Repo: "
+        }
+      },
+      {
+        "method": "POST",
+        "path": "/repos/acme/app/issues/1/comments",
+        "query": {},
+        "body": {
+          "body": "This is stale, alice. Repo: "
+        }
+      }
+    ]
+  },
+  "unordered": false
+}

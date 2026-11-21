@@ -1,0 +1,79 @@
+{
+  "name": "schedule-stale-time-constraint-all-hours",
+  "description": "time_constraint with all days, hours_between [0, 23] and a time zone: always inside the window, search runs.",
+  "event": "schedule",
+  "payload": {
+    "action": "repository",
+    "installation": {
+      "id": 4242
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: schedule.repository\n    name: Stale\n    validate:\n      - do: stale\n        time_constraint:\n          time_zone: Europe/Vienna\n          hours_between: [0, 23]\n          days_of_week: [Sun, Mon, Tue, Wed, Thu, Fri, Sat]\n    pass:\n      - do: comment\n        payload:\n          body: stale\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/search/issues",
+      "status": 200,
+      "body": {
+        "total_count": 0,
+        "incomplete_results": false,
+        "items": []
+      }
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/search/issues",
+        "query": {
+          "order": "desc",
+          "per_page": "20",
+          "q": "repo:acme/app is:open updated:<<timestamp>",
+          "sort": "updated"
+        },
+        "body": null
+      }
+    ]
+  },
+  "unordered": false
+}

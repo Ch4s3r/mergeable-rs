@@ -1,0 +1,143 @@
+{
+  "name": "validator-author-issue-event",
+  "description": "author validator on issues.opened (payload.issue.user) failing must_include: fail comment posted.",
+  "event": "issues",
+  "payload": {
+    "action": "opened",
+    "issue": {
+      "url": "https://api.github.com/repos/acme/app/issues/10",
+      "id": 800010,
+      "node_id": "I_10",
+      "number": 10,
+      "title": "Login fails on Safari",
+      "user": {
+        "login": "bob",
+        "id": 46254,
+        "node_id": "U_bob",
+        "type": "User",
+        "html_url": "https://github.com/bob"
+      },
+      "body": "Steps to reproduce: open the login page in Safari.",
+      "labels": [],
+      "state": "open",
+      "locked": false,
+      "assignee": null,
+      "assignees": [],
+      "milestone": null,
+      "comments": 0,
+      "created_at": "2024-01-15T10:00:00Z",
+      "updated_at": "2024-01-15T10:00:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/acme/app/issues/10"
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    },
+    "organization": {
+      "login": "acme",
+      "id": 9001
+    },
+    "sender": {
+      "login": "bob",
+      "id": 46254,
+      "node_id": "U_bob",
+      "type": "User",
+      "html_url": "https://github.com/bob"
+    },
+    "installation": {
+      "id": 4242,
+      "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg=="
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: issues.opened\n    name: Issue author\n    validate:\n      - do: author\n        must_include:\n          regex: '^alice$'\n    fail:\n      - do: comment\n        payload:\n          body: Only alice may open issues, @author.\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/10/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/repos/acme/app/issues/10/comments",
+      "status": 201,
+      "body": {
+        "id": 9901,
+        "body": "created"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/2/comments",
+      "status": 200,
+      "body": []
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/issues/10/comments",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/issues/10/comments",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "POST",
+        "path": "/repos/acme/app/issues/10/comments",
+        "query": {},
+        "body": {
+          "body": "Only alice may open issues, bob."
+        }
+      }
+    ]
+  },
+  "unordered": false
+}

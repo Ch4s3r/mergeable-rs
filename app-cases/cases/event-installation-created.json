@@ -1,0 +1,40 @@
+{
+  "name": "event-installation-created",
+  "description": "installation.created without repository in payload: settings/config lookups fail on context.repo(), nothing else happens (scheduler off).",
+  "event": "installation",
+  "payload": {
+    "action": "created",
+    "installation": {
+      "id": 4242,
+      "account": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "app_id": 1,
+      "target_type": "Organization"
+    },
+    "repositories": [
+      {
+        "id": 500001,
+        "name": "app",
+        "full_name": "acme/app",
+        "private": false
+      }
+    ],
+    "sender": {
+      "login": "alice",
+      "id": 97097,
+      "node_id": "U_alice",
+      "type": "User",
+      "html_url": "https://github.com/alice"
+    }
+  },
+  "files": {},
+  "github": [],
+  "expected": {
+    "status": 200,
+    "calls": []
+  },
+  "unordered": false
+}

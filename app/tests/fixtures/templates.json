@@ -1,0 +1,8780 @@
+[
+ {
+  "name": "consts DEFAULT_PR_PASS 0 title",
+  "template": "Mergeable Run has been Completed!",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "Mergeable Run has been Completed!"
+ },
+ {
+  "name": "consts DEFAULT_PR_PASS 0 summary",
+  "template": "All the validators have returned 'pass'! \n Here are some stats of the run: \n {{validationCount}} validations were run",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "All the validators have returned 'pass'! \n Here are some stats of the run: \n 3 validations were run"
+ },
+ {
+  "name": "consts DEFAULT_PR_FAIL 0 title",
+  "template": "{{failCount}}/{{validationCount}} Fail(s): {{#each failures}} {{toUpperCase name}}{{^@last}}, {{/@last}}{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "1/3 Fail(s):  TITLE,  LABEL"
+ },
+ {
+  "name": "consts DEFAULT_PR_FAIL 0 summary",
+  "template": "### Status: {{toUpperCase validationStatus}}\n\n        Here are some stats of the run:\n        {{validationCount}} validations were run.\n        {{passCount}} PASSED\n        {{failCount}} FAILED\n      ",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "### Status: FAIL\n\n        Here are some stats of the run:\n        3 validations were run.\n        1 PASSED\n        1 FAILED\n      "
+ },
+ {
+  "name": "consts DEFAULT_PR_FAIL 0 text",
+  "template": "{{#each validationSuites}}\n#### {{{statusIcon status}}} Validator: {{toUpperCase name}}\n{{#each validations }} * {{{statusIcon status}}} ***{{{ description }}}***\n       Input : {{{details.input}}}\n       Settings : {{{displaySettings details.settings}}}\n       {{/each}}\n{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "#### :x: Validator: TITLE\n * :x: ***Title must not include \"wip\" & <stuff>***\n       Input : WIP: x\n       Settings : ```{\"2\":[1,2.5,null,true],\"10\":1,\"must_exclude\":{\"regex\":\"wip\",\"message\":\"no\"}}```\n * :heavy_check_mark: ***ok***\n       Input : a,b\n       Settings : ```{\"min\":{\"count\":1}}```\n#### :heavy_exclamation_mark: Validator: LABEL\n * :heavy_exclamation_mark: ***boom***\n       Input : \n       Settings : ```{}```\n"
+ },
+ {
+  "name": "consts DEFAULT_PR_ERROR 0 title",
+  "template": "Mergeable found some failed checks!",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "Mergeable found some failed checks!"
+ },
+ {
+  "name": "consts DEFAULT_PR_ERROR 0 summary",
+  "template": "### Status: {{toUpperCase validationStatus}}\n      Some or All of the validators have returned 'error' status, please check below for details\n      \n      Here are some stats of the run: \n      {{validationCount}} validations were run. \n      {{passCount}} ***PASSED***\n      {{failCount}} ***FAILED***\n      {{errorCount}} ***ERRORED***",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "### Status: FAIL\n      Some or All of the validators have returned 'error' status, please check below for details\n      \n      Here are some stats of the run: \n      3 validations were run. \n      1 ***PASSED***\n      1 ***FAILED***\n      1 ***ERRORED***"
+ },
+ {
+  "name": "consts DEFAULT_PR_ERROR 0 text",
+  "template": "{{#each validationSuites}}\n#### {{{statusIcon status}}} Validator: {{toUpperCase name}}\nStatus {{toUpperCase status}}\n{{#each validations }} * {{{statusIcon status}}} ***{{{ description }}}***\n       Input : {{{details.input}}}\n       Settings : {{{displaySettings details.settings}}}\n       {{#if details.error}}\n       Error : {{{details.error}}}\n       {{/if}}\n       {{/each}}\n{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "#### :x: Validator: TITLE\nStatus FAIL\n * :x: ***Title must not include \"wip\" & <stuff>***\n       Input : WIP: x\n       Settings : ```{\"2\":[1,2.5,null,true],\"10\":1,\"must_exclude\":{\"regex\":\"wip\",\"message\":\"no\"}}```\n * :heavy_check_mark: ***ok***\n       Input : a,b\n       Settings : ```{\"min\":{\"count\":1}}```\n#### :heavy_exclamation_mark: Validator: LABEL\nStatus ERROR\n * :heavy_exclamation_mark: ***boom***\n       Input : \n       Settings : ```{}```\n       Error : Error: something\n"
+ },
+ {
+  "name": "consts DEFAULT_ISSUES_PASS 0 body",
+  "template": "All the validators have returned 'pass'! \n Here are some stats of the run: \n {{validationCount}} validations were run",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "All the validators have returned 'pass'! \n Here are some stats of the run: \n 3 validations were run"
+ },
+ {
+  "name": "consts DEFAULT_ISSUES_FAIL 0 body",
+  "template": "### We found some failed validations in your Issue\n{{#each validationSuites}}\n{{#ifEquals status \"fail\"}}\n#### {{{statusIcon status}}} Validator: {{toUpperCase name}}\n{{#each validations }} * {{{statusIcon status}}} ***{{{ description }}}***\nInput : {{{details.input}}}\nSettings : {{{displaySettings details.settings}}}\n{{/each}}\n{{/ifEquals}}\n{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "### We found some failed validations in your Issue\n#### :x: Validator: TITLE\n * :x: ***Title must not include \"wip\" & <stuff>***\nInput : WIP: x\nSettings : ```{\"2\":[1,2.5,null,true],\"10\":1,\"must_exclude\":{\"regex\":\"wip\",\"message\":\"no\"}}```\n * :heavy_check_mark: ***ok***\nInput : a,b\nSettings : ```{\"min\":{\"count\":1}}```\n"
+ },
+ {
+  "name": "consts DEFAULT_ISSUES_ERROR 0 body",
+  "template": "### We found some error in your mergeable configuration\n{{#each validationSuites}}\n{{#ifEquals status \"error\"}}\n#### {{{statusIcon status}}} Validator: {{toUpperCase name}}\n{{#each validations }} * {{{statusIcon status}}} ***{{{ description }}}***\nInput : {{{details.input}}}\nSettings : {{{displaySettings details.settings}}}\n{{#if details.error}}\nError : {{{details.error}}}\n{{/if}}\n{{/each}}\n{{/ifEquals}}\n{{/each}}\n        ",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "### We found some error in your mergeable configuration\n#### :heavy_exclamation_mark: Validator: LABEL\n * :heavy_exclamation_mark: ***boom***\nInput : \nSettings : ```{}```\nError : Error: something\n        "
+ },
+ {
+  "name": "checks docs text",
+  "template": "{{#each validationSuites}}\n#### {{{statusIcon status}}} Validator: {{toUpperCase name}}\n{{#each validations }} * {{{statusIcon status}}} ***{{{ description }}}***\n       Input : {{{details.input}}}\n       Settings : {{{displaySettings details.settings}}}\n       {{/each}}\n{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "#### :x: Validator: TITLE\n * :x: ***Title must not include \"wip\" & <stuff>***\n       Input : WIP: x\n       Settings : ```{\"2\":[1,2.5,null,true],\"10\":1,\"must_exclude\":{\"regex\":\"wip\",\"message\":\"no\"}}```\n * :heavy_check_mark: ***ok***\n       Input : a,b\n       Settings : ```{\"min\":{\"count\":1}}```\n#### :heavy_exclamation_mark: Validator: LABEL\n * :heavy_exclamation_mark: ***boom***\n       Input : \n       Settings : ```{}```\n"
+ },
+ {
+  "name": "merge commit title",
+  "template": "{{{ title }}} (#{{{ number }}})",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "Add <login> & \"page\" (#10)"
+ },
+ {
+  "name": "merge commit message",
+  "template": "{{{ body }}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix"
+ },
+ {
+  "name": "status placeholder",
+  "template": "Your run has returned the following status: {{status}}",
+  "data": {
+   "status": "pass"
+  },
+  "expected": "Your run has returned the following status: pass"
+ },
+ {
+  "name": "format date created",
+  "template": "created {{formatDate created_at}} done {{formatDate completed_at}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "created Jan 15, 2024, 10:00 AM done Jul 4, 2024, 11:59 PM"
+ },
+ {
+  "name": "format date missing field",
+  "template": "[{{formatDate missing_field}}]",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "[]"
+ },
+ {
+  "name": "format date variants",
+  "template": "{{#each dates}}{{formatDate this}}|{{/each}}",
+  "data": {
+   "dates": [
+    "2024-01-15T00:05:00Z",
+    "2024-01-15T12:00:00Z",
+    "2024-01-15T13:07:00+02:00",
+    "2024-01-15",
+    "2024-06",
+    "2024",
+    "2024-02-30",
+    "2024-13-01",
+    "not a date",
+    "",
+    "2024-01-15T24:00:00Z",
+    "2024-01-15T10:00:00.123456Z",
+    "+002024-01-15T00:00:00Z",
+    "0099-01-15T10:00:00Z",
+    "Mon, 15 Jan 2024 10:00:00 GMT",
+    "2024-01-15T10:00:00+0100"
+   ]
+  },
+  "expected": "Jan 15, 2024, 12:05 AM|Jan 15, 2024, 12:00 PM|Jan 15, 2024, 11:07 AM|Jan 15, 2024, 12:00 AM|Jun 1, 2024, 12:00 AM|Jan 1, 2024, 12:00 AM|Mar 1, 2024, 12:00 AM|Invalid Date|Invalid Date|Invalid Date|Jan 16, 2024, 12:00 AM|Jan 15, 2024, 10:00 AM|Jan 15, 2024, 12:00 AM|Jan 15, 99, 10:00 AM|Jan 15, 2024, 10:00 AM|Jan 15, 2024, 9:00 AM|"
+ },
+ {
+  "name": "escaping set",
+  "template": "{{html}}|{{{html}}}|{{&html}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "&amp;&lt;&gt;&quot;&#x27;&#x60;&#x3D; /|&<>\"'`= /|&<>\"'`= /"
+ },
+ {
+  "name": "value rendering",
+  "template": "{{zero}}|{{negative}}|{{float}}|{{big}}|{{truthy}}|{{falsy}}|{{nothing}}|{{missing}}|{{labels}}|{{empty_list}}|{{empty_object}}|{{nested.list}}|{{user}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "0|-1.5|2.5|12345678901|true|false|||[object Object],[object Object]||[object Object]|1,2,3|[object Object]"
+ },
+ {
+  "name": "unicode passthrough",
+  "template": "{{unicode}} {{toUpperCase unicode}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "straße café   😀 STRASSE CAFÉ   😀"
+ },
+ {
+  "name": "each array data vars",
+  "template": "{{#each labels}}{{@index}}:{{@key}}:{{@first}}:{{@last}}:{{name}};{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "0:0:true:false:bug;1:1:false:true:feature;"
+ },
+ {
+  "name": "each object order and data",
+  "template": "{{#each keyed}}{{@key}}={{this}}@{{@index}}{{#if @first}}F{{/if}}{{#if @last}}L{{/if}};{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "0=zero@0F;1=3@1;z=1@2;a=2@3;-1=minus@4;01=padded@5L;"
+ },
+ {
+  "name": "each else on empty",
+  "template": "{{#each empty_list}}x{{else}}empty{{/each}}|{{#each empty_object}}x{{else}}none{{/each}}|{{#each missing}}x{{else}}miss{{/each}}|{{#each title}}x{{else}}str{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "empty|none|miss|str"
+ },
+ {
+  "name": "each nested parent access",
+  "template": "{{#each validationSuites}}{{name}}[{{#each validations}}{{@../index}}.{{@index}} {{../name}} {{status}} {{@root.validationStatus}},{{/each}}]{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "title[0.0 title fail fail,0.1 title pass fail,]label[1.0 label error fail,]"
+ },
+ {
+  "name": "each with block params",
+  "template": "{{#each labels as |label position|}}{{position}}={{label.name}} {{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "0=bug 1=feature "
+ },
+ {
+  "name": "each over primitives",
+  "template": "{{#each items}}<{{this}}>{{.}}{{/each}}",
+  "data": {
+   "items": [
+    "a",
+    1,
+    true,
+    null,
+    "x<y"
+   ]
+  },
+  "expected": "<a>a<1>1<true>true<><x&lt;y>x&lt;y"
+ },
+ {
+  "name": "inverted last separator",
+  "template": "{{#each failures}} {{toUpperCase name}}{{^@last}}, {{/@last}}{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": " TITLE,  LABEL"
+ },
+ {
+  "name": "if truthiness",
+  "template": "{{#if empty_object}}T{{else}}F{{/if}}{{#if empty_list}}T{{else}}F{{/if}}{{#if zero}}T{{else}}F{{/if}}{{#if zero includeZero=true}}T{{else}}F{{/if}}{{#if title}}T{{/if}}{{#if nothing}}T{{else}}N{{/if}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "TFFTTN"
+ },
+ {
+  "name": "unless and else if chain",
+  "template": "{{#unless falsy}}U{{/unless}}{{#if falsy}}A{{else if zero}}B{{else if title}}C{{else}}D{{/if}}{{#if falsy}}A{{else if nothing}}B{{/if}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "UC"
+ },
+ {
+  "name": "with and lookup",
+  "template": "{{#with user}}{{login}} {{../number}}{{/with}}{{#with missing}}x{{else}}nowith{{/with}}|{{lookup user \"login\"}}|{{lookup labels 1}}|{{lookup missing \"x\"}}|{{#with user as |u|}}{{u.login}}{{/with}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "alice 10nowith|alice|[object Object]||alice"
+ },
+ {
+  "name": "block helper missing sections",
+  "template": "{{#user}}{{login}}{{/user}}|{{#truthy}}yes{{/truthy}}|{{#falsy}}no{{else}}inv{{/falsy}}|{{#labels}}{{name}}{{/labels}}|{{^labels}}nolabels{{/labels}}|{{^empty_list}}empty{{/empty_list}}|{{#title}}{{this}}{{/title}}|{{#zero}}z{{this}}{{/zero}}|{{#missing}}m{{else}}nom{{/missing}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "alice|yes|inv|bugfeature||empty|Add &lt;login&gt; &amp; &quot;page&quot;|z0|nom"
+ },
+ {
+  "name": "paths",
+  "template": "{{this.title}}|{{./number}}|{{nested/a/b/c}}|{{nested.a.b.c}}|{{[nested].[a]}}|{{labels.[1].name}}|{{labels.length}}|{{title.length}}|{{nested.missing.deep}}|{{@root.number}}|{{keyed.[01]}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "Add &lt;login&gt; &amp; &quot;page&quot;|10|deep|deep|[object Object]|feature|2|20||10|padded"
+ },
+ {
+  "name": "bracket segments with spaces",
+  "template": "{{[foo bar]}}|{{obj.[a-b]}}|{{a-b}}",
+  "data": {
+   "foo bar": "spaced",
+   "obj": {
+    "a-b": "dash"
+   },
+   "a-b": "top"
+  },
+  "expected": "spaced|dash|top"
+ },
+ {
+  "name": "whitespace control",
+  "template": "a  {{~title~}}  b\n  {{~#if truthy~}}\n  yes  \n{{~/if~}}  c",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "aAdd &lt;login&gt; &amp; &quot;page&quot;byesc"
+ },
+ {
+  "name": "standalone lines",
+  "template": "list:\n{{#each labels}}\n- {{name}}\n{{/each}}\nend\n  {{#if truthy}}\n  inside\n  {{else}}\n  never\n  {{/if}}\ndone",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "list:\n- bug\n- feature\nend\n  inside\ndone"
+ },
+ {
+  "name": "standalone crlf",
+  "template": "a\r\n{{#if truthy}}\r\nb\r\n{{/if}}\r\nc",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "a\r\nb\r\nc"
+ },
+ {
+  "name": "comments",
+  "template": "x{{! short }}y\n{{!-- long }} comment --}}\nz {{!-- --}}w\n  {{! standalone }}\nq",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "xy\nz w\nq"
+ },
+ {
+  "name": "escaped mustaches",
+  "template": "\\{{title}} and \\\\{{number}} and \\{{a}}\\{{b}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "{{title}} and \\10 and {{a}}{{b}}"
+ },
+ {
+  "name": "standalone each else",
+  "template": "{{#each empty_list}}\nitem\n{{else}}\nnothing\n{{/each}}\n",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "nothing\n"
+ },
+ {
+  "name": "nested blocks indentation",
+  "template": "{{#each validationSuites}}\n  {{#each validations}}\n    {{#if details.error}}\n    E {{details.error}}\n    {{else}}\n    ok {{status}}\n    {{/if}}\n  {{/each}}\n{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "    ok fail\n    ok pass\n    E Error: something\n"
+ },
+ {
+  "name": "breaklines",
+  "template": "{{breaklines body}}|{{{breaklines body}}}|{{breaklines missing}}|{{breaklines html}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "Line one<br>Line two &lt;b&gt;bold&lt;/b&gt;<br>Line three<br>Four<br><br>Six|Line one<br>Line two &lt;b&gt;bold&lt;/b&gt;<br>Line three<br>Four<br><br>Six||&amp;&lt;&gt;&quot;&#x27;&#x60;&#x3D; /"
+ },
+ {
+  "name": "to upper case",
+  "template": "{{toUpperCase validationStatus}} {{toUpperCase html}} {{{toUpperCase html}}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "FAIL &amp;&lt;&gt;&quot;&#x27;&#x60;&#x3D; / &<>\"'`= /"
+ },
+ {
+  "name": "display settings",
+  "template": "{{displaySettings validationSuites.[0].validations.[0].details.settings}}|{{{displaySettings validationSuites.[0].validations.[0].details.settings}}}|{{{displaySettings missing}}}|{{{displaySettings nothing}}}|{{{displaySettings unicode}}}|{{{displaySettings keyed}}}|{{{displaySettings float}}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "&#x60;&#x60;&#x60;{&quot;2&quot;:[1,2.5,null,true],&quot;10&quot;:1,&quot;must_exclude&quot;:{&quot;regex&quot;:&quot;wip&quot;,&quot;message&quot;:&quot;no&quot;}}&#x60;&#x60;&#x60;|```{\"2\":[1,2.5,null,true],\"10\":1,\"must_exclude\":{\"regex\":\"wip\",\"message\":\"no\"}}```|```undefined```|```null```|```\"straße café   😀\"```|```{\"0\":\"zero\",\"1\":3,\"z\":1,\"a\":2,\"-1\":\"minus\",\"01\":\"padded\"}```|```2.5```"
+ },
+ {
+  "name": "if equals",
+  "template": "{{#ifEquals validationStatus \"fail\"}}F{{else}}N{{/ifEquals}}{{#ifEquals number 10}}ten{{/ifEquals}}{{#ifEquals missing undefined}}U{{/ifEquals}}{{#ifEquals nothing null}}N{{/ifEquals}}{{#ifEquals user user}}same{{else}}diff{{/ifEquals}}{{#ifEquals number \"10\"}}loose{{else}}strict{{/ifEquals}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "FtenUNsamestrict"
+ },
+ {
+  "name": "status icons",
+  "template": "{{statusIcon \"pass\"}}{{statusIcon \"fail\"}}{{statusIcon \"error\"}}{{statusIcon \"info\"}}|{{statusIcon \"bogus\"}}|{{statusIcon number}}|{{statusIcon missing}}|{{statusIcon}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": ":heavy_check_mark::x::heavy_exclamation_mark::information_source:|Unknown Status given: bogus|Unknown Status given: 10|Unknown Status given: undefined|Unknown Status given: [object Object]"
+ },
+ {
+  "name": "subexpressions and hash",
+  "template": "{{toUpperCase (lookup user \"login\")}}|{{#if (lookup user \"login\")}}has{{/if}}|{{statusIcon (lookup failures.[0] \"status\")}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "ALICE|has|:x:"
+ },
+ {
+  "name": "literal params",
+  "template": "{{lookup keyed 1}}|{{lookup keyed \"z\"}}|{{#if true}}t{{/if}}{{#if false}}f{{else}}nf{{/if}}{{#if null}}n{{else}}nn{{/if}}{{#if 0}}z{{else}}nz{{/if}}{{#if \"x\"}}s{{/if}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "3|1|tnfnnnzs"
+ },
+ {
+  "name": "missing simple helper renders empty",
+  "template": "[{{nohelper}}][{{#nohelper}}x{{else}}y{{/nohelper}}]",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "[][y]"
+ },
+ {
+  "name": "helper name shadows data",
+  "template": "{{statusIcon}}|{{title}}",
+  "data": {
+   "statusIcon": "data",
+   "title": "t"
+  },
+  "expected": "Unknown Status given: [object Object]|t"
+ },
+ {
+  "name": "this in nested if",
+  "template": "{{#each labels}}{{#if name}}{{this.name}}/{{../title}}{{/if}}{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "bug/Add &lt;login&gt; &amp; &quot;page&quot;feature/Add &lt;login&gt; &amp; &quot;page&quot;"
+ },
+ {
+  "name": "object key named length",
+  "template": "{{obj.length}}|{{arr.length}}",
+  "data": {
+   "obj": {
+    "length": "own"
+   },
+   "arr": [
+    1,
+    2,
+    3
+   ]
+  },
+  "expected": "own|3"
+ },
+ {
+  "name": "numbers in data",
+  "template": "{{a}} {{b}} {{c}} {{d}}",
+  "data": {
+   "a": 1,
+   "b": 100,
+   "c": 0.5,
+   "d": 0
+  },
+  "expected": "1 100 0.5 0"
+ },
+ {
+  "name": "array of arrays and objects",
+  "template": "{{mixed}}",
+  "data": {
+   "mixed": [
+    1,
+    "a",
+    {
+     "b": 1
+    },
+    null,
+    [
+     2,
+     [
+      3,
+      null
+     ]
+    ],
+    true
+   ]
+  },
+  "expected": "1,a,[object Object],,2,3,,true"
+ },
+ {
+  "name": "triple stash objects",
+  "template": "{{{user}}}|{{{labels}}}|{{{missing}}}|{{{nothing}}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "[object Object]|[object Object],[object Object]||"
+ },
+ {
+  "name": "tilde on else",
+  "template": "{{#if falsy}}\n  a\n{{~else~}}\n  b\n{{/if}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "b\n"
+ },
+ {
+  "name": "standalone else",
+  "template": "{{#if falsy}}\na\n{{else}}\nb\n{{/if}}\n",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "b\n"
+ },
+ {
+  "name": "standalone inverse caret",
+  "template": "{{#if falsy}}\na\n{{^}}\nb\n{{/if}}\n",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "b\n"
+ },
+ {
+  "name": "each over object of objects",
+  "template": "{{#each obj}}{{@key}}:{{name}} {{/each}}",
+  "data": {
+   "obj": {
+    "first": {
+     "name": "one"
+    },
+    "second": {
+     "name": "two"
+    }
+   }
+  },
+  "expected": "first:one second:two "
+ },
+ {
+  "name": "deep depth parent",
+  "template": "{{#each validationSuites}}{{#each validations}}{{#each details.input}}{{this}}<{{../../name}}>{{/each}}{{/each}}{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "a<title>b<title>"
+ },
+ {
+  "name": "root data in each",
+  "template": "{{#each labels}}{{@root.user.login}}{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "alicealice"
+ },
+ {
+  "name": "doc comment example",
+  "template": "- {{formatDate created_at}}\n- {{title}}\n- {{body}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "expected": "- Jan 15, 2024, 10:00 AM\n- Add &lt;login&gt; &amp; &quot;page&quot;\n- Line one\nLine two &lt;b&gt;bold&lt;/b&gt;\r\nLine three\rFour\n\nSix"
+ },
+ {
+  "name": "to upper case of missing",
+  "template": "{{toUpperCase missing}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "TypeError: Cannot read properties of undefined (reading 'toUpperCase')"
+ },
+ {
+  "name": "to upper case of null",
+  "template": "{{toUpperCase nothing}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "TypeError: Cannot read properties of null (reading 'toUpperCase')"
+ },
+ {
+  "name": "to upper case of number",
+  "template": "{{toUpperCase number}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "TypeError: str.toUpperCase is not a function"
+ },
+ {
+  "name": "to upper case without argument",
+  "template": "{{toUpperCase}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "TypeError: str.toUpperCase is not a function"
+ },
+ {
+  "name": "missing helper with param",
+  "template": "{{nohelper title}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: Missing helper: \"nohelper\""
+ },
+ {
+  "name": "missing block helper with param",
+  "template": "{{#nohelper title}}x{{/nohelper}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: Missing helper: \"nohelper\""
+ },
+ {
+  "name": "if without argument",
+  "template": "{{#if}}x{{/if}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: #if requires exactly one argument"
+ },
+ {
+  "name": "each without argument",
+  "template": "{{#each}}x{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: Must pass iterator to #each"
+ },
+ {
+  "name": "if equals one argument",
+  "template": "{{#ifEquals title}}x{{/ifEquals}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "TypeError: Cannot read properties of undefined (reading 'inverse')"
+ },
+ {
+  "name": "mismatched close",
+  "template": "{{#if title}}x{{/each}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: if doesn't match each - 1:3"
+ },
+ {
+  "name": "unclosed mustache",
+  "template": "{{title",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: Parse error on line 1:\n{{title\n--^\nExpecting 'ID', 'STRING', 'NUMBER', 'BOOLEAN', 'UNDEFINED', 'NULL', 'DATA', got 'INVALID'"
+ },
+ {
+  "name": "unclosed block",
+  "template": "{{#if title}}x",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: Parse error on line 1:\n{{#if title}}x\n--------------^\nExpecting 'OPEN_INVERSE_CHAIN', 'INVERSE', 'OPEN_ENDBLOCK', got 'EOF'"
+ },
+ {
+  "name": "numeric path segment",
+  "template": "{{labels.0}}",
+  "data": {
+   "validationStatus": "fail",
+   "validationCount": 3,
+   "passCount": 1,
+   "failCount": 1,
+   "errorCount": 1,
+   "failures": [
+    {
+     "name": "title",
+     "status": "fail"
+    },
+    {
+     "name": "label",
+     "status": "fail"
+    }
+   ],
+   "validationSuites": [
+    {
+     "name": "title",
+     "status": "fail",
+     "validations": [
+      {
+       "status": "fail",
+       "description": "Title must not include \"wip\" & <stuff>",
+       "details": {
+        "input": "WIP: x",
+        "settings": {
+         "2": [
+          1,
+          2.5,
+          null,
+          true
+         ],
+         "10": 1,
+         "must_exclude": {
+          "regex": "wip",
+          "message": "no"
+         }
+        }
+       }
+      },
+      {
+       "status": "pass",
+       "description": "ok",
+       "details": {
+        "input": [
+         "a",
+         "b"
+        ],
+        "settings": {
+         "min": {
+          "count": 1
+         }
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "label",
+     "status": "error",
+     "validations": [
+      {
+       "status": "error",
+       "description": "boom",
+       "details": {
+        "input": null,
+        "settings": {},
+        "error": "Error: something"
+       }
+      }
+     ]
+    }
+   ],
+   "title": "Add <login> & \"page\"",
+   "body": "Line one\nLine two <b>bold</b>\r\nLine three\rFour\n\nSix",
+   "number": 10,
+   "created_at": "2024-01-15T10:00:00Z",
+   "completed_at": "2024-07-04T23:59:30.999Z",
+   "user": {
+    "login": "alice"
+   },
+   "labels": [
+    {
+     "name": "bug"
+    },
+    {
+     "name": "feature"
+    }
+   ],
+   "empty_list": [],
+   "empty_object": {},
+   "zero": 0,
+   "negative": -1.5,
+   "float": 2.5,
+   "big": 12345678901,
+   "truthy": true,
+   "falsy": false,
+   "nothing": null,
+   "html": "&<>\"'`= /",
+   "unicode": "straße café   😀",
+   "nested": {
+    "a": {
+     "b": {
+      "c": "deep"
+     }
+    },
+    "list": [
+     [
+      1,
+      2
+     ],
+     [
+      3
+     ]
+    ]
+   },
+   "keyed": {
+    "0": "zero",
+    "1": 3,
+    "z": 1,
+    "a": 2,
+    "-1": "minus",
+    "01": "padded"
+   }
+  },
+  "error": "Error: Parse error on line 1:\n{{labels.0}}\n---------^\nExpecting 'ID', got 'NUMBER'"
+ }
+]

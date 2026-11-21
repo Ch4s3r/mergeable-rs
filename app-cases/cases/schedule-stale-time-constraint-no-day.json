@@ -1,0 +1,57 @@
+{
+  "name": "schedule-stale-time-constraint-no-day",
+  "description": "time_constraint.days_of_week empty: always outside the window, fail without search.",
+  "event": "schedule",
+  "payload": {
+    "action": "repository",
+    "installation": {
+      "id": 4242
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: schedule.repository\n    name: Stale\n    validate:\n      - do: stale\n        days: 30\n        time_constraint:\n          days_of_week: []\n    pass:\n      - do: comment\n        payload:\n          body: stale\n"
+  },
+  "github": [],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      }
+    ]
+  },
+  "unordered": false
+}

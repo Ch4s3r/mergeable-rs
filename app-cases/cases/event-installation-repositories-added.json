@@ -1,0 +1,40 @@
+{
+  "name": "event-installation-repositories-added",
+  "description": "installation_repositories.added: only logging, no API calls.",
+  "event": "installation_repositories",
+  "payload": {
+    "action": "added",
+    "installation": {
+      "id": 4242,
+      "account": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      }
+    },
+    "repository_selection": "selected",
+    "repositories_added": [
+      {
+        "id": 500002,
+        "name": "web",
+        "full_name": "acme/web",
+        "private": true
+      }
+    ],
+    "repositories_removed": [],
+    "sender": {
+      "login": "alice",
+      "id": 97097,
+      "node_id": "U_alice",
+      "type": "User",
+      "html_url": "https://github.com/alice"
+    }
+  },
+  "files": {},
+  "github": [],
+  "expected": {
+    "status": 200,
+    "calls": []
+  },
+  "unordered": false
+}

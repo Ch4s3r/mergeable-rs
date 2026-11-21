@@ -1,0 +1,25 @@
+[package]
+name = "replay"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "replay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+axum = "0.8.9"
+base64 = "0.23.1"
+clap = { version = "4.6.9", features = ["derive"] }
+form_urlencoded = "1.2.3"
+hex = "0.4.3"
+hmac = "0.13.0"
+percent-encoding = "2.3.2"
+regex = "1.13.2"
+reqwest = { version = "0.13.5", default-features = false, features = ["json"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.11.1"
+tokio = { version = "1.54.1", features = ["full"] }

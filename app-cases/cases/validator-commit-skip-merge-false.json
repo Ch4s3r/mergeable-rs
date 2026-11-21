@@ -1,0 +1,318 @@
+{
+  "name": "validator-commit-skip-merge-false",
+  "description": "skip_merge: false includes merge commits: fail.",
+  "event": "pull_request",
+  "payload": {
+    "action": "opened",
+    "number": 1,
+    "pull_request": {
+      "url": "https://api.github.com/repos/acme/app/pulls/1",
+      "id": 900001,
+      "node_id": "PR_1",
+      "number": 1,
+      "state": "open",
+      "locked": false,
+      "title": "Add login page",
+      "user": {
+        "login": "alice",
+        "id": 97097,
+        "node_id": "U_alice",
+        "type": "User",
+        "html_url": "https://github.com/alice"
+      },
+      "body": "Implements the login page.",
+      "labels": [],
+      "milestone": null,
+      "assignee": null,
+      "assignees": [],
+      "requested_reviewers": [],
+      "requested_teams": [],
+      "draft": false,
+      "created_at": "2024-01-15T10:00:00Z",
+      "updated_at": "2024-01-15T10:00:00Z",
+      "closed_at": null,
+      "merged_at": null,
+      "merged": false,
+      "mergeable": true,
+      "mergeable_state": "clean",
+      "html_url": "https://github.com/acme/app/pull/1",
+      "diff_url": "https://github.com/acme/app/pull/1.diff",
+      "head": {
+        "label": "acme:feature/login",
+        "ref": "feature/login",
+        "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+        "user": {
+          "login": "acme",
+          "id": 12993,
+          "node_id": "U_acme",
+          "type": "User",
+          "html_url": "https://github.com/acme"
+        },
+        "repo": {
+          "id": 500001,
+          "node_id": "R_app",
+          "name": "app",
+          "full_name": "acme/app",
+          "private": false,
+          "visibility": "public",
+          "owner": {
+            "login": "acme",
+            "id": 9001,
+            "type": "Organization"
+          },
+          "html_url": "https://github.com/acme/app",
+          "url": "https://api.github.com/repos/acme/app",
+          "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+          "default_branch": "main",
+          "topics": []
+        }
+      },
+      "base": {
+        "label": "acme:main",
+        "ref": "main",
+        "sha": "0f1e2d3c4b5a69788796a5b4c3d2e1f009876543",
+        "user": {
+          "login": "acme",
+          "id": 12993,
+          "node_id": "U_acme",
+          "type": "User",
+          "html_url": "https://github.com/acme"
+        },
+        "repo": {
+          "id": 500001,
+          "node_id": "R_app",
+          "name": "app",
+          "full_name": "acme/app",
+          "private": false,
+          "visibility": "public",
+          "owner": {
+            "login": "acme",
+            "id": 9001,
+            "type": "Organization"
+          },
+          "html_url": "https://github.com/acme/app",
+          "url": "https://api.github.com/repos/acme/app",
+          "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+          "default_branch": "main",
+          "topics": []
+        }
+      },
+      "commits": 1,
+      "additions": 11,
+      "deletions": 2,
+      "changed_files": 2
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    },
+    "organization": {
+      "login": "acme",
+      "id": 9001
+    },
+    "sender": {
+      "login": "alice",
+      "id": 97097,
+      "node_id": "U_alice",
+      "type": "User",
+      "html_url": "https://github.com/alice"
+    },
+    "installation": {
+      "id": 4242,
+      "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg=="
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: pull_request.*\n    name: PR rules\n    validate:\n      - do: commit\n        message:\n          regex: '^feat'\n          skip_merge: false\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/pulls/1/commits",
+      "status": 200,
+      "body": [
+        {
+          "sha": "c92515",
+          "commit": {
+            "message": "feat: one",
+            "author": {
+              "name": "Alice",
+              "email": "alice@acme.test",
+              "date": "2024-01-10T08:00:00Z"
+            },
+            "committer": {
+              "name": "GitHub",
+              "email": "noreply@github.com",
+              "date": "2024-01-10T08:00:00Z"
+            }
+          }
+        },
+        {
+          "sha": "c80327",
+          "commit": {
+            "message": "Merge branch 'main' into feature/login",
+            "author": {
+              "name": "Alice",
+              "email": "alice@acme.test",
+              "date": "2024-01-11T08:00:00Z"
+            },
+            "committer": {
+              "name": "GitHub",
+              "email": "noreply@github.com",
+              "date": "2024-01-11T08:00:00Z"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/pulls/1/files",
+      "status": 200,
+      "body": [
+        {
+          "sha": "f1",
+          "filename": "src/app.js",
+          "status": "modified",
+          "additions": 10,
+          "deletions": 2,
+          "changes": 12
+        },
+        {
+          "sha": "f2",
+          "filename": "README.md",
+          "status": "modified",
+          "additions": 1,
+          "deletions": 0,
+          "changes": 1
+        }
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/repos/acme/app/check-runs",
+      "status": 201,
+      "body": {
+        "id": 123,
+        "name": "Mergeable",
+        "status": "in_progress",
+        "head_sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/repos/acme/app/check-runs/123",
+      "status": 200,
+      "body": {
+        "id": 123,
+        "status": "completed"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/2/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/10/comments",
+      "status": 200,
+      "body": []
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/pulls/1/files",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "POST",
+        "path": "/repos/acme/app/check-runs",
+        "query": {},
+        "body": {
+          "status": "in_progress",
+          "output": {
+            "title": "Mergeable is running.",
+            "summary": "Please be patient. We'll get you the results as soon as possible."
+          },
+          "name": "Mergeable: PR rules",
+          "started_at": "<timestamp>",
+          "head_branch": "feature/login",
+          "head_sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/pulls/1/commits",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "PATCH",
+        "path": "/repos/acme/app/check-runs/123",
+        "query": {},
+        "body": {
+          "name": "Mergeable: PR rules",
+          "status": "completed",
+          "output": {
+            "title": "1/1 Fail(s):  COMMIT",
+            "summary": "### Status: FAIL\n\n        Here are some stats of the run:\n        1 validations were run.\n        0 PASSED\n        1 FAILED\n      ",
+            "text": "#### :x: Validator: COMMIT\n * :x: ***Some or all of your commit messages doesn't meet the criteria***\n       Input : feat: one,Merge branch 'main' into feature/login\n       Settings : ```{\"do\":\"commit\",\"message\":{\"regex\":\"^feat\",\"skip_merge\":false}}```\n<!-- #mergeable-data {\"id\":123,\"eventName\":\"pull_request\",\"action\":\"opened\"} #mergeable-data -->"
+          },
+          "conclusion": "failure",
+          "completed_at": "<timestamp>"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/issues/1/comments",
+        "query": {},
+        "body": null
+      }
+    ]
+  },
+  "unordered": false
+}

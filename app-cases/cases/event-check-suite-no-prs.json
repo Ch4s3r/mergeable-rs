@@ -1,0 +1,77 @@
+{
+  "name": "event-check-suite-no-prs",
+  "description": "check_suite with no pull_requests: baseRef fails, no merge.",
+  "event": "check_suite",
+  "payload": {
+    "action": "completed",
+    "check_suite": {
+      "id": 55,
+      "head_branch": "main",
+      "head_sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "status": "completed",
+      "conclusion": "success",
+      "pull_requests": []
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    },
+    "organization": {
+      "login": "acme",
+      "id": 9001
+    },
+    "sender": {
+      "login": "alice",
+      "id": 97097,
+      "node_id": "U_alice",
+      "type": "User",
+      "html_url": "https://github.com/alice"
+    },
+    "installation": {
+      "id": 4242,
+      "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg=="
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: check_suite.*\n    name: Suite merge\n    validate:\n      - do: baseRef\n        must_include:\n          regex: main\n    pass:\n      - do: merge\n"
+  },
+  "github": [],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      }
+    ]
+  },
+  "unordered": false
+}

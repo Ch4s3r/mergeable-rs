@@ -1,0 +1,222 @@
+{
+  "name": "title-must-include-pass",
+  "description": "A v2 config validating the title with must_include passes and the checks pass action reports success.",
+  "event": "pull_request",
+  "payload": {
+    "action": "opened",
+    "number": 1,
+    "pull_request": {
+      "url": "https://api.github.com/repos/acme/app/pulls/1",
+      "id": 1001,
+      "number": 1,
+      "state": "open",
+      "locked": false,
+      "title": "feat: add replay",
+      "body": "Adds the replay harness",
+      "user": {
+        "login": "octocat",
+        "id": 2,
+        "type": "User"
+      },
+      "created_at": "2026-11-20T10:00:00Z",
+      "updated_at": "2026-11-20T10:00:00Z",
+      "closed_at": null,
+      "merged_at": null,
+      "assignee": null,
+      "assignees": [],
+      "requested_reviewers": [],
+      "requested_teams": [],
+      "labels": [],
+      "milestone": null,
+      "draft": false,
+      "head": {
+        "label": "acme:feature",
+        "ref": "feature",
+        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "user": {
+          "login": "acme",
+          "id": 1,
+          "type": "Organization"
+        },
+        "repo": {
+          "id": 100,
+          "node_id": "R_100",
+          "name": "app",
+          "full_name": "acme/app",
+          "private": false,
+          "owner": {
+            "login": "acme",
+            "id": 1,
+            "type": "Organization"
+          },
+          "html_url": "https://github.com/acme/app",
+          "default_branch": "main"
+        }
+      },
+      "base": {
+        "label": "acme:main",
+        "ref": "main",
+        "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "user": {
+          "login": "acme",
+          "id": 1,
+          "type": "Organization"
+        },
+        "repo": {
+          "id": 100,
+          "node_id": "R_100",
+          "name": "app",
+          "full_name": "acme/app",
+          "private": false,
+          "owner": {
+            "login": "acme",
+            "id": 1,
+            "type": "Organization"
+          },
+          "html_url": "https://github.com/acme/app",
+          "default_branch": "main"
+        }
+      },
+      "author_association": "MEMBER",
+      "merged": false,
+      "mergeable": true,
+      "comments": 0,
+      "review_comments": 0,
+      "commits": 1,
+      "additions": 1,
+      "deletions": 0,
+      "changed_files": 1
+    },
+    "repository": {
+      "id": 100,
+      "node_id": "R_100",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "owner": {
+        "login": "acme",
+        "id": 1,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "default_branch": "main"
+    },
+    "sender": {
+      "login": "octocat",
+      "id": 2,
+      "type": "User"
+    },
+    "installation": {
+      "id": 176535,
+      "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uMTc2NTM1"
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: pull_request.*\n    validate:\n      - do: title\n        must_include:\n          regex: 'feat|fix'\n    pass:\n      - do: checks\n        status: success\n        payload:\n          title: 'Title looks good'\n          summary: 'All {{validationCount}} validations passed'\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/pulls/1/files",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/repos/acme/app/check-runs",
+      "status": 201,
+      "body": {
+        "id": 555,
+        "name": "Mergeable",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "status": "in_progress",
+        "html_url": "https://github.com/acme/app/runs/555"
+      }
+    },
+    {
+      "method": "PATCH",
+      "path": "/repos/acme/app/check-runs/555",
+      "status": 200,
+      "body": {
+        "id": 555,
+        "name": "Mergeable",
+        "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "status": "completed",
+        "html_url": "https://github.com/acme/app/runs/555"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 200,
+      "body": []
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/pulls/1/files",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "POST",
+        "path": "/repos/acme/app/check-runs",
+        "query": {},
+        "body": {
+          "status": "in_progress",
+          "output": {
+            "title": "Mergeable is running.",
+            "summary": "Please be patient. We'll get you the results as soon as possible."
+          },
+          "name": "Mergeable",
+          "started_at": "<timestamp>",
+          "head_branch": "feature",
+          "head_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      {
+        "method": "PATCH",
+        "path": "/repos/acme/app/check-runs/555",
+        "query": {},
+        "body": {
+          "name": "Mergeable",
+          "status": "completed",
+          "output": {
+            "title": "Title looks good",
+            "summary": "All 1 validations passed"
+          },
+          "conclusion": "success",
+          "completed_at": "<timestamp>"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/issues/1/comments",
+        "query": {},
+        "body": null
+      }
+    ]
+  },
+  "unordered": false
+}

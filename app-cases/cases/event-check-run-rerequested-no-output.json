@@ -1,0 +1,118 @@
+{
+  "name": "event-check-run-rerequested-no-output",
+  "description": "check_run without output: interceptor skips.",
+  "event": "check_run",
+  "payload": {
+    "action": "rerequested",
+    "check_run": {
+      "id": 123,
+      "name": "Mergeable: PR rules",
+      "head_sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+      "status": "completed",
+      "conclusion": "failure",
+      "pull_requests": [
+        {
+          "id": 900001,
+          "number": 1,
+          "url": "https://api.github.com/repos/acme/app/pulls/1",
+          "head": {
+            "ref": "feature/login",
+            "sha": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "repo": {
+              "id": 500001,
+              "name": "app"
+            }
+          },
+          "base": {
+            "ref": "main",
+            "sha": "0f1e2d3c4b5a69788796a5b4c3d2e1f009876543",
+            "repo": {
+              "id": 500001,
+              "name": "app"
+            }
+          }
+        }
+      ]
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    },
+    "organization": {
+      "login": "acme",
+      "id": 9001
+    },
+    "sender": {
+      "login": "alice",
+      "id": 97097,
+      "node_id": "U_alice",
+      "type": "User",
+      "html_url": "https://github.com/alice"
+    },
+    "installation": {
+      "id": 4242,
+      "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg=="
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: pull_request.*\n    name: PR rules\n    validate:\n      - do: title\n        must_exclude:\n          regex: wip\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/2/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/10/comments",
+      "status": 200,
+      "body": []
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      }
+    ]
+  },
+  "unordered": false
+}

@@ -1,0 +1,79 @@
+{
+  "name": "schedule-stale-query-options",
+  "description": "stale with type [pull_request], label match/ignore and ignore_drafts/milestones/projects: query string built from all options; nothing found.",
+  "event": "schedule",
+  "payload": {
+    "action": "repository",
+    "installation": {
+      "id": 4242
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: schedule.repository\n    name: Stale\n    validate:\n      - do: stale\n        days: 10\n        type: [pull_request]\n        label:\n          match: ['needs-review']\n          ignore: ['pinned', 'security']\n        ignore_drafts: true\n        ignore_milestones: true\n        ignore_projects: true\n    pass:\n      - do: comment\n        payload:\n          body: stale\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/search/issues",
+      "status": 200,
+      "body": {
+        "total_count": 0,
+        "incomplete_results": false,
+        "items": []
+      }
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/search/issues",
+        "query": {
+          "order": "desc",
+          "per_page": "20",
+          "q": "repo:acme/app is:open updated:<<timestamp> type:pr label:\"needs-review\" -label:\"pinned\" -label:\"security\" -is:draft no:milestone no:project",
+          "sort": "updated"
+        },
+        "body": null
+      }
+    ]
+  },
+  "unordered": false
+}

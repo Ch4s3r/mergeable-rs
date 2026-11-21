@@ -1,0 +1,158 @@
+{
+  "name": "error-action-throws-on-issue-comment-event",
+  "description": "Action throws on issue_comment (unknown merge method): error comment posted on issue 1.",
+  "event": "issue_comment",
+  "payload": {
+    "action": "created",
+    "issue": {
+      "url": "https://api.github.com/repos/acme/app/issues/1",
+      "id": 900001,
+      "node_id": "I_10",
+      "number": 1,
+      "title": "Add login page",
+      "user": {
+        "login": "alice",
+        "id": 97097,
+        "node_id": "U_alice",
+        "type": "User",
+        "html_url": "https://github.com/alice"
+      },
+      "body": "Implements the login page.",
+      "labels": [],
+      "state": "open",
+      "locked": false,
+      "assignee": null,
+      "assignees": [],
+      "milestone": null,
+      "comments": 0,
+      "created_at": "2024-01-15T10:00:00Z",
+      "updated_at": "2024-01-15T10:00:00Z",
+      "closed_at": null,
+      "html_url": "https://github.com/acme/app/pull/1",
+      "pull_request": {
+        "url": "https://api.github.com/repos/acme/app/pulls/1",
+        "html_url": "https://github.com/acme/app/pull/1",
+        "diff_url": "https://github.com/acme/app/pull/1.diff",
+        "patch_url": "https://github.com/acme/app/pull/1.patch",
+        "merged_at": null
+      }
+    },
+    "comment": {
+      "id": 7001,
+      "body": "/merge",
+      "user": {
+        "login": "carol",
+        "id": 95466,
+        "node_id": "U_carol",
+        "type": "User",
+        "html_url": "https://github.com/carol"
+      },
+      "created_at": "2024-01-15T10:00:00Z",
+      "updated_at": "2024-01-15T10:00:00Z",
+      "html_url": "https://github.com/acme/app/pull/1#issuecomment-7001"
+    },
+    "repository": {
+      "id": 500001,
+      "node_id": "R_app",
+      "name": "app",
+      "full_name": "acme/app",
+      "private": false,
+      "visibility": "public",
+      "owner": {
+        "login": "acme",
+        "id": 9001,
+        "type": "Organization"
+      },
+      "html_url": "https://github.com/acme/app",
+      "url": "https://api.github.com/repos/acme/app",
+      "issues_url": "https://api.github.com/repos/acme/app/issues{/number}",
+      "default_branch": "main",
+      "topics": []
+    },
+    "organization": {
+      "login": "acme",
+      "id": 9001
+    },
+    "sender": {
+      "login": "carol",
+      "id": 95466,
+      "node_id": "U_carol",
+      "type": "User",
+      "html_url": "https://github.com/carol"
+    },
+    "installation": {
+      "id": 4242,
+      "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg=="
+    }
+  },
+  "files": {
+    ".github/mergeable.yml": "version: 2\nmergeable:\n  - when: issue_comment.created\n    name: Merge on comment\n    validate:\n      - do: lastComment\n        must_include:\n          regex: '^/merge$'\n    pass:\n      - do: merge\n        merge_method: yolo\n"
+  },
+  "github": [
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "POST",
+      "path": "/repos/acme/app/issues/1/comments",
+      "status": 201,
+      "body": {
+        "id": 9901,
+        "body": "created"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/2/comments",
+      "status": 200,
+      "body": []
+    },
+    {
+      "method": "GET",
+      "path": "/repos/acme/app/issues/10/comments",
+      "status": 200,
+      "body": []
+    }
+  ],
+  "expected": {
+    "status": 200,
+    "calls": [
+      {
+        "method": "GET",
+        "path": "/repos/acme/.github/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.settings.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/contents/.github/mergeable.yml",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "GET",
+        "path": "/repos/acme/app/issues/1/comments",
+        "query": {},
+        "body": null
+      },
+      {
+        "method": "POST",
+        "path": "/repos/acme/app/issues/1/comments",
+        "query": {},
+        "body": {
+          "body": "####  :x: Error Occurred while executing an Action \n\n If you believe this is an unexpected error, please report it on our issue tracker: https://github.com/mergeability/mergeable/issues/new \n##### Error Details \n-------------------- \nUnSupportedSettingError: Unknown Merge method, supported options are merge, rebase, squash"
+        }
+      }
+    ]
+  },
+  "unordered": false
+}
