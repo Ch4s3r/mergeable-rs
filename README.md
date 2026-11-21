@@ -22,6 +22,22 @@ docker run --rm -p 3000:3000 \
   mergeable-rust
 ```
 
+Cloud Native Buildpacks (Paketo, same tooling as the Node image; configuration in `rust/project.toml` and
+`rust/Procfile`):
+
+```sh
+cd rust
+pack build mergeable-rust --path .            # or: --publish to push to a registry
+docker run --rm -p 3000:3000 -e APP_ID=... -e WEBHOOK_SECRET=... -e PRIVATE_KEY=... mergeable-rust
+```
+
+The builder `paketobuildpacks/ubuntu-noble-builder-buildpackless` is multi-arch, so it builds natively on
+Apple Silicon (the jammy builders are amd64-only and rustc crashes under qemu emulation). With Docker's
+containerd image store, `pack` cannot export multi-arch buildpacks into the local daemon
+(buildpacks/pack#2272); publish to a registry instead, e.g. a local one:
+`docker run -d -p 5001:5000 registry:2` and
+`pack build localhost:5001/mergeable-rust --path . --publish --insecure-registry localhost:5001 --network host`.
+
 ## Run and test
 
 ```sh

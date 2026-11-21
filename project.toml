@@ -1,0 +1,17 @@
+[_]
+schema-version = "0.2"
+id = "mergeable-rust"
+
+[io.buildpacks]
+builder = "paketobuildpacks/ubuntu-noble-builder-buildpackless"
+exclude = ["target", "app-cases", "research", "tools", "*.md"]
+
+[[io.buildpacks.group]]
+uri = "docker.io/paketocommunity/rust"
+
+[[io.buildpacks.group]]
+uri = "docker.io/paketobuildpacks/procfile"
+
+[[io.buildpacks.build.env]]
+name = "BP_CARGO_WORKSPACE_MEMBERS"
+value = "mergeable"
