@@ -13,7 +13,7 @@ Benchmark: BENCHMARK.md. Handoff: HANDOFF.md.
 | 4 | filters/lib, filters/options_processor, validators | filters, validators, minimatch, lodash | done 2026-11-21 |
 | 5 | filters | filters | done 2026-11-21 |
 
-Results: replay 379/381 identical to Node, 2 approved known diffs (ADR-003, ADR-012); fallback rate 0%.
+Results: replay 381/381 identical to Node, no known diffs; fallback rate 0%.
 Gate: cargo fmt --check, cargo clippy --all-targets -D warnings, cargo test (332 + 14 tests) all pass.
 
 ## Out of scope

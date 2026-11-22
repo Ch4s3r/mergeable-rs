@@ -8,6 +8,8 @@ use crate::yaml;
 use serde_json::{Map, Value, json};
 use std::sync::LazyLock;
 
+mod v1_config;
+
 pub const FILE_NAME: &str = ".github/mergeable.yml";
 
 pub mod error_codes {
@@ -21,7 +23,6 @@ pub mod error_codes {
     pub const MISSING_WHEN_KEYWORD: u16 = 90;
     pub const MISSING_VALIDATE_KEYWORD: u16 = 100;
     pub const NON_ARRAY_VALIDATE: u16 = 110;
-    pub const UNSUPPORTED_VERSION_ONE: u16 = 120;
 }
 
 static CONFIG_CACHE: LazyLock<ConfigCache> = LazyLock::new(ConfigCache::from_env);
@@ -77,10 +78,9 @@ impl Configuration {
         }
         match config_version(&configuration.settings).as_str() {
             "1" => {
-                configuration.set_error(
-                    error_codes::UNSUPPORTED_VERSION_ONE,
-                    "Configuration version 1 is no longer supported, please migrate to `version: 2`",
-                );
+                let transformed = v1_config::transform(&mut configuration.settings)?;
+                configuration.settings =
+                    transformed.get("mergeable").cloned().unwrap_or(Value::Null);
                 Ok(configuration)
             }
             "2" => {
@@ -506,6 +506,24 @@ mod tests {
             .map(|rule| rule.keys().collect())
             .unwrap_or_default();
         assert_eq!(keys, ["when", "fail", "validate", "pass", "error"]);
+    }
+
+    #[test]
+    fn version_less_config_is_transformed_from_version_one() {
+        let configuration = Configuration::from_settings(json!({
+            "mergeable": {"pull_requests": {"title": "wip", "label": "do not merge"}}
+        }))
+        .unwrap();
+        assert!(!configuration.has_errors());
+        assert_eq!(configuration.settings[0]["when"], "pull_request.*");
+        assert_eq!(configuration.settings[1]["when"], "pull_request_review.*");
+        assert_eq!(
+            configuration.settings[0]["validate"],
+            json!([
+                {"do": "title", "must_exclude": {"regex": "wip"}},
+                {"do": "label", "must_exclude": {"regex": "do not merge"}}
+            ])
+        );
     }
 
     #[test]

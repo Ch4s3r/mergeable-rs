@@ -216,7 +216,6 @@
       "body": []
     }
   ],
-  "known_diff": "ADR-012: the YAML parse error text comes from js-yaml in Node and from serde_yaml_ng in Rust; the \"Invalid YML format > \" prefix, check title and conclusion match.",
   "expected": {
     "status": 200,
     "calls": [

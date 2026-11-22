@@ -73,7 +73,7 @@ async fn get_config_file(
         });
     }
     let text = js::to_js_string(Some(&response.data));
-    let parsed = yaml::parse(&text).map_err(|error| {
+    let parsed = yaml::parse_like_js_yaml_4(&text).map_err(|error| {
         let reason = if error.message.contains("unknown tag") {
             "unsafe YAML"
         } else {

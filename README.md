@@ -110,7 +110,6 @@ installation at a time) and, after a random delay within one interval, runs the 
 ## Differences to the Node app
 
 - Configuration files without `version: 2` (the deprecated version-1 format) are reported with an "Invalid Configuration" check instead of being converted (ADR-003).
-- YAML parse error texts come from serde_yaml_ng instead of js-yaml; the surrounding check text is the same.
 - `/metrics` is rendered in the OpenMetrics text format (`application/openmetrics-text; version=1.0.0`) by
   `prometheus-client`, not the Prometheus 0.0.4 text format of prom-client. Prometheus scrapes both.
   Node-specific default metrics (`nodejs_*`, most `process_*`) are not exported; only

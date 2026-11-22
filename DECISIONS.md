@@ -12,11 +12,11 @@ Context: Probot provides webhook HMAC verification, App JWT, installation tokens
 Decision: reqwest (rustls) GitHub client returning serde_json::Value, jsonwebtoken (RS256) for the App JWT, hmac+sha2 for X-Hub-Signature-256, own port of probot config loading. octocrab was considered (Q2) but its typed models drop fields mergeable templates read; a Value client mirrors Octokit 1:1.
 Consequences: All GitHub calls go through one client (auth, Link-header pagination, Octokit-style error text 'HttpError: <message>').
 
-## ADR-003: Scope: every feature, v1 config format dropped
-Status: accepted (2026-11-21)
-Context: v1 config (version-less mergeable.yml) is deprecated since 2.0.
-Decision: Port everything: v2 config, settings file, all validators/filters/actions/options, Jira option, scheduler, memory+Redis cache, Prometheus metrics, rate-limit endpoint. A config without `version: 2` gets a configuration-error check.
-Consequences: The v1 transformer and its tests are not ported.
+## ADR-003: Scope: every feature, including the v1 config format
+Status: accepted (2026-11-21), amended (2026-11-22)
+Context: v1 config (version-less mergeable.yml) is deprecated since 2.0 but still accepted by Node.
+Decision: Port everything: v1 and v2 config, settings file, all validators/filters/actions/options, Jira option, scheduler, memory+Redis cache, Prometheus metrics, rate-limit endpoint. A config without `version` is transformed to v2 exactly like Node's v1Config transformer (configuration/v1_config.rs).
+Consequences: Existing v1 configs keep working; the earlier "version 1 is no longer supported" error is gone.
 
 ## ADR-004: Config, settings and env vars stay compatible
 Status: accepted (2026-11-21)
@@ -39,7 +39,7 @@ Consequences: Typed structs only in a later reshape pass.
 ## ADR-007: Crates
 Status: accepted (2026-11-21)
 Context: Dependency research in rust/research/.
-Decision: tokio, axum, reqwest(rustls), serde_json(preserve_order), serde_yaml_ng, handlebars (helpers ported), regex + fancy-regex (lookbehind), globset (minimatch), chrono + chrono-tz, moka (memory cache), redis (Redis cache), prometheus-client, jsonwebtoken, hmac, sha2, tracing.
+Decision: tokio, axum, reqwest(rustls), serde_json(preserve_order), an own YAML loader (js-yaml 3.14 / 4.1 behaviour, see ADR-012), handlebars (helpers ported), regex + fancy-regex (lookbehind), globset (minimatch), chrono + chrono-tz, moka (memory cache), redis (Redis cache), prometheus-client, jsonwebtoken, hmac, sha2, tracing.
 Consequences: rustls/jsonwebtoken pull ring (asm/C crypto): no equally mature pure-Rust alternative, accepted.
 
 ## ADR-008: No per-wave stops; one final report with benchmark
@@ -69,5 +69,5 @@ Consequences: Node and Rust have the same GitHub-facing pacing, so throughput un
 ## ADR-012: Known differences and how replay compares runtime texts
 Status: accepted (2026-11-21)
 Context: Some recorded texts embed details of the Node runtime: V8 stack frames ("    at ..."), Node's "Require stack:" list of absolute paths, and js-yaml's parser messages. Some cases depend on retry timing around the quiet window.
-Decision: replay ignores JS stack frames and Require-stack lists when comparing (the error message before them is still compared exactly). A case may set "quiet_ms" when Probot's retry schedule (1 s, 4 s, 9 s) straddles the default 4 s quiet window. Remaining differences are marked per case with "known_diff": config-invalid-yaml-in-pr (YAML parser message text) and config-version-1-old-format (ADR-003).
+Decision: replay ignores JS stack frames and Require-stack lists when comparing (the error message before them is still compared exactly). A case may set "quiet_ms" when Probot's retry schedule (1 s, 4 s, 9 s) straddles the default 4 s quiet window. No case carries a "known_diff" any more: YAML is parsed by an own loader that reproduces js-yaml 3.14.1 (configuration, settings) and 4.1.0 (Probot context.config) including error texts, proven by a 3,019-entry corpus (rust/tools/generate-yaml-corpus.js), and version-1 configs are transformed (ADR-003).
 Consequences: Every other recorded text, including TypeError messages, must match byte for byte.

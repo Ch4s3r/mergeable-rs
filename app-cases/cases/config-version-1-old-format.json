@@ -1,6 +1,6 @@
 {
   "name": "config-version-1-old-format",
-  "description": "Version-less (v1) config: Node transforms it to v2 (ADR-003: Rust reports a configuration error, expected known diff).",
+  "description": "Version-less (v1) config: Node transforms it to v2; the Rust port does the same.",
   "event": "pull_request",
   "payload": {
     "action": "opened",
@@ -208,7 +208,6 @@
       "body": []
     }
   ],
-  "known_diff": "ADR-003: version-1 configuration is not supported by the Rust port; it reports a configuration error check instead of transforming the config.",
   "expected": {
     "status": 200,
     "calls": [
