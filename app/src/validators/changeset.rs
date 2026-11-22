@@ -7,6 +7,7 @@ use crate::registry::Registry;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::borrow::Cow;
 
 pub struct Changeset;
 
@@ -32,26 +33,22 @@ pub fn files_with_selected_status(
     Ok(selected)
 }
 
-pub fn file_names(files: &[Value]) -> JsResult<Vec<Value>> {
+pub fn file_names(files: Vec<Value>) -> JsResult<Vec<Value>> {
     files
-        .iter()
-        .map(|file| {
-            Ok(js::read(Some(file), "filename")?
-                .cloned()
-                .unwrap_or(Value::Null))
-        })
+        .into_iter()
+        .map(|mut file| Ok(js::take(Some(&mut file), "filename")?.unwrap_or(Value::Null)))
         .collect()
 }
 
 pub async fn evaluate(mut files: Vec<Value>, settings: &Value) -> JsResult<Value> {
-    let mut remaining_settings = settings.clone();
+    let mut remaining_settings = Cow::Borrowed(settings);
     if let Some(file_status_settings) = settings.get("files").filter(|value| js::is_truthy(value)) {
         files = files_with_selected_status(files, file_status_settings)?;
-        if let Value::Object(map) = &mut remaining_settings {
+        if let Value::Object(map) = remaining_settings.to_mut() {
             map.shift_remove("files");
         }
     }
-    let changed_files = Value::Array(file_names(&files)?);
+    let changed_files = Value::Array(file_names(files)?);
     validators::process_options(&remaining_settings, &changed_files, None).await
 }
 
@@ -84,9 +81,8 @@ impl Validator for Changeset {
         settings: &Value,
         _registry: &Registry,
     ) -> JsResult<Value> {
-        let pull_number = js::read(event_aware::get_payload(context), "number")?
-            .cloned()
-            .unwrap_or(Value::Null);
+        let pull_number =
+            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -109,14 +105,14 @@ mod tests {
         ];
         let selected =
             files_with_selected_status(files, &json!({"added": true, "modified": false})).unwrap();
-        assert_eq!(file_names(&selected).unwrap(), vec![json!("added-file.js")]);
+        assert_eq!(file_names(selected).unwrap(), vec![json!("added-file.js")]);
     }
 
     #[test]
     fn no_enabled_status_selects_nothing() {
         let files = vec![json!({"filename": "a.js", "status": "removed"})];
         let selected = files_with_selected_status(files, &json!({"removed": false})).unwrap();
-        assert!(selected.is_empty());
+        assert_eq!(selected, [] as [serde_json::Value; 0]);
     }
 
     fn modified(names: &[&str]) -> Vec<Value> {

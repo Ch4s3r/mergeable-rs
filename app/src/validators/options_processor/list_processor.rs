@@ -34,7 +34,7 @@ pub async fn process(list: &Value, context: &Context) -> JsResult<Vec<Value>> {
     let mut candidates = Vec::new();
     let mut first_synchronous_error: Option<JsError> = None;
     let mut team_elements = Vec::new();
-    for element in &elements {
+    for element in elements {
         let element_text = match element {
             Value::String(text) => text,
             Value::Null => {
@@ -50,7 +50,7 @@ pub async fn process(list: &Value, context: &Context) -> JsResult<Vec<Value>> {
             }
         };
         if team_regex.is_match(element_text).unwrap_or(false) {
-            team_elements.push(element.clone());
+            team_elements.push(element);
             continue;
         }
         match annotations::search_and_replace_special_annotations(element_text, payload, &event) {
@@ -64,7 +64,7 @@ pub async fn process(list: &Value, context: &Context) -> JsResult<Vec<Value>> {
     let team_results = join_all(
         team_elements
             .iter()
-            .map(|team| teams::extract_team_members(context, std::slice::from_ref(team))),
+            .map(|&team| teams::extract_team_members(context, std::slice::from_ref(team))),
     )
     .await;
     if let Some(error) = first_synchronous_error {

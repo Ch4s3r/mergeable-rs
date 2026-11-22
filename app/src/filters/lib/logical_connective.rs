@@ -12,7 +12,7 @@ fn single_error(name: &str, settings: &Value, message: &str, filter_context: &Va
     consolidate_results(
         vec![construct_error(
             &json!(name),
-            &json!(""),
+            json!(""),
             settings,
             message,
             None,
@@ -59,12 +59,12 @@ pub async fn process(
     name: &str,
 ) -> JsResult<Value> {
     let filter_context = json!({"name": name});
-    let listed_settings = settings.cloned().unwrap_or(Value::Null);
+    let listed_settings = settings.unwrap_or(&Value::Null);
 
     if !matches!(settings, Some(Value::Array(items)) if !items.is_empty()) {
         return Ok(single_error(
             name,
-            &listed_settings,
+            listed_settings,
             OPTION_MISSING_ERROR_MESSAGE,
             &filter_context,
         ));
@@ -75,7 +75,7 @@ pub async fn process(
     if let Err(error) = registry.register_filters(&rules) {
         return Ok(single_error(
             name,
-            &listed_settings,
+            listed_settings,
             &format!("Unsupported filter {error}"),
             &filter_context,
         ));
@@ -112,7 +112,7 @@ pub async fn process(
         if count != 1 {
             return Ok(single_error(
                 name,
-                &listed_settings,
+                listed_settings,
                 &format!(
                     "Failed to validate because the 'filter' option does not have exactly one element, but {count}"
                 ),
@@ -156,7 +156,7 @@ mod tests {
     }
 
     async fn run(filter: &dyn Filter, settings: Value) -> Value {
-        let context = pull_request_context(PullRequest {
+        let context = pull_request_context(&PullRequest {
             base_ref: "Topic 1",
             ..PullRequest::default()
         });

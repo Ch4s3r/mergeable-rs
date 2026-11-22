@@ -27,6 +27,7 @@ impl JsError {
         Self::named("TypeError", message)
     }
 
+    #[must_use]
     pub fn reading_property_of_undefined(property: &str) -> Self {
         Self::type_error(format!(
             "Cannot read properties of undefined (reading '{property}')"
@@ -50,6 +51,7 @@ impl JsError {
         }
     }
 
+    #[must_use]
     pub fn is_named(&self, name: &str) -> bool {
         self.name == name
     }

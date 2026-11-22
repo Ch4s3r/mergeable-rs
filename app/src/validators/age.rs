@@ -14,9 +14,10 @@ const MILLISECONDS_PER_DAY: f64 = 86_400_000.0;
 
 pub struct Age;
 
+#[must_use]
 pub fn parse_moment_milliseconds(time_to_compare: Option<&Value>, now: DateTime<Utc>) -> f64 {
     match time_to_compare {
-        None => now.timestamp_millis() as f64,
+        None => js::number_from_timestamp_milliseconds(now.timestamp_millis()),
         Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
         Some(Value::String(text)) => parse_date_text(text).unwrap_or(f64::NAN),
         Some(_) => f64::NAN,
@@ -25,14 +26,16 @@ pub fn parse_moment_milliseconds(time_to_compare: Option<&Value>, now: DateTime<
 
 fn parse_date_text(text: &str) -> Option<f64> {
     if let Ok(parsed) = DateTime::parse_from_rfc3339(text) {
-        return Some(parsed.timestamp_millis() as f64);
+        return Some(js::number_from_timestamp_milliseconds(
+            parsed.timestamp_millis(),
+        ));
     }
     if let Ok(date) = NaiveDate::parse_from_str(text, "%Y-%m-%d") {
         return date
             .and_hms_opt(0, 0, 0)
             .map(|midnight| chrono::Local.from_local_datetime(&midnight))
-            .and_then(|local| local.single())
-            .map(|local| local.timestamp_millis() as f64);
+            .and_then(chrono::offset::LocalResult::single)
+            .map(|local| js::number_from_timestamp_milliseconds(local.timestamp_millis()));
     }
     for format in [
         "%Y-%m-%dT%H:%M:%S%.f",
@@ -44,17 +47,18 @@ fn parse_date_text(text: &str) -> Option<f64> {
             return chrono::Local
                 .from_local_datetime(&naive)
                 .single()
-                .map(|local| local.timestamp_millis() as f64);
+                .map(|local| js::number_from_timestamp_milliseconds(local.timestamp_millis()));
         }
     }
     DateTime::parse_from_rfc2822(text)
         .ok()
-        .map(|parsed| parsed.timestamp_millis() as f64)
+        .map(|parsed| js::number_from_timestamp_milliseconds(parsed.timestamp_millis()))
 }
 
+#[must_use]
 pub fn check_age(now: DateTime<Utc>, time_to_compare: Option<&Value>, settings: &Value) -> Value {
-    let elapsed_milliseconds =
-        now.timestamp_millis() as f64 - parse_moment_milliseconds(time_to_compare, now);
+    let elapsed_milliseconds = js::number_from_timestamp_milliseconds(now.timestamp_millis())
+        - parse_moment_milliseconds(time_to_compare, now);
     let elapsed_days = elapsed_milliseconds / MILLISECONDS_PER_DAY;
     let is_mergeable = elapsed_days >= lodash::to_number(settings.get("days"));
     let description = if is_mergeable {

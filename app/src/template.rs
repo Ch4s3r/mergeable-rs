@@ -60,11 +60,31 @@ pub fn compile_and_render(template: &Value, data: &Value) -> JsResult<String> {
     }
 }
 
+#[must_use]
+pub fn template_data(payload: Option<&Value>, validation_result: &Value) -> Value {
+    let mut data = Value::Object(Map::new());
+    if let Some(payload_value) = payload {
+        js::deep_merge_into(&mut data, payload_value);
+    }
+    js::deep_merge_into(&mut data, validation_result);
+    data
+}
+
 pub fn populate_template(
     template: &Value,
     validation_result: &Value,
     payload: Option<&Value>,
-    event: &Value,
+    event: &crate::event_aware::EventAttributes<'_>,
+) -> JsResult<String> {
+    let data = template_data(payload, validation_result);
+    populate_template_with_data(template, &data, payload, event)
+}
+
+pub fn populate_template_with_data(
+    template: &Value,
+    data: &Value,
+    payload: Option<&Value>,
+    event: &crate::event_aware::EventAttributes<'_>,
 ) -> JsResult<String> {
     let template_text = match template {
         Value::String(text) => text,
@@ -76,12 +96,7 @@ pub fn populate_template(
     };
     let annotated =
         annotations::search_and_replace_special_annotations(template_text, payload, event)?;
-    let mut data = Value::Object(Map::new());
-    if let Some(payload_value) = payload {
-        js::deep_merge_into(&mut data, payload_value);
-    }
-    js::deep_merge_into(&mut data, validation_result);
-    render(&annotated, &data)
+    render(&annotated, data)
 }
 
 fn is_js_whitespace(character: char) -> bool {
@@ -267,28 +282,25 @@ impl<'source> Lexer<'source> {
             self.emit(TokenKind::EndOfInput, "", start);
             return false;
         }
-        match rest.find("{{") {
-            Some(offset) => {
-                let mut text = &rest[..offset];
-                let next_state = if text.ends_with("\\\\") {
-                    text = &text[..text.len() - 1];
-                    LexerState::Mustache
-                } else if text.ends_with('\\') {
-                    text = &text[..text.len() - 1];
-                    LexerState::EscapedMustache
-                } else {
-                    LexerState::Mustache
-                };
-                self.states.push(next_state);
-                if !text.is_empty() {
-                    self.emit(TokenKind::Content, text, start);
-                }
-                self.position = start + offset;
+        if let Some(offset) = rest.find("{{") {
+            let mut text = &rest[..offset];
+            let next_state = if text.ends_with("\\\\") {
+                text = &text[..text.len() - 1];
+                LexerState::Mustache
+            } else if text.ends_with('\\') {
+                text = &text[..text.len() - 1];
+                LexerState::EscapedMustache
+            } else {
+                LexerState::Mustache
+            };
+            self.states.push(next_state);
+            if !text.is_empty() {
+                self.emit(TokenKind::Content, text, start);
             }
-            None => {
-                self.emit(TokenKind::Content, rest, start);
-                self.position = source.len();
-            }
+            self.position = start + offset;
+        } else {
+            self.emit(TokenKind::Content, rest, start);
+            self.position = source.len();
         }
         true
     }
@@ -348,6 +360,10 @@ impl<'source> Lexer<'source> {
         JsError::error(format!("Lexical error on line {line}. Unrecognized text."))
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one match over all Handlebars mustache token forms, kept together like the original lexer"
+    )]
     fn lex_mustache(&mut self) -> bool {
         let source = self.source;
         let start = self.position;
@@ -1021,7 +1037,7 @@ impl<'source> Parser<'source> {
             _ => None,
         };
         let close = self.parse_close_block()?;
-        prepare_block(open, program, inverse_and_program, close, inverted)
+        prepare_block(open, program, inverse_and_program, &close, inverted)
     }
 
     fn parse_close_block(&mut self) -> JsResult<BlockClose> {
@@ -1058,7 +1074,7 @@ impl<'source> Parser<'source> {
             None => BlockClose::Missing,
         };
         let strip = open.strip;
-        let block = prepare_block(open, program, nested, close, false)?;
+        let block = prepare_block(open, program, nested, &close, false)?;
         Ok(InverseAndProgram {
             strip,
             program: Program {
@@ -1089,10 +1105,10 @@ fn prepare_block(
     open: OpenBlock,
     program: Program,
     inverse_and_program: Option<InverseAndProgram>,
-    close: BlockClose,
+    close: &BlockClose,
     inverted: bool,
 ) -> JsResult<Block> {
-    if let BlockClose::Path { original, .. } = &close {
+    if let BlockClose::Path { original, .. } = close {
         let open_original = literal_original(&open.call.path);
         if &open_original != original {
             return Err(JsError::error(format!(
@@ -1104,7 +1120,7 @@ fn prepare_block(
     let mut program = program;
     program.block_params = open.block_params;
     let close_strip = match close {
-        BlockClose::Path { strip, .. } | BlockClose::Inverse(strip) => Some(strip),
+        BlockClose::Path { strip, .. } | BlockClose::Inverse(strip) => Some(*strip),
         BlockClose::Missing => None,
     };
     let mut inverse = None;
@@ -1134,6 +1150,10 @@ fn prepare_block(
 }
 
 #[derive(Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the independent strip and standalone flags of the Handlebars whitespace control visitor"
+)]
 struct StandaloneStrip {
     open: bool,
     close: bool,
@@ -1582,6 +1602,10 @@ fn lookup_property<'data>(parent: &Js<'data>, name: &str) -> Js<'data> {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "integral JavaScript numbers below 2^53 convert to i64 exactly"
+)]
 fn javascript_number_value(number: f64) -> Value {
     if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 {
         Value::from(number as i64)
@@ -2623,7 +2647,7 @@ mod tests {
             ) {
                 (Some(expected), _, Ok(actual)) if actual == expected => {}
                 (Some(expected), _, outcome) => {
-                    mismatches.push(format!("{name}: expected {expected:?}, got {outcome:?}"))
+                    mismatches.push(format!("{name}: expected {expected:?}, got {outcome:?}"));
                 }
                 (None, Some(expected_error), Err(actual_error)) => {
                     let is_parse_error = expected_error.starts_with("Error: Parse error");
@@ -2676,7 +2700,7 @@ mod tests {
             &json!("@author {{title}} {{status}} {{#each labels}}{{name}}{{/each}} @sender"),
             &results,
             Some(&payload),
-            &event,
+            &crate::event_aware::EventAttributes::from_payload(&event),
         )
         .unwrap();
         assert_eq!(rendered, "alice payload title pass xb bob");
@@ -2688,7 +2712,7 @@ mod tests {
             &Value::Null,
             &json!({}),
             Some(&json!({"user": {"login": "a"}})),
-            &json!({}),
+            &crate::event_aware::EventAttributes::default(),
         )
         .unwrap_err();
         assert_eq!(

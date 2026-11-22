@@ -49,10 +49,10 @@ mod tests {
         json!({"name": "payload", "supportedOptions": ["boolean", "must_exclude", "must_include"]})
     }
 
-    fn status_for(expected: Value, input: Value) -> String {
+    fn status_for(expected: &Value, input: &Value) -> String {
         let result = match_boolean(
             &payload_filter(),
-            &input,
+            input,
             &json!({"boolean": {"match": expected}}),
         )
         .unwrap();
@@ -61,20 +61,20 @@ mod tests {
 
     #[test]
     fn string_input_matching_the_expected_boolean_passes() {
-        assert_eq!(status_for(json!(true), json!("true")), "pass");
-        assert_eq!(status_for(json!(false), json!("false")), "pass");
+        assert_eq!(status_for(&json!(true), &json!("true")), "pass");
+        assert_eq!(status_for(&json!(false), &json!("false")), "pass");
     }
 
     #[test]
     fn boolean_input_matching_the_expected_boolean_passes() {
-        assert_eq!(status_for(json!(true), json!(true)), "pass");
-        assert_eq!(status_for(json!(false), json!(false)), "pass");
+        assert_eq!(status_for(&json!(true), &json!(true)), "pass");
+        assert_eq!(status_for(&json!(false), &json!(false)), "pass");
     }
 
     #[test]
     fn input_not_matching_the_expected_boolean_fails() {
-        assert_eq!(status_for(json!(true), json!(false)), "fail");
-        assert_eq!(status_for(json!(false), json!("true")), "fail");
+        assert_eq!(status_for(&json!(true), &json!(false)), "fail");
+        assert_eq!(status_for(&json!(false), &json!("true")), "fail");
     }
 
     #[test]

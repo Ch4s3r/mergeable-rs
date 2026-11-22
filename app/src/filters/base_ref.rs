@@ -33,10 +33,8 @@ impl Filter for BaseRef {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let payload = event_aware::get_payload(context);
-        let base_ref = js::read(js::read(payload, "base")?, "ref")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        filters::process_options(self, context, &base_ref, settings).await
+        let base_ref = js::read(js::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
+        filters::process_options(self, context, base_ref, settings).await
     }
 }
 
@@ -54,7 +52,7 @@ mod tests {
     }
 
     async fn filter_base_ref(base_ref: &str, settings: Value) -> Value {
-        let context = pull_request_context(PullRequest {
+        let context = pull_request_context(&PullRequest {
             base_ref,
             ..PullRequest::default()
         });

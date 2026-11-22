@@ -20,6 +20,7 @@ pub struct LocalTime {
     pub hour: u32,
 }
 
+#[must_use]
 pub fn local_time(now: DateTime<Utc>, time_zone: Option<&str>) -> LocalTime {
     let zoned = time_zone.and_then(|name| name.parse::<chrono_tz::Tz>().ok());
     match zoned {
@@ -124,9 +125,15 @@ pub fn requested_types(settings: &Value) -> Vec<Value> {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the finite, already truncated JavaScript millisecond timestamp maps to i64 like Date does"
+)]
 pub fn search_timestamp(now: DateTime<Utc>, days: f64) -> JsResult<String> {
     let offset_milliseconds = days * MILLISECONDS_PER_DAY;
-    let target_milliseconds = (now.timestamp_millis() as f64 - offset_milliseconds).trunc();
+    let target_milliseconds = (js::number_from_timestamp_milliseconds(now.timestamp_millis())
+        - offset_milliseconds)
+        .trunc();
     if !target_milliseconds.is_finite() {
         return Err(JsError::named("RangeError", "Invalid time value"));
     }
@@ -160,13 +167,13 @@ pub fn search_query(
     } else {
         String::new()
     };
+    let default_label = json!({});
     let label = settings
         .get("label")
         .filter(|value| js::is_truthy(value))
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    let mut label_parts = label_query_parts(&label, "match", "")?;
-    label_parts.extend(label_query_parts(&label, "ignore", "-")?);
+        .unwrap_or(&default_label);
+    let mut label_parts = label_query_parts(label, "match", "")?;
+    label_parts.extend(label_query_parts(label, "ignore", "-")?);
     let label_query = label_parts.join(" ");
     let mut ignore_query = String::new();
     if js::truthy(settings.get("ignore_drafts")) {
@@ -184,7 +191,7 @@ pub fn search_query(
     Ok(lodash::js_trim(&query).to_string())
 }
 
-pub fn schedule_result(items: &Value, input: &Value, settings: &Value) -> JsResult<Value> {
+pub fn schedule_result(items: Value, input: &Value, settings: &Value) -> JsResult<Value> {
     let items = match items {
         Value::Array(items) => items,
         Value::Null => {
@@ -202,10 +209,10 @@ pub fn schedule_result(items: &Value, input: &Value, settings: &Value) -> JsResu
                 "Cannot read properties of null (reading 'pull_request')",
             ));
         }
-        if js::truthy(js::get(item, "pull_request")) {
-            pulls.push(item.clone());
+        if js::truthy(js::get(&item, "pull_request")) {
+            pulls.push(item);
         } else {
-            issues.push(item.clone());
+            issues.push(item);
         }
     }
     let status = if !issues.is_empty() || !pulls.is_empty() {
@@ -213,14 +220,21 @@ pub fn schedule_result(items: &Value, input: &Value, settings: &Value) -> JsResu
     } else {
         "fail"
     };
-    Ok(json!({
-        "status": status,
-        "name": "stale",
-        "validations": construct_stale_output(status, input, settings),
-        "schedule": {"issues": issues, "pulls": pulls},
-    }))
+    let mut schedule = Map::new();
+    schedule.insert("issues".to_string(), Value::Array(issues));
+    schedule.insert("pulls".to_string(), Value::Array(pulls));
+    let mut result = Map::new();
+    result.insert("status".to_string(), Value::String(status.to_string()));
+    result.insert("name".to_string(), Value::String("stale".to_string()));
+    result.insert(
+        "validations".to_string(),
+        construct_stale_output(status, input, settings),
+    );
+    result.insert("schedule".to_string(), Value::Object(schedule));
+    Ok(Value::Object(result))
 }
 
+#[must_use]
 pub fn days_setting(settings: &Value) -> Value {
     settings
         .get("days")
@@ -271,7 +285,7 @@ impl Validator for Stale {
             json!({"q": query, "sort": "updated", "order": "desc", "per_page": MAX_ISSUES}),
         )
         .await?;
-        schedule_result(&items, &json!({"days": days, "types": types}), settings)
+        schedule_result(items, &json!({"days": days, "types": types}), settings)
     }
 }
 
@@ -286,38 +300,38 @@ mod tests {
             .unwrap_or_default()
     }
 
-    fn query_for(settings: Value) -> String {
-        let types = requested_types(&settings);
-        search_query("owner", "repo", &settings, &types, "2024-01-05T08:30:00").unwrap()
+    fn query_for(settings: &Value) -> String {
+        let types = requested_types(settings);
+        search_query("owner", "repo", settings, &types, "2024-01-05T08:30:00").unwrap()
     }
 
     #[test]
     fn both_types_or_no_type_search_without_a_type_filter() {
         let both =
-            query_for(json!({"do": "stale", "days": 10, "type": ["issues", "pull_request"]}));
+            query_for(&json!({"do": "stale", "days": 10, "type": ["issues", "pull_request"]}));
         assert_eq!(both, "repo:owner/repo is:open updated:<2024-01-05T08:30:00");
-        let default_types = query_for(json!({"do": "stale", "days": 10}));
+        let default_types = query_for(&json!({"do": "stale", "days": 10}));
         assert!(!default_types.contains("type:"));
     }
 
     #[test]
     fn single_type_adds_a_type_filter() {
-        assert!(query_for(json!({"type": ["issues"]})).ends_with(" type:issue"));
-        assert!(query_for(json!({"type": ["pull_request"]})).ends_with(" type:pr"));
-        assert!(query_for(json!({"type": ["junk", "issues"]})).ends_with(" type:issue"));
-        assert!(!query_for(json!({"type": ["junk1", "junk2"]})).contains("type:"));
+        assert!(query_for(&json!({"type": ["issues"]})).ends_with(" type:issue"));
+        assert!(query_for(&json!({"type": ["pull_request"]})).ends_with(" type:pr"));
+        assert!(query_for(&json!({"type": ["junk", "issues"]})).ends_with(" type:issue"));
+        assert!(!query_for(&json!({"type": ["junk1", "junk2"]})).contains("type:"));
     }
 
     #[test]
     fn label_match_and_ignore_become_label_qualifiers() {
         let query = query_for(
-            json!({"label": {"match": ["test_match1", "test_match2"], "ignore": ["test_ignore"]}}),
+            &json!({"label": {"match": ["test_match1", "test_match2"], "ignore": ["test_ignore"]}}),
         );
         assert_eq!(
             query,
             "repo:owner/repo is:open updated:<2024-01-05T08:30:00 label:\"test_match1\" label:\"test_match2\" -label:\"test_ignore\""
         );
-        assert!(!query_for(json!({"days": 10})).contains("label:"));
+        assert!(!query_for(&json!({"days": 10})).contains("label:"));
     }
 
     #[test]
@@ -329,7 +343,7 @@ mod tests {
             (false, false, true),
         ] {
             let query = query_for(
-                json!({"ignore_drafts": draft, "ignore_milestones": milestones, "ignore_projects": projects}),
+                &json!({"ignore_drafts": draft, "ignore_milestones": milestones, "ignore_projects": projects}),
             );
             assert_eq!(query.contains("-is:draft"), draft);
             assert_eq!(query.contains("no:milestone"), milestones);
@@ -340,7 +354,7 @@ mod tests {
     #[test]
     fn issues_and_pulls_are_split_and_any_result_passes() {
         let result = schedule_result(
-            &json!([{"number": 1}, {"number": 2, "pull_request": {}}]),
+            json!([{"number": 1}, {"number": 2, "pull_request": {}}]),
             &json!({"days": 10, "types": []}),
             &json!({}),
         )
@@ -363,7 +377,7 @@ mod tests {
     #[test]
     fn nothing_stale_fails() {
         let result = schedule_result(
-            &json!([]),
+            json!([]),
             &json!({"days": 10, "types": ["issue"]}),
             &json!({}),
         )

@@ -34,6 +34,7 @@ pub trait Action: Send + Sync {
     ) -> JsResult<()>;
 }
 
+#[must_use]
 pub fn create(key: &str) -> Option<Arc<dyn Action>> {
     let action: Arc<dyn Action> = match key {
         "assign" => Arc::new(assign::Assign),
@@ -85,10 +86,10 @@ pub async fn process_after_validate(
         .await
 }
 
-pub fn get_actionables<'context>(
-    context: &'context Context,
-    results: &Value,
-) -> Vec<Cow<'context, Value>> {
+pub fn get_actionables<'value>(
+    context: &'value Context,
+    results: &'value Value,
+) -> Vec<Cow<'value, Value>> {
     let schedule_results = if context.event_name == "schedule" {
         js::get_path(results, &["validationSuites", "0", "schedule"])
             .filter(|schedule| js::is_truthy(schedule))
@@ -97,13 +98,9 @@ pub fn get_actionables<'context>(
     };
     match schedule_results {
         Some(schedule) => {
-            let issues = schedule
-                .get("issues")
-                .map(js::as_array_or_wrap)
-                .unwrap_or_default();
-            js::concat(&issues, schedule.get("pulls").unwrap_or(&Value::Null))
-                .into_iter()
-                .map(Cow::Owned)
+            let issues = schedule.get("issues").map_or(&[][..], js::as_array_or_wrap);
+            js::concat(issues, schedule.get("pulls").unwrap_or(&js::NULL))
+                .map(Cow::Borrowed)
                 .collect()
         }
         None => {
@@ -112,6 +109,7 @@ pub fn get_actionables<'context>(
     }
 }
 
+#[must_use]
 pub fn is_comment_on_plain_issue(context: &Context) -> bool {
     context.event_name == "issue_comment"
         && !js::truthy(js::get_path(&context.payload, &["issue", "pull_request"]))

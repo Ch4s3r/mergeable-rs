@@ -7,6 +7,7 @@ use crate::js;
 use async_trait::async_trait;
 use futures::future::join_all;
 use serde_json::Value;
+use std::sync::Arc;
 
 pub const SUPPORTED_EVENTS: [&str; 4] = [
     "pull_request.*",
@@ -15,17 +16,18 @@ pub const SUPPORTED_EVENTS: [&str; 4] = [
     "schedule.repository",
 ];
 const MODES: [&str; 3] = ["add", "delete", "replace"];
-fn matches_patterns(label: &Value, patterns: &Value) -> JsResult<bool> {
-    let pattern_list = match patterns {
-        Value::Array(items) => items,
-        Value::Null => {
-            return Err(JsError::type_error(
-                "Cannot read properties of null (reading 'some')",
-            ));
-        }
-        _ => return Err(JsError::type_error("patterns.some is not a function")),
-    };
-    for pattern in pattern_list {
+fn pattern_list(patterns: &Value) -> JsResult<&[Value]> {
+    match patterns {
+        Value::Array(items) => Ok(items),
+        Value::Null => Err(JsError::type_error(
+            "Cannot read properties of null (reading 'some')",
+        )),
+        _ => Err(JsError::type_error("patterns.some is not a function")),
+    }
+}
+
+fn matches_any_pattern(label: &Value, patterns: &[Value]) -> JsResult<bool> {
+    for pattern in patterns {
         if crate::minimatch::minimatch(label, pattern, false)? {
             return Ok(true);
         }
@@ -33,14 +35,21 @@ fn matches_patterns(label: &Value, patterns: &Value) -> JsResult<bool> {
     Ok(false)
 }
 
-pub fn labels_without_matches(labels: Vec<Value>, patterns: &Value) -> JsResult<Vec<Value>> {
+fn labels_without_any_pattern(labels: Vec<Value>, patterns: &[Value]) -> JsResult<Vec<Value>> {
     let mut kept = Vec::new();
     for label in labels {
-        if !matches_patterns(&label, patterns)? {
+        if !matches_any_pattern(&label, patterns)? {
             kept.push(label);
         }
     }
     Ok(kept)
+}
+
+pub fn labels_without_matches(labels: Vec<Value>, patterns: &Value) -> JsResult<Vec<Value>> {
+    if labels.is_empty() {
+        return Ok(labels);
+    }
+    labels_without_any_pattern(labels, pattern_list(patterns)?)
 }
 
 pub fn combine_labels(current: Vec<Value>, settings: &Value) -> JsResult<Vec<Value>> {
@@ -49,30 +58,28 @@ pub fn combine_labels(current: Vec<Value>, settings: &Value) -> JsResult<Vec<Val
         .get("add")
         .filter(|addition| js::is_truthy(addition))
     {
-        labels = js::concat(&labels, addition);
+        labels.extend_from_slice(js::as_array_or_wrap(addition));
     }
     if let Some(deletion) = settings
         .get("delete")
         .filter(|deletion| js::is_truthy(deletion))
     {
-        labels = labels_without_matches(labels, &Value::Array(js::concat(&[], deletion)))?;
+        labels = labels_without_any_pattern(labels, js::as_array_or_wrap(deletion))?;
     }
     Ok(labels)
 }
 
 async fn update_labels(context: &Context, issue: &Value, settings: &Value) -> JsResult<()> {
-    let issue_number = js::read(Some(issue), "number")?
-        .cloned()
-        .unwrap_or(Value::Null);
+    let issue_number = js::read(Some(issue), "number")?.unwrap_or(&Value::Null);
     let current = match settings
         .get("replace")
         .filter(|replacement| js::is_truthy(replacement))
     {
-        Some(replacement) => js::concat(&[], replacement),
-        None => api::list_labels_on_issue(context, &issue_number).await?,
+        Some(replacement) => js::as_array_or_wrap(replacement).to_vec(),
+        None => api::list_labels_on_issue(context, issue_number).await?,
     };
     let labels = combine_labels(current, settings)?;
-    api::set_labels(context, &issue_number, &Value::Array(labels))
+    api::set_labels(context, issue_number, &Value::Array(labels))
         .await
         .map(|_| ())
 }
@@ -92,7 +99,7 @@ fn log_detached_failure(context: &Context, error: &JsError) {
 async fn delete_matching_labels(
     context: &Context,
     issue_numbers: Vec<Value>,
-    patterns: Option<Value>,
+    patterns: Option<&Value>,
 ) {
     let current_labels = join_all(
         issue_numbers
@@ -101,7 +108,7 @@ async fn delete_matching_labels(
     )
     .await;
     for (issue_number, listed) in issue_numbers.into_iter().zip(current_labels) {
-        match listed.and_then(|current| labels_to_keep(current, patterns.as_ref())) {
+        match listed.and_then(|current| labels_to_keep(current, patterns)) {
             Ok(kept) => {
                 let task_context = context.clone();
                 spawn_detached(context, "action/labels", async move {
@@ -168,7 +175,7 @@ impl Action for Labels {
             )));
         }
         let mode_name = mode_name.unwrap_or("add");
-        let configured_labels = settings.get("labels").cloned();
+        let configured_labels = settings.get("labels");
         let mut issue_numbers = Vec::new();
         let mut unreadable_issue = None;
         for issue in &items {
@@ -183,9 +190,10 @@ impl Action for Labels {
         if mode_name == "delete" {
             delete_matching_labels(context, issue_numbers, configured_labels).await;
         } else {
+            let shared_labels = Arc::new(configured_labels.cloned().unwrap_or(Value::Null));
             for issue_number in issue_numbers {
                 let task_context = context.clone();
-                let labels = configured_labels.clone().unwrap_or(Value::Null);
+                let labels = Arc::clone(&shared_labels);
                 let replaces = mode_name == "replace";
                 spawn_detached(context, "action/labels", async move {
                     let response = if replaces {
@@ -248,14 +256,22 @@ mod tests {
     #[test]
     fn replace_then_add_then_delete_is_the_order_of_operations() {
         let settings = json!({"delete": ["not present", "more adds"], "add": ["addition", "more adds"], "replace": ["test present", "not present"]});
-        let labels = combine_labels(js::concat(&[], &settings["replace"]), &settings).unwrap();
+        let labels = combine_labels(
+            js::as_array_or_wrap(&settings["replace"]).to_vec(),
+            &settings,
+        )
+        .unwrap();
         assert_eq!(strings(labels), vec!["test present", "addition"]);
     }
 
     #[test]
     fn settings_can_be_single_values() {
         let settings = json!({"delete": "deletion", "add": "addition", "replace": "replace"});
-        let labels = combine_labels(js::concat(&[], &settings["replace"]), &settings).unwrap();
+        let labels = combine_labels(
+            js::as_array_or_wrap(&settings["replace"]).to_vec(),
+            &settings,
+        )
+        .unwrap();
         assert_eq!(strings(labels), vec!["replace", "addition"]);
     }
 

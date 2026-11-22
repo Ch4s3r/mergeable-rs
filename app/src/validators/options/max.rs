@@ -27,7 +27,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
         format!("{validator_name} count is more than \"{count_text}\""),
     );
     let is_mergeable = match input {
-        Value::Array(items) => items.len() as f64 <= count_limit,
+        Value::Array(items) => js::number_from_length(items.len()) <= count_limit,
         Value::Number(number)
             if number
                 .as_f64()
@@ -49,10 +49,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn status_for(count: Value, input: Value) -> &'static str {
+    fn status_for(count: &Value, input: &Value) -> &'static str {
         process(
             &json!({"name": "label"}),
-            &input,
+            input,
             &json!({"max": {"count": count}}),
         )
         .unwrap()
@@ -61,16 +61,16 @@ mod tests {
 
     #[test]
     fn list_within_or_at_maximum_passes_and_above_fails() {
-        assert_eq!(status_for(json!(3), json!(["A", "B"])), "pass");
-        assert_eq!(status_for(json!(3), json!(["A", "B", "C"])), "pass");
-        assert_eq!(status_for(json!(3), json!(["A", "B", "C", "D"])), "fail");
+        assert_eq!(status_for(&json!(3), &json!(["A", "B"])), "pass");
+        assert_eq!(status_for(&json!(3), &json!(["A", "B", "C"])), "pass");
+        assert_eq!(status_for(&json!(3), &json!(["A", "B", "C", "D"])), "fail");
     }
 
     #[test]
     fn integer_within_or_at_maximum_passes_and_above_fails() {
-        assert_eq!(status_for(json!(20), json!(10)), "pass");
-        assert_eq!(status_for(json!(10), json!(10)), "pass");
-        assert_eq!(status_for(json!(10), json!(20)), "fail");
+        assert_eq!(status_for(&json!(20), &json!(10)), "pass");
+        assert_eq!(status_for(&json!(10), &json!(10)), "pass");
+        assert_eq!(status_for(&json!(10), &json!(20)), "fail");
     }
 
     #[test]

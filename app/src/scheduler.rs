@@ -4,7 +4,7 @@ use crate::github::app_auth::AppJwtClient;
 use crate::github::client::GithubApp;
 use crate::js;
 use crate::server;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -21,6 +21,7 @@ pub struct SchedulerOptions {
 }
 
 impl SchedulerOptions {
+    #[must_use]
     pub fn from_env(interval_milliseconds: f64) -> Self {
         let environment_text = |name: &str| std::env::var(name).unwrap_or_default();
         SchedulerOptions {
@@ -39,6 +40,7 @@ pub fn parse_ignored_accounts(ignored_accounts_text: &str) -> Vec<String> {
         .collect()
 }
 
+#[must_use]
 pub fn js_number(text: &str) -> f64 {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -57,6 +59,7 @@ pub fn js_number(text: &str) -> f64 {
     }
 }
 
+#[must_use]
 pub fn node_timer_duration(milliseconds: f64) -> Duration {
     let effective = if (1.0..=NODE_TIMEOUT_MAX_MILLISECONDS).contains(&milliseconds) {
         milliseconds
@@ -66,12 +69,16 @@ pub fn node_timer_duration(milliseconds: f64) -> Duration {
     Duration::from_secs_f64(effective / 1000.0)
 }
 
-pub fn scheduled_event_payload(installation: &Value, repository: &Value) -> Value {
-    json!({
-        "action": "repository",
-        "installation": installation,
-        "repository": repository,
-    })
+#[must_use]
+pub fn scheduled_event_payload(installation: &Value, repository: Value) -> Value {
+    let mut payload = Map::new();
+    payload.insert(
+        "action".to_string(),
+        Value::String("repository".to_string()),
+    );
+    payload.insert("installation".to_string(), installation.clone());
+    payload.insert("repository".to_string(), repository);
+    Value::Object(payload)
 }
 
 pub fn is_ignored_installation(
@@ -138,6 +145,7 @@ impl Scheduler {
         scheduler
     }
 
+    #[must_use]
     pub fn listens_to(event_name: &str, payload: &Value) -> bool {
         let action = js::as_str(payload.get("action"));
         matches!(
@@ -152,10 +160,13 @@ impl Scheduler {
         payload: &Value,
     ) -> JsResult<()> {
         let installation = js::get(payload, "installation");
-        match event_name {
-            "installation" => self.schedule_each_repository(installation).await,
-            _ => self.setup_installation(installation),
+        if event_name == "installation" {
+            return self.schedule_each_repository(installation).await;
         }
+        if self.accepts_installation(installation)? {
+            self.queue_installation(installation.cloned().unwrap_or(Value::Null));
+        }
+        Ok(())
     }
 
     async fn setup(&self) -> JsResult<()> {
@@ -164,38 +175,42 @@ impl Scheduler {
             .paginate_as_app("/app/installations?per_page=100")
             .await?;
         for installation in installations {
-            self.setup_installation(Some(&installation))?;
+            if self.accepts_installation(Some(&installation))? {
+                self.queue_installation(installation);
+            }
         }
         Ok(())
     }
 
-    fn setup_installation(&self, installation: Option<&Value>) -> JsResult<()> {
+    fn accepts_installation(&self, installation: Option<&Value>) -> JsResult<bool> {
         if is_ignored_installation(&self.options.ignored_accounts, installation)? {
             tracing::info!(installation = ?installation, "installation is ignored");
-            return Ok(());
+            return Ok(false);
         }
-        let queued_installation = installation.cloned().unwrap_or(Value::Null);
-        if self.installation_queue.send(queued_installation).is_err() {
+        Ok(true)
+    }
+
+    fn queue_installation(&self, installation: Value) {
+        if self.installation_queue.send(installation).is_err() {
             tracing::error!("scheduler queue closed");
         }
-        Ok(())
     }
 
     async fn schedule_each_repository(&self, installation: Option<&Value>) -> JsResult<()> {
         let installation_id = js::read(installation, "id")?.and_then(Value::as_u64);
-        let installation = installation.cloned().unwrap_or(Value::Null);
+        let installation = installation.unwrap_or(&Value::Null);
         let client = self.github.installation(installation_id);
         let repositories = client
             .paginate("GET /installation/repositories", json!({"per_page": 100}))
             .await?;
         for repository in repositories {
-            self.schedule(&installation, &repository);
+            self.schedule(installation, repository);
         }
         Ok(())
     }
 
-    fn schedule(&self, installation: &Value, repository: &Value) {
-        let key = repository_key(repository);
+    fn schedule(&self, installation: &Value, repository: Value) {
+        let key = repository_key(&repository);
         let Ok(mut intervals) = self.intervals.lock() else {
             return;
         };
@@ -258,10 +273,10 @@ mod tests {
         let installation = json!({"id": 2, "account": {"login": "octocat"}});
         let repository = json!({"id": 7, "name": "app", "owner": {"login": "octocat"}});
         assert_eq!(
-            scheduled_event_payload(&installation, &repository),
+            scheduled_event_payload(&installation, repository.clone()),
             json!({"action": "repository", "installation": installation, "repository": repository})
         );
-        let payload = scheduled_event_payload(&installation, &repository);
+        let payload = scheduled_event_payload(&installation, repository);
         let keys: Vec<&String> = payload
             .as_object()
             .map(|payload| payload.keys().collect())

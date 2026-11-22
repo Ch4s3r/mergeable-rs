@@ -31,17 +31,22 @@ impl OptionResult {
         }
     }
 
-    pub fn to_value(&self) -> Value {
-        json!({"status": self.status, "description": self.description})
+    #[must_use]
+    pub fn into_value(self) -> Value {
+        let mut result = Map::new();
+        result.insert("status".to_string(), Value::String(self.status.to_string()));
+        result.insert("description".to_string(), self.description);
+        Value::Object(result)
     }
 }
 
+#[must_use]
 pub fn construct_output(
     validator_context: &Value,
     input: Option<&Value>,
     settings: Option<&Value>,
     status: &str,
-    description: Value,
+    description: &Value,
     error: Option<Value>,
 ) -> Value {
     let mut details = Map::new();
@@ -62,6 +67,7 @@ pub fn construct_output(
     })
 }
 
+#[must_use]
 pub fn construct_error_output(
     validator_context: &Value,
     input: Option<&Value>,
@@ -73,15 +79,17 @@ pub fn construct_error_output(
         input,
         settings,
         "error",
-        Value::String(description.to_string()),
+        &Value::String(description.to_string()),
         None,
     )
 }
 
+#[must_use]
 pub fn validator_name(validator_context: &Value) -> String {
     js::to_js_string(js::get(validator_context, "name"))
 }
 
+#[must_use]
 pub fn message_or_default(message: Option<&Value>, default_description: String) -> Value {
     match message {
         Some(custom) if js::is_truthy(custom) => custom.clone(),
@@ -89,6 +97,7 @@ pub fn message_or_default(message: Option<&Value>, default_description: String) 
     }
 }
 
+#[must_use]
 pub fn regex_flags(filter: &Value) -> String {
     match js::get(filter, "regex_flag") {
         Some(flag) if js::is_truthy(flag) => {
@@ -111,15 +120,18 @@ pub fn compile_user_regex(regex: &Value, flags: &str) -> JsResult<JsRegex> {
     })
 }
 
+#[must_use]
 pub fn compile_constant_pattern(pattern: &str, flags: JsRegexFlags) -> Option<fancy_regex::Regex> {
     let translated = js_regex::translate(pattern, flags).ok()?;
     fancy_regex::Regex::new(&translated).ok()
 }
 
-pub fn concat_into_list(value: &Value) -> Vec<Value> {
+#[must_use]
+pub fn concat_into_list(value: &Value) -> &[Value] {
     js::as_array_or_wrap(value)
 }
 
+#[must_use]
 pub fn join_list(items: &[Value], separator: &str) -> String {
     items
         .iter()
@@ -131,10 +143,12 @@ pub fn join_list(items: &[Value], separator: &str) -> String {
         .join(separator)
 }
 
+#[must_use]
 pub fn utf16_length(text: &str) -> usize {
     text.encode_utf16().count()
 }
 
+#[must_use]
 pub fn is_js_whitespace(character: char) -> bool {
     matches!(
         character,
@@ -167,25 +181,29 @@ fn index_of(container: &Value, needle: &Value) -> Result<f64, NotSearchable> {
         Value::String(text) => {
             let needle_text = js::to_js_string(Some(needle));
             Ok(text.find(&needle_text).map_or(-1.0, |byte_offset| {
-                utf16_length(&text[..byte_offset]) as f64
+                js::number_from_length(utf16_length(&text[..byte_offset]))
             }))
         }
         Value::Array(items) => Ok(items
             .iter()
             .position(|item| js::strict_equals(item, needle))
-            .map_or(-1.0, |index| index as f64)),
+            .map_or(-1.0, js::number_from_length)),
         _ => Err(NotSearchable),
     }
 }
 
 fn length_of(value: &Value) -> Option<f64> {
     match value {
-        Value::String(text) => Some(utf16_length(text) as f64),
-        Value::Array(items) => Some(items.len() as f64),
+        Value::String(text) => Some(js::number_from_length(utf16_length(text))),
+        Value::Array(items) => Some(js::number_from_length(items.len())),
         _ => None,
     }
 }
 
+#[expect(
+    clippy::float_cmp,
+    reason = "exact comparison of JavaScript indexOf results, which are integral numbers"
+)]
 fn has_affix(container: &Value, item: &Value, affix: Affix) -> Result<bool, NotSearchable> {
     let index = index_of(container, item)?;
     Ok(match affix {

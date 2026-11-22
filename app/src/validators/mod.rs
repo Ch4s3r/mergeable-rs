@@ -5,6 +5,7 @@ use crate::registry::Registry;
 use crate::results;
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::borrow::Cow;
 use std::sync::Arc;
 
 pub mod lib;
@@ -66,6 +67,7 @@ pub trait Validator: Send + Sync {
     ) -> JsResult<Value>;
 }
 
+#[must_use]
 pub fn create(key: &str) -> Option<Arc<dyn Validator>> {
     let validator: Arc<dyn Validator> = match key {
         "age" => Arc::new(age::Age),
@@ -126,7 +128,7 @@ pub async fn process_validate(
                 let validator_context = json!({"name": validator.name()});
                 let output = vec![results::construct_error_output(
                     &validator_context,
-                    &Value::String(js::stringify(&supported_settings)),
+                    Value::String(js::stringify(&supported_settings)),
                     settings,
                     &error.name,
                     Some(Value::String(error.to_string())),
@@ -139,6 +141,7 @@ pub async fn process_validate(
     validator.validate(context, settings, registry).await
 }
 
+#[must_use]
 pub fn option_type(option: &Value) -> &'static str {
     match option {
         Value::Array(_) => "array",
@@ -172,10 +175,10 @@ pub fn validate_settings(
         let value_type = option_type(value_to_check);
         if value_type == "object" {
             let mut deeper = nestings.to_vec();
-            deeper.push(key.clone());
+            deeper.push(key);
             validate_settings(owner, &supported_value, value_to_check, &deeper)?;
         } else {
-            let allowed = match &supported_value {
+            let allowed = match supported_value.as_ref() {
                 Value::String(text) => text.contains(value_type),
                 Value::Array(items) => items.iter().any(|item| item.as_str() == Some(value_type)),
                 _ => {
@@ -187,7 +190,7 @@ pub fn validate_settings(
             if !allowed {
                 return Err(JsError::unsupported_setting(format!(
                     "{owner}: {prefix}{key} is expected to be of type: {}",
-                    js::to_js_string(Some(&supported_value))
+                    js::to_js_string(Some(supported_value.as_ref()))
                 )));
             }
         }
@@ -195,16 +198,20 @@ pub fn validate_settings(
     Ok(())
 }
 
-fn supported_setting_at(supported_settings: &Value, key: &str) -> Value {
+fn supported_setting_at<'settings>(
+    supported_settings: &'settings Value,
+    key: &str,
+) -> Cow<'settings, Value> {
     match supported_settings {
-        Value::String(text) => key
-            .parse::<usize>()
-            .ok()
-            .and_then(|index| text.encode_utf16().nth(index))
-            .map_or(Value::Null, |unit| {
-                Value::String(String::from_utf16_lossy(&[unit]))
-            }),
-        other => js::get(other, key).cloned().unwrap_or(Value::Null),
+        Value::String(text) => Cow::Owned(
+            key.parse::<usize>()
+                .ok()
+                .and_then(|index| text.encode_utf16().nth(index))
+                .map_or(Value::Null, |unit| {
+                    Value::String(String::from_utf16_lossy(&[unit]))
+                }),
+        ),
+        other => Cow::Borrowed(js::get(other, key).unwrap_or(&js::NULL)),
     }
 }
 
@@ -219,7 +226,7 @@ pub async fn process_options(
         .map(|option| Value::String((*option).to_string()))
         .collect();
     let validator_context = json!({
-        "name": settings.get("do").cloned().unwrap_or(Value::Null),
+        "name": settings.get("do").unwrap_or(&Value::Null),
         "supportedOptions": supported,
     });
     options::process(&validator_context, input, settings, false).await

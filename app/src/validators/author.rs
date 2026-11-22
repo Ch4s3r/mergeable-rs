@@ -55,20 +55,17 @@ impl Validator for Author {
         }
 
         for list_option in ["one_of", "none_of"] {
-            if let Some(list) = js::get(&author_settings, list_option)
-                .filter(|list| js::is_truthy(list))
-                .cloned()
+            if let Some(list) =
+                js::get(&author_settings, list_option).filter(|list| js::is_truthy(list))
             {
-                let candidates = list_processor::process(&list, context).await?;
+                let candidates = list_processor::process(list, context).await?;
                 if let Value::Object(fields) = &mut author_settings {
                     fields.insert(list_option.to_string(), Value::Array(candidates));
                 }
             }
         }
 
-        let login = js::read(js::read(payload, "user")?, "login")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        validators::process_options(&author_settings, &login, None).await
+        let login = js::read(js::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
+        validators::process_options(&author_settings, login, None).await
     }
 }

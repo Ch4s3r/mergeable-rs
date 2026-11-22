@@ -1,5 +1,6 @@
 use crate::context::Context;
 use crate::error::JsResult;
+use crate::validators::options::lib::OptionResult;
 use serde_json::Value;
 
 pub fn process(
@@ -9,5 +10,5 @@ pub fn process(
     rule: &Value,
 ) -> JsResult<Value> {
     crate::validators::options::must_exclude::process(filter_context, input, rule)
-        .map(|result| result.to_value())
+        .map(OptionResult::into_value)
 }

@@ -70,7 +70,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
     let regex_list = lib::concat_into_list(regex);
     let all = js::truthy(js::get(filter, "all"));
     let all_text = if all { "all" } else { "" };
-    let joined_patterns = lib::join_list(&regex_list, ", ");
+    let joined_patterns = lib::join_list(regex_list, ", ");
     let validator_name = lib::validator_name(validator_context);
     let success_description =
         format!("{validator_name} {all_text}must include '{joined_patterns}'");
@@ -81,7 +81,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
     let flags = lib::regex_flags(filter);
 
     let mut is_mergeable = false;
-    for pattern in &regex_list {
+    for pattern in regex_list {
         let compiled = lib::compile_user_regex(pattern, &flags)?;
         if includes_pattern(&compiled, input, key, all)? {
             is_mergeable = true;
@@ -100,10 +100,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn run(rule: Value, input: Value) -> OptionResult {
+    fn run(rule: &Value, input: &Value) -> OptionResult {
         process(
             &json!({"name": "label"}),
-            &input,
+            input,
             &json!({"must_include": rule}),
         )
         .unwrap()
@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn passes_when_a_label_matches() {
         assert_eq!(
-            run(json!({"regex": "test"}), json!(["A", "B", "the test"])).status,
+            run(&json!({"regex": "test"}), &json!(["A", "B", "the test"])).status,
             "pass"
         );
     }
@@ -120,8 +120,8 @@ mod tests {
     #[test]
     fn fails_with_custom_message_when_nothing_matches() {
         let result = run(
-            json!({"regex": "test", "message": "failed Test"}),
-            json!(["A", "B"]),
+            &json!({"regex": "test", "message": "failed Test"}),
+            &json!(["A", "B"]),
         );
         assert_eq!(result.status, "fail");
         assert_eq!(result.description, json!("failed Test"));
@@ -142,16 +142,16 @@ mod tests {
     fn all_requires_every_label_to_match() {
         assert_eq!(
             run(
-                json!({"regex": "test", "all": true}),
-                json!(["A test", "B", "the test"])
+                &json!({"regex": "test", "all": true}),
+                &json!(["A test", "B", "the test"])
             )
             .status,
             "fail"
         );
         assert_eq!(
             run(
-                json!({"regex": "test", "all": true}),
-                json!(["A test", "B test", "the test"])
+                &json!({"regex": "test", "all": true}),
+                &json!(["A test", "B test", "the test"])
             )
             .status,
             "pass"
@@ -162,8 +162,8 @@ mod tests {
     fn regex_flag_none_makes_matching_case_sensitive() {
         assert_eq!(
             run(
-                json!({"regex": "test", "regex_flag": "none"}),
-                json!(["A", "B", "Test"])
+                &json!({"regex": "test", "regex_flag": "none"}),
+                &json!(["A", "B", "Test"])
             )
             .status,
             "fail"
@@ -174,15 +174,15 @@ mod tests {
     fn any_regex_of_a_list_may_match() {
         assert_eq!(
             run(
-                json!({"regex": ["^the\\stest$", "nothing"]}),
-                json!(["A", "B", "the test"])
+                &json!({"regex": ["^the\\stest$", "nothing"]}),
+                &json!(["A", "B", "the test"])
             )
             .status,
             "pass"
         );
         let result = run(
-            json!({"regex": ["test", "another"], "message": "failed array Test"}),
-            json!(["E", "F"]),
+            &json!({"regex": ["test", "another"], "message": "failed array Test"}),
+            &json!(["E", "F"]),
         );
         assert_eq!(result.status, "fail");
         assert_eq!(result.description, json!("failed array Test"));
@@ -192,8 +192,8 @@ mod tests {
     fn object_labels_need_a_key() {
         assert_eq!(
             run(
-                json!({"regex": "bug", "key": "name"}),
-                json!([{"name": "bug"}])
+                &json!({"regex": "bug", "key": "name"}),
+                &json!([{"name": "bug"}])
             )
             .status,
             "pass"
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn default_descriptions_join_patterns_and_glue_all_to_the_verb() {
-        let result = run(json!({"regex": ["a", "b"], "all": true}), json!(["a"]));
+        let result = run(&json!({"regex": ["a", "b"], "all": true}), &json!(["a"]));
         assert_eq!(result.description, json!("label allmust include 'a, b'"));
     }
 }

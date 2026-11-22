@@ -1,6 +1,38 @@
 use crate::context::Context;
-use serde_json::{Value, json};
+use serde_json::Value;
+use std::sync::LazyLock;
 
+static EMPTY_STRING: Value = Value::String(String::new());
+static EMPTY_OBJECT: LazyLock<Value> = LazyLock::new(|| Value::Object(serde_json::Map::new()));
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EventAttributes<'payload> {
+    pub action: Option<&'payload Value>,
+    pub repository: Option<&'payload Value>,
+    pub sender: Option<&'payload Value>,
+}
+
+impl<'payload> EventAttributes<'payload> {
+    #[must_use]
+    pub fn from_payload(payload: &'payload Value) -> Self {
+        Self {
+            action: payload.get("action"),
+            repository: payload.get("repository"),
+            sender: payload.get("sender"),
+        }
+    }
+
+    #[must_use]
+    pub fn of_schedule() -> Self {
+        Self {
+            action: Some(&EMPTY_STRING),
+            repository: Some(&EMPTY_OBJECT),
+            sender: Some(&EMPTY_OBJECT),
+        }
+    }
+}
+
+#[must_use]
 pub fn is_event_supported(supported_events: &[&str], event_name: &str) -> bool {
     let event_object = event_name.split('.').next().unwrap_or_default();
     supported_events.iter().any(|&event| {
@@ -8,6 +40,7 @@ pub fn is_event_supported(supported_events: &[&str], event_name: &str) -> bool {
     })
 }
 
+#[must_use]
 pub fn payload_key(context: &Context) -> &str {
     match context.event_name.as_str() {
         "issues" | "issue_comment" => "issue",
@@ -16,25 +49,22 @@ pub fn payload_key(context: &Context) -> &str {
     }
 }
 
+#[must_use]
 pub fn get_payload(context: &Context) -> Option<&Value> {
     context.payload.get(payload_key(context))
 }
 
+#[must_use]
 pub fn get_all_payload(context: &Context) -> &Value {
     &context.payload
 }
 
-pub fn get_event_attributes(context: &Context) -> Value {
+#[must_use]
+pub fn get_event_attributes(context: &Context) -> EventAttributes<'_> {
     if context.event_name == "schedule" {
-        return json!({"action": "", "repository": {}, "sender": {}});
+        return EventAttributes::of_schedule();
     }
-    let mut attributes = serde_json::Map::new();
-    for key in ["action", "repository", "sender"] {
-        if let Some(value) = context.payload.get(key) {
-            attributes.insert(key.to_string(), value.clone());
-        }
-    }
-    Value::Object(attributes)
+    EventAttributes::from_payload(&context.payload)
 }
 
 #[cfg(test)]

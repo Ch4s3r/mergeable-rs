@@ -23,7 +23,7 @@ pub struct RecordOutcome {
 fn save_both_passes(
     case: &mut Case,
     first_run: CaseRun,
-    second_run: CaseRun,
+    second_run: &CaseRun,
 ) -> Result<RecordedCase> {
     let mut noise = Vec::new();
     if !first_run.settled || !second_run.settled {
@@ -90,7 +90,7 @@ async fn record_in_fresh_processes(
                 let second_run =
                     run_case_in_fresh_process(&program, &case, &options, &format!("{name}.pass2"))
                         .await?;
-                save_both_passes(&mut case, first_run, second_run)
+                save_both_passes(&mut case, first_run, &second_run)
             }
             .await
             .map_err(|error| format!("{error:#}"));
@@ -116,7 +116,7 @@ async fn record_in_one_process(
     let mut outcomes = Vec::with_capacity(cases.len());
     for ((case, first_run), second_run) in cases.iter_mut().zip(first_runs).zip(second_runs) {
         let result = match (first_run, second_run) {
-            (Ok(first_run), Ok(second_run)) => save_both_passes(case, first_run, second_run),
+            (Ok(first_run), Ok(second_run)) => save_both_passes(case, first_run, &second_run),
             (Err(error), _) | (_, Err(error)) => Err(error),
         };
         outcomes.push(RecordOutcome {

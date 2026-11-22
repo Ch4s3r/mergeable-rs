@@ -4,7 +4,7 @@ use crate::github::api;
 use crate::js;
 use crate::results;
 use crate::validators::options_processor::unique_values;
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 
 fn split_team(team: &Value) -> JsResult<(String, String)> {
     let team_text = match team {
@@ -56,16 +56,24 @@ pub async fn extract_team_memberships(
     Ok(unique_values(team_members))
 }
 
+#[must_use]
 pub fn context_as_validator(context: &Context) -> Value {
-    json!({
-        "eventId": context.event_id,
-        "eventName": context.event_name,
-        "payload": context.payload,
-    })
+    let mut validator = Map::new();
+    validator.insert(
+        "eventId".to_string(),
+        Value::String(context.event_id.clone()),
+    );
+    validator.insert(
+        "eventName".to_string(),
+        Value::String(context.event_name.clone()),
+    );
+    validator.insert("payload".to_string(), Value::clone(&context.payload));
+    Value::Object(validator)
 }
 
+#[must_use]
 pub fn team_option_output(
-    validator_context: &Value,
+    validator_context: Value,
     team_memberships: Vec<Value>,
     settings: &Value,
     team_name: &Value,
@@ -87,15 +95,19 @@ pub fn team_option_output(
             format!("'{user_text}' is not part of the '{team_text}' team'"),
         )
     };
-    let output = vec![results::construct_output(
+    let mut consolidation_context = Map::new();
+    if let Some(name) = js::get(&validator_context, "name") {
+        consolidation_context.insert("name".to_string(), name.clone());
+    }
+    let output = vec![results::construct_output_with_owned_validator(
         validator_context,
-        &Value::Array(team_memberships),
+        Value::Array(team_memberships),
         settings,
         status,
         Value::String(description),
         Some(Value::Null),
     )];
-    results::consolidate_result(output, validator_context)
+    results::consolidate_result(output, &Value::Object(consolidation_context))
 }
 
 pub async fn process_team_option(
@@ -103,29 +115,28 @@ pub async fn process_team_option(
     settings: &Value,
     payload: Option<&Value>,
 ) -> JsResult<Value> {
-    let team_name = js::get(settings, "team").cloned().unwrap_or(Value::Null);
-    let user_name = js::read(js::read(payload, "user")?, "login")?
-        .cloned()
-        .unwrap_or(Value::Null);
+    let team_name = js::get(settings, "team").unwrap_or(&Value::Null);
+    let user_name = js::read(js::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
     let team_memberships = extract_team_memberships(
         context,
-        std::slice::from_ref(&team_name),
-        std::slice::from_ref(&user_name),
+        std::slice::from_ref(team_name),
+        std::slice::from_ref(user_name),
     )
     .await?;
     // ponytail: Node puts the whole mergeable Context object into the output's validator field; only its serialisable event fields are kept here
     Ok(team_option_output(
-        &context_as_validator(context),
+        context_as_validator(context),
         team_memberships,
         settings,
-        &team_name,
-        &user_name,
+        team_name,
+        user_name,
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn team_id_must_have_organization_and_slug() {
@@ -147,7 +158,7 @@ mod tests {
     fn team_option_passes_for_members_and_has_no_validator_name() {
         let settings = json!({"do": "author", "team": "org/team-slug"});
         let result = team_option_output(
-            &json!({"eventName": "pull_request"}),
+            json!({"eventName": "pull_request"}),
             vec![json!("alice")],
             &settings,
             &json!("org/team-slug"),
@@ -166,7 +177,7 @@ mod tests {
     fn team_option_fails_for_non_members() {
         let settings = json!({"do": "author", "team": "org/team-slug"});
         let result = team_option_output(
-            &json!({}),
+            json!({}),
             vec![],
             &settings,
             &json!("org/team-slug"),

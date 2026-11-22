@@ -7,6 +7,7 @@ use std::time::Duration;
 
 const REPLAY_TEST_SIGNING_KEY: &str = include_str!("../../../../replay/test-key.pem");
 
+#[must_use]
 pub fn context_for(event_name: &str, payload: Value) -> Context {
     let settings = GithubAppSettings {
         base_url: "http://127.0.0.1:9".to_string(),
@@ -24,7 +25,7 @@ pub fn context_for(event_name: &str, payload: Value) -> Context {
         payload,
         app.installation(Some(1)),
     );
-    context.global_settings = Some(json!({}));
+    context.global_settings = Some(Arc::new(json!({})));
     context
 }
 
@@ -46,7 +47,8 @@ impl Default for PullRequest<'_> {
     }
 }
 
-pub fn pull_request_context(pull_request: PullRequest<'_>) -> Context {
+#[must_use]
+pub fn pull_request_context(pull_request: &PullRequest<'_>) -> Context {
     context_for(
         "pull_request",
         json!({

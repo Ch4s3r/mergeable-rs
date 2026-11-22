@@ -42,10 +42,11 @@ impl Validator for Description {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let body = js::read(event_aware::get_payload(context), "body")?;
+        let empty_description = Value::String(String::new());
         let description = match body {
-            Some(present) if js::is_truthy(present) => present.clone(),
-            _ => Value::String(String::new()),
+            Some(present) if js::is_truthy(present) => present,
+            _ => &empty_description,
         };
-        validators::process_options(settings, &description, None).await
+        validators::process_options(settings, description, None).await
     }
 }

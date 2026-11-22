@@ -64,7 +64,7 @@ pub async fn process(
                 let filter_name = js::to_js_string(filter_context.get("name"));
                 output.push(lib::construct_error(
                     filter_context,
-                    input,
+                    input.clone(),
                     &rule,
                     &format!("The '{key}' option is not supported for '{filter_name}' filter, please see README for all available options"),
                     None,
@@ -74,14 +74,14 @@ pub async fn process(
             match run_option(&key, context, filter_context, input, &rule).await {
                 Ok(result) => output.push(lib::construct_output(
                     filter_context,
-                    input,
-                    &rule,
-                    &result,
+                    input.clone(),
+                    rule,
+                    result,
                     None,
                 )),
                 Err(error) => output.push(lib::construct_error(
                     filter_context,
-                    input,
+                    input.clone(),
                     &rule,
                     &error.message,
                     None,

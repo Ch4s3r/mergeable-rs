@@ -92,8 +92,7 @@ async fn express_not_found(request: Request) -> Response {
     let resource = request
         .uri()
         .path_and_query()
-        .map(axum::http::uri::PathAndQuery::as_str)
-        .unwrap_or("/");
+        .map_or("/", axum::http::uri::PathAndQuery::as_str);
     let body = format!(
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>Cannot {} {}</pre>\n</body>\n</html>\n",
         request.method(),
@@ -111,11 +110,10 @@ async fn unknown_webhook_route(request: Request) -> Response {
     let url = request
         .uri()
         .path_and_query()
-        .map(axum::http::uri::PathAndQuery::as_str)
-        .unwrap_or("/");
+        .map_or("/", axum::http::uri::PathAndQuery::as_str);
     json_error(
         StatusCode::NOT_FOUND,
-        format!("Unknown route: {} {url}", request.method()),
+        &format!("Unknown route: {} {url}", request.method()),
     )
 }
 
@@ -160,10 +158,10 @@ pub async fn rate_limit_core(
     app_client: &AppJwtClient,
     installation_id: &str,
 ) -> JsResult<Option<Value>> {
-    let data = app_client
+    let mut data = app_client
         .rate_limit_as_installation(installation_id)
         .await?;
-    Ok(js::read_path(&data, &["resources", "core"])?.cloned())
+    js::take_path(&mut data, &["resources", "core"])
 }
 
 async fn github_rate_limit(
@@ -182,7 +180,7 @@ async fn github_rate_limit(
     }
 }
 
-fn json_error(status: StatusCode, message: String) -> Response {
+fn json_error(status: StatusCode, message: &str) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "application/json")],
@@ -191,6 +189,7 @@ fn json_error(status: StatusCode, message: String) -> Response {
         .into_response()
 }
 
+#[must_use]
 pub fn signature_matches(secret: &str, body: &[u8], signature_header: &str) -> bool {
     let (hex_signature, uses_sha256) = match signature_header.strip_prefix("sha256=") {
         Some(rest) => (rest, true),
@@ -247,20 +246,19 @@ async fn receive_webhook(
     if !missing.is_empty() {
         return json_error(
             StatusCode::BAD_REQUEST,
-            format!("Required headers missing: {}", missing.join(", ")),
+            &format!("Required headers missing: {}", missing.join(", ")),
         );
     }
     let signature = header_text(&headers, "x-hub-signature-256");
     if !signature_matches(&state.webhook_secret, &body, signature) {
         return json_error(
             StatusCode::BAD_REQUEST,
-            "Error: [@octokit/webhooks] signature does not match event payload and secret"
-                .to_string(),
+            "Error: [@octokit/webhooks] signature does not match event payload and secret",
         );
     }
     let payload: Value = match serde_json::from_slice(&body) {
         Ok(payload) => payload,
-        Err(error) => return json_error(StatusCode::BAD_REQUEST, format!("SyntaxError: {error}")),
+        Err(error) => return json_error(StatusCode::BAD_REQUEST, &format!("SyntaxError: {error}")),
     };
     let event_name = header_text(&headers, "x-github-event").to_string();
     let delivery_id = header_text(&headers, "x-github-delivery").to_string();
@@ -278,11 +276,11 @@ async fn receive_webhook(
                 .status
                 .and_then(|code| StatusCode::from_u16(code).ok())
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-            json_error(status, error.to_string())
+            json_error(status, &error.to_string())
         }
         Ok(Err(join_error)) => json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Error: {join_error}"),
+            &format!("Error: {join_error}"),
         ),
     }
 }

@@ -140,7 +140,7 @@ impl MockGithub {
     fn locked_state(&self) -> MutexGuard<'_, MockState> {
         self.state
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn load_scenarios(&self, scenarios: Vec<Scenario>, recording: bool) {
@@ -158,7 +158,7 @@ impl MockGithub {
         *self
             .last_request_at
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub fn requests_served(&self) -> u64 {
@@ -170,7 +170,7 @@ impl MockGithub {
         *self
             .last_request_at
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Instant::now();
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Instant::now();
     }
 
     fn recorded_body(&self, body: &[u8]) -> Value {
@@ -186,7 +186,7 @@ impl MockGithub {
         &self,
         method: &str,
         path: &str,
-        query: Map<String, Value>,
+        query: &Map<String, Value>,
         accept: &str,
         body: &[u8],
     ) -> MockReply {
@@ -207,7 +207,7 @@ impl MockGithub {
         }
         if let Some(stub) = candidates
             .iter()
-            .find_map(|scenario| scenario.matching_stub(method, path, &query))
+            .find_map(|scenario| scenario.matching_stub(method, path, query))
         {
             return stub_reply(stub);
         }
@@ -246,7 +246,10 @@ fn stub_reply(stub: &Stub) -> MockReply {
 
 fn file_reply(file_path: &str, content: &str, accept: &str) -> MockReply {
     if accept.contains(".raw") {
-        let content_type = if file_path.ends_with(".json") {
+        let content_type = if std::path::Path::new(file_path)
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
             "application/json"
         } else {
             "text/plain; charset=utf-8"
@@ -359,7 +362,7 @@ async fn handle_request(
     github.respond(
         method.as_str(),
         &path,
-        parse_query(uri.query()),
+        &parse_query(uri.query()),
         accept,
         &body,
     )

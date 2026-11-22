@@ -41,6 +41,10 @@ pub fn parse(text: &str) -> Result<Option<Value>, YamlError> {
     Ok(Some(to_json(parsed)))
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "integral YAML floats below 9e15 become exact JavaScript integers"
+)]
 fn to_json(value: serde_yaml_ng::Value) -> Value {
     match value {
         serde_yaml_ng::Value::Null => Value::Null,

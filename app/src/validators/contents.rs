@@ -9,6 +9,7 @@ use crate::results;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::borrow::Cow;
 
 const DEFAULT_SUCCESS_MESSAGE: &str = "Your Contents passes validations";
 
@@ -32,12 +33,10 @@ fn matches_ignored_patterns(file_name: &Value, patterns_to_ignore: &Value) -> Js
     Ok(false)
 }
 
-pub fn changed_file_names(files: &[Value], patterns_to_ignore: &Value) -> JsResult<Vec<Value>> {
+pub fn changed_file_names(files: Vec<Value>, patterns_to_ignore: &Value) -> JsResult<Vec<Value>> {
     let mut changed = Vec::new();
-    for file in files {
-        let file_name = js::read(Some(file), "filename")?
-            .cloned()
-            .unwrap_or(Value::Null);
+    for mut file in files {
+        let file_name = js::take(Some(&mut file), "filename")?.unwrap_or(Value::Null);
         if matches_ignored_patterns(&file_name, patterns_to_ignore)? {
             continue;
         }
@@ -49,6 +48,7 @@ pub fn changed_file_names(files: &[Value], patterns_to_ignore: &Value) -> JsResu
     Ok(changed)
 }
 
+#[must_use]
 pub fn summarize(changed_files: Vec<Value>, failed_files: &[String], settings: &Value) -> Value {
     let is_mergeable = failed_files.is_empty();
     let description = if is_mergeable {
@@ -58,7 +58,7 @@ pub fn summarize(changed_files: Vec<Value>, failed_files: &[String], settings: &
     };
     let output = results::construct_output(
         &validator_context(),
-        &Value::Array(changed_files),
+        Value::Array(changed_files),
         settings,
         if is_mergeable { "pass" } else { "fail" },
         Value::String(description),
@@ -93,34 +93,33 @@ impl Validator for Contents {
         settings: &Value,
         _registry: &Registry,
     ) -> JsResult<Value> {
-        let mut patterns_to_ignore = json!([".github/mergeable.yml"]);
-        let mut parse_option = settings.clone();
+        let default_patterns_to_ignore = json!([".github/mergeable.yml"]);
+        let mut patterns_to_ignore = &default_patterns_to_ignore;
+        let mut parse_option = Cow::Borrowed(settings);
         if let Some(file_options) = settings.get("files").filter(|value| js::is_truthy(value)) {
             if let Some(ignore) =
                 js::read(Some(file_options), "ignore")?.filter(|value| js::is_truthy(value))
             {
-                patterns_to_ignore = ignore.clone();
+                patterns_to_ignore = ignore;
             }
-            if let Value::Object(map) = &mut parse_option {
+            if let Value::Object(map) = parse_option.to_mut() {
                 map.shift_remove("files");
             }
         }
 
-        let pull_number = js::read(event_aware::get_payload(context), "number")?
-            .cloned()
-            .unwrap_or(Value::Null);
+        let pull_number =
+            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
         )
         .await?;
-        let changed_files = changed_file_names(&files, &patterns_to_ignore)?;
+        let changed_files = changed_file_names(files, patterns_to_ignore)?;
 
         let mut failed_files = Vec::new();
         for file in &changed_files {
             let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
-                .cloned()
-                .unwrap_or(Value::Null);
+                .unwrap_or(&Value::Null);
             let params = context.repo_params(json!({"path": file, "ref": head_sha}))?;
             let file_name = js::to_js_string(Some(file));
             let Some(file_content) = api::get_content(context, params).await? else {
@@ -155,14 +154,14 @@ mod tests {
     #[test]
     fn mergeable_config_is_ignored_by_default() {
         let files = pull_request_files(&[".github/mergeable.yml", "package.json"]);
-        let changed = changed_file_names(&files, &json!([".github/mergeable.yml"])).unwrap();
+        let changed = changed_file_names(files, &json!([".github/mergeable.yml"])).unwrap();
         assert_eq!(changed, vec![json!("package.json")]);
     }
 
     #[test]
     fn ignore_option_replaces_the_default_patterns() {
         let files = pull_request_files(&["package.json", "src/a.js"]);
-        let changed = changed_file_names(&files, &json!(["package.json"])).unwrap();
+        let changed = changed_file_names(files, &json!(["package.json"])).unwrap();
         assert_eq!(changed, vec![json!("src/a.js")]);
     }
 
@@ -173,7 +172,7 @@ mod tests {
             json!({"filename": "new.js", "status": "added"}),
         ];
         assert_eq!(
-            changed_file_names(&files, &json!([])).unwrap(),
+            changed_file_names(files, &json!([])).unwrap(),
             vec![json!("new.js")]
         );
     }

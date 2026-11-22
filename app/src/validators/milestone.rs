@@ -38,13 +38,14 @@ impl Validator for Milestone {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let payload = event_aware::get_payload(context);
+        let empty_title = Value::String(String::new());
         let milestone_title = match js::read(payload, "milestone")? {
             Some(milestone) if js::is_truthy(milestone) => {
-                js::get(milestone, "title").cloned().unwrap_or(Value::Null)
+                js::get(milestone, "title").unwrap_or(&Value::Null)
             }
-            _ => Value::String(String::new()),
+            _ => &empty_title,
         };
-        let mut output = validators::process_options(settings, &milestone_title, None).await?;
+        let mut output = validators::process_options(settings, milestone_title, None).await?;
 
         if js::as_str(output.get("status")) == Some("fail") {
             let closed_issues =
@@ -57,10 +58,8 @@ impl Validator for Milestone {
                 )
                 .await?;
                 for issue_milestone in &milestones {
-                    let issue_title = js::get(issue_milestone, "title")
-                        .cloned()
-                        .unwrap_or(Value::Null);
-                    output = validators::process_options(settings, &issue_title, None).await?;
+                    let issue_title = js::get(issue_milestone, "title").unwrap_or(&Value::Null);
+                    output = validators::process_options(settings, issue_title, None).await?;
                 }
             }
         }

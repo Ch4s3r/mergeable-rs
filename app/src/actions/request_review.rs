@@ -6,18 +6,19 @@ use crate::github::api;
 use crate::js;
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::borrow::Borrow;
 
 pub const SUPPORTED_EVENTS: [&str; 1] = ["pull_request.*"];
 
-fn mapped_property(list: Option<&Value>, list_name: &str, property: &str) -> JsResult<Vec<Value>> {
+fn mapped_property<'list>(
+    list: Option<&'list Value>,
+    list_name: &str,
+    property: &str,
+) -> JsResult<Vec<&'list Value>> {
     match list {
         Some(Value::Array(items)) => items
             .iter()
-            .map(|item| {
-                Ok(js::read(Some(item), property)?
-                    .cloned()
-                    .unwrap_or(Value::Null))
-            })
+            .map(|item| Ok(js::read(Some(item), property)?.unwrap_or(&js::NULL)))
             .collect(),
         None => Err(JsError::reading_property_of_undefined("map")),
         Some(Value::Null) => Err(JsError::type_error(
@@ -29,19 +30,25 @@ fn mapped_property(list: Option<&Value>, list_name: &str, property: &str) -> JsR
     }
 }
 
-fn configured_list(settings: &Value, key: &str) -> Value {
+static EMPTY_LIST: Value = Value::Array(Vec::new());
+
+fn configured_list<'settings>(settings: &'settings Value, key: &str) -> &'settings Value {
     settings
         .get(key)
         .filter(|value| js::is_truthy(value))
-        .cloned()
-        .unwrap_or_else(|| json!([]))
+        .unwrap_or(&EMPTY_LIST)
 }
 
-fn contains(list: &[Value], candidate: &Value) -> bool {
-    list.iter().any(|item| js::strict_equals(item, candidate))
+fn contains<Item: Borrow<Value>>(list: &[Item], candidate: &Value) -> bool {
+    list.iter()
+        .any(|item| js::strict_equals(item.borrow(), candidate))
 }
 
-pub fn lodash_difference(values: &Value, excluded: &[Value]) -> Vec<Value> {
+#[must_use]
+pub fn lodash_difference<Excluded: Borrow<Value>>(
+    values: &Value,
+    excluded: &[Excluded],
+) -> Vec<Value> {
     match values {
         Value::Array(items) => items
             .iter()
@@ -52,6 +59,7 @@ pub fn lodash_difference(values: &Value, excluded: &[Value]) -> Vec<Value> {
     }
 }
 
+#[must_use]
 pub fn lodash_intersection(values: &[Value], others: &[Value]) -> Vec<Value> {
     let mut common: Vec<Value> = Vec::new();
     for value in values {
@@ -116,15 +124,15 @@ impl Action for RequestReview {
             "login",
         )?;
         let reviewers = configured_list(settings, "reviewers");
-        let author_login = match &reviewers {
+        let author_login = match reviewers {
             Value::Array(items) if !items.is_empty() => {
                 js::read(js::read(payload, "user")?, "login")?
             }
             _ => None,
         };
-        let reviewers = reviewers_without_author(&reviewers, author_login)?;
+        let reviewers = reviewers_without_author(reviewers, author_login)?;
         let reviewers_to_request = lodash_difference(&reviewers, &requested_reviewers);
-        let pull_number = js::read(payload, "number")?.cloned().unwrap_or(Value::Null);
+        let pull_number = js::read(payload, "number")?.unwrap_or(&Value::Null);
         let collaborators =
             api::list_collaborators(context, context.repo_params(json!({}))?).await?;
         let collaborators_to_request = lodash_intersection(&reviewers_to_request, &collaborators);
@@ -134,15 +142,15 @@ impl Action for RequestReview {
             "slug",
         )?;
         let teams_to_request =
-            lodash_difference(&configured_list(settings, "teams"), &requested_teams);
+            lodash_difference(configured_list(settings, "teams"), &requested_teams);
         if collaborators_to_request.is_empty() && teams_to_request.is_empty() {
             return Ok(());
         }
         api::request_reviewers(
             context,
-            &pull_number,
-            Some(&Value::Array(reviewers_to_request)),
-            Some(&Value::Array(teams_to_request)),
+            pull_number,
+            Some(Value::Array(reviewers_to_request)),
+            Some(Value::Array(teams_to_request)),
         )
         .await?;
         Ok(())
@@ -163,12 +171,18 @@ mod tests {
 
     #[test]
     fn already_requested_reviewers_are_not_requested_again() {
-        assert!(lodash_difference(&json!(["shine2lay"]), &[json!("shine2lay")]).is_empty());
+        assert_eq!(
+            lodash_difference(&json!(["shine2lay"]), &[json!("shine2lay")]),
+            [] as [serde_json::Value; 0]
+        );
     }
 
     #[test]
     fn non_collaborators_are_not_counted_as_requestable() {
-        assert!(lodash_intersection(&[json!("shine2lay")], &[]).is_empty());
+        assert_eq!(
+            lodash_intersection(&[json!("shine2lay")], &[]),
+            [] as [serde_json::Value; 0]
+        );
         assert_eq!(
             lodash_intersection(&[json!("a"), json!("a"), json!("b")], &[json!("a")]),
             vec![json!("a")]
@@ -177,7 +191,10 @@ mod tests {
 
     #[test]
     fn already_requested_teams_are_not_requested_again() {
-        assert!(lodash_difference(&json!(["developers"]), &[json!("developers")]).is_empty());
+        assert_eq!(
+            lodash_difference(&json!(["developers"]), &[json!("developers")]),
+            [] as [serde_json::Value; 0]
+        );
         assert_eq!(
             lodash_difference(&json!(["developers"]), &[json!("justice-league")]),
             vec![json!("developers")]
@@ -186,6 +203,9 @@ mod tests {
 
     #[test]
     fn non_array_teams_setting_requests_no_team() {
-        assert!(lodash_difference(&json!("developers"), &[]).is_empty());
+        assert_eq!(
+            lodash_difference(&json!("developers"), &[] as &[Value]),
+            [] as [serde_json::Value; 0]
+        );
     }
 }

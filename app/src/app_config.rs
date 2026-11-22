@@ -1,5 +1,10 @@
+use base64::Engine as _;
 use std::time::Duration;
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "flat set of independent on/off switches read from environment variables"
+)]
 pub struct AppConfig {
     pub app_id: String,
     pub private_key_pem: String,
@@ -29,7 +34,6 @@ fn read_private_key() -> Result<String, String> {
         if key.contains("-----BEGIN") {
             return Ok(key.replace("\\n", "\n"));
         }
-        use base64::Engine as _;
         return base64::engine::general_purpose::STANDARD
             .decode(key.trim())
             .ok()

@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use futures::future::join_all;
 use serde_json::{Map, Value, json};
 use std::borrow::Cow;
+use std::sync::Arc;
 
 pub const SUPPORTED_EVENTS: [&str; 5] = [
     "pull_request.*",
@@ -48,12 +49,16 @@ pub fn merge_parameters(
     Ok(Value::Object(parameters))
 }
 
-async fn merge_unmerged_pull_request(
-    context: Context,
-    pull_number: Value,
+struct MergeSettings {
     merge_method: Value,
     commit_title: Option<Value>,
     commit_message: Option<Value>,
+}
+
+async fn merge_unmerged_pull_request(
+    context: Context,
+    pull_number: Value,
+    merge_settings: Arc<MergeSettings>,
 ) -> JsResult<()> {
     let pull_request = api::get_pull_request(&context, &pull_number).await?.data;
     let is_blocked =
@@ -64,9 +69,9 @@ async fn merge_unmerged_pull_request(
     }
     let parameters = merge_parameters(
         &pull_number,
-        &merge_method,
-        commit_title.as_ref(),
-        commit_message.as_ref(),
+        &merge_settings.merge_method,
+        merge_settings.commit_title.as_ref(),
+        merge_settings.commit_message.as_ref(),
         &pull_request,
     )?;
     let parameters = context.repo_params(parameters)?;
@@ -178,6 +183,11 @@ impl Action for Merge {
             return Ok(());
         }
         let merge_method = validated_merge_method(settings)?;
+        let merge_settings = Arc::new(MergeSettings {
+            merge_method,
+            commit_title: settings.get("commit_title").cloned(),
+            commit_message: settings.get("commit_message").cloned(),
+        });
         let pull_numbers = related_pull_requests(context)
             .await?
             .iter()
@@ -202,9 +212,7 @@ impl Action for Merge {
                     merge_unmerged_pull_request(
                         context.clone(),
                         pull_number,
-                        merge_method.clone(),
-                        settings.get("commit_title").cloned(),
-                        settings.get("commit_message").cloned(),
+                        Arc::clone(&merge_settings),
                     ),
                 ),
                 Err(error) => log_detached_failure(context, &error),

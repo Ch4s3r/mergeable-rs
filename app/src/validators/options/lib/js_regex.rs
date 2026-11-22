@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 const COMPILED_PATTERN_CACHE_CAPACITY: u64 = 4096;
@@ -14,6 +15,10 @@ const LINE_TERMINATOR_CLASS_ITEMS: &str = "\\n\\r\\x{2028}\\x{2029}";
 const NEVER_MATCHING_CLASS: &str = "[^\\x00-\\x{10FFFF}]";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one field per JavaScript RegExp flag (g, i, m, s, u, y)"
+)]
 pub struct JsRegexFlags {
     pub global: bool,
     pub ignore_case: bool,
@@ -24,6 +29,7 @@ pub struct JsRegexFlags {
 }
 
 impl JsRegexFlags {
+    #[must_use]
     pub fn parse(flags: &str) -> Option<Self> {
         let mut parsed = JsRegexFlags::default();
         let mut seen = String::new();
@@ -220,8 +226,7 @@ impl Translator<'_> {
                     if self.flags.dot_all {
                         self.output.push_str("(?s:.)");
                     } else {
-                        self.output
-                            .push_str(&format!("[^{LINE_TERMINATOR_CLASS_ITEMS}]"));
+                        let _ = write!(self.output, "[^{LINE_TERMINATOR_CLASS_ITEMS}]");
                     }
                 }
                 '^' => {
@@ -314,16 +319,18 @@ impl Translator<'_> {
         match self.peek(1) {
             Some('b') => {
                 self.position += 2;
-                self.output.push_str(&format!(
+                let _ = write!(
+                    self.output,
                     "(?:(?<=[{WORD_CLASS_ITEMS}])(?![{WORD_CLASS_ITEMS}])|(?<![{WORD_CLASS_ITEMS}])(?=[{WORD_CLASS_ITEMS}]))"
-                ));
+                );
                 Ok(())
             }
             Some('B') => {
                 self.position += 2;
-                self.output.push_str(&format!(
+                let _ = write!(
+                    self.output,
                     "(?:(?<=[{WORD_CLASS_ITEMS}])(?=[{WORD_CLASS_ITEMS}])|(?<![{WORD_CLASS_ITEMS}])(?![{WORD_CLASS_ITEMS}]))"
-                ));
+                );
                 Ok(())
             }
             Some(digit) if digit.is_ascii_digit() && digit != '0' => {
@@ -340,7 +347,7 @@ impl Translator<'_> {
                 let group_number: usize = digits.parse().unwrap_or(usize::MAX);
                 if group_number <= self.capture_groups {
                     self.position += 1 + length;
-                    self.output.push_str(&format!("\\{group_number}"));
+                    let _ = write!(self.output, "\\{group_number}");
                     return Ok(());
                 }
                 if self.flags.unicode {
@@ -361,7 +368,7 @@ impl Translator<'_> {
                             .iter()
                             .collect();
                         self.position += end + 1;
-                        self.output.push_str(&format!("\\k<{name}>"));
+                        let _ = write!(self.output, "\\k<{name}>");
                         Ok(())
                     }
                     _ => Err(JsRegexSyntaxError),
@@ -476,7 +483,7 @@ impl Translator<'_> {
                 if self.peek(0) != Some('{') {
                     return Err(JsRegexSyntaxError);
                 }
-                let property: String = self.pattern[self.position..self.position + close + 1]
+                let property: String = self.pattern[self.position..=(self.position + close)]
                     .iter()
                     .collect();
                 self.position += close + 1;

@@ -32,8 +32,8 @@ async fn repository_topics(context: &Context) -> JsResult<Value> {
         return Ok(names);
     }
     let params = json!({
-        "owner": js::read_path(&context.payload, &["repository", "owner", "login"])?.cloned().unwrap_or(Value::Null),
-        "repo": js::read_path(&context.payload, &["repository", "name"])?.cloned().unwrap_or(Value::Null),
+        "owner": js::read_path(&context.payload, &["repository", "owner", "login"])?.unwrap_or(&Value::Null),
+        "repo": js::read_path(&context.payload, &["repository", "name"])?.unwrap_or(&Value::Null),
     });
     let topics = api::get_all_topics(context, params).await?;
     if use_config_cache {

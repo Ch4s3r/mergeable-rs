@@ -208,7 +208,10 @@ mod tests {
             owners("*.js @bob", "first/second/third/dir/test.js"),
             vec!["@bob"]
         );
-        assert!(owners("*.go @bob", "another/file/path/test.js").is_empty());
+        assert_eq!(
+            owners("*.go @bob", "another/file/path/test.js"),
+            [] as [std::string::String; 0]
+        );
         assert_eq!(
             owners("*.go @bob", "another/file/path/test.go"),
             vec!["@bob"]
@@ -218,7 +221,10 @@ mod tests {
     #[test]
     fn rooted_directory_matches_only_from_the_root() {
         assert_eq!(owners(" /docs/ @bob", "/docs/test.js"), vec!["@bob"]);
-        assert!(owners(" /docs/ @bob", "another/file/docs/test.js").is_empty());
+        assert_eq!(
+            owners(" /docs/ @bob", "another/file/docs/test.js"),
+            [] as [std::string::String; 0]
+        );
         assert_eq!(
             owners("/docs/ @bob", "/docs/long/path/to/test.js"),
             vec!["@bob"]
@@ -232,7 +238,10 @@ mod tests {
     #[test]
     fn directory_star_matches_only_direct_files() {
         assert_eq!(owners("/docs/* @bob", "/docs/test.js"), vec!["@bob"]);
-        assert!(owners("/docs/* @bob", "/docs/not/matching/test.js").is_empty());
+        assert_eq!(
+            owners("/docs/* @bob", "/docs/not/matching/test.js"),
+            [] as [std::string::String; 0]
+        );
     }
 
     #[test]

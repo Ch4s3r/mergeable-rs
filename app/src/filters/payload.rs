@@ -53,7 +53,7 @@ fn recurse_through_fields<'walk>(
             match js::read(Some(payload), &key)? {
                 None => output.push(construct_error(
                     &json!({"name": "payload"}),
-                    &json!(""),
+                    json!(""),
                     field,
                     &format!("{nested_path} does NOT exist"),
                     None,
@@ -115,7 +115,7 @@ impl Filter for Payload {
             settings,
         )
         .await?;
-        let filter_context = json!({"name": settings.get("do").cloned().unwrap_or(Value::Null)});
+        let filter_context = json!({"name": settings.get("do").unwrap_or(&Value::Null)});
         Ok(consolidate_results(output, &filter_context))
     }
 }

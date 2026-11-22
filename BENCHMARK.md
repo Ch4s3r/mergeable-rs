@@ -68,3 +68,18 @@ settings borrowed instead of cloned in flex/registry/configuration, GitHub reque
 the token header cached, the template lexer made linear, and logging switched to plain `tracing` macros with fields.
 Replay: 379/381 identical + 2 known diffs (unchanged); one case hit a harness connection reset under `--jobs 12`
 and passed 3/3 when rerun.
+
+## Rust-to-Rust: clippy pedantic and borrowing round (2026-11-22)
+
+clippy::pedantic is enabled workspace-wide (only missing_errors_doc and missing_panics_doc allowed; deliberate
+JavaScript-number casts carry scoped `#[expect]`s). js/lodash helpers return borrowed slices/iterators instead of
+copied arrays, Context.global_settings is shared via Arc, GitHub responses are moved instead of cloned, and payload
+fields are borrowed: non-test `.clone()`/`.cloned()` in app/src went from 302 to 202.
+
+| Build | Read µs CPU/webhook | Write µs CPU/webhook | Binary |
+|---|---|---|---|
+| previous round | 285 | 538 | 12.4 MB |
+| this round | 296 (noise, runs 271-300) | 516 (-4%) | 12.3 MB |
+
+The benchmark payloads are small, so the effect of not copying large payloads (big PRs, file lists, reviews) is
+mostly not visible here. Replay: 379/381 identical + 2 known diffs (unchanged).

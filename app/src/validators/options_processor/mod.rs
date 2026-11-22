@@ -30,6 +30,7 @@ pub fn map_logins(list: Option<&Value>, list_expression: &str) -> JsResult<Vec<V
     }
 }
 
+#[must_use]
 pub fn unique_values(values: Vec<Value>) -> Vec<Value> {
     let mut unique: Vec<Value> = Vec::new();
     for value in values {

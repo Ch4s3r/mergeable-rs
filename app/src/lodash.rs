@@ -1,8 +1,9 @@
 use crate::js;
 use serde_json::Value;
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::cmp::Ordering;
 
+#[must_use]
 pub fn same_value_zero(left: Option<&Value>, right: Option<&Value>) -> bool {
     match (left, right) {
         (None, None) => true,
@@ -11,47 +12,71 @@ pub fn same_value_zero(left: Option<&Value>, right: Option<&Value>) -> bool {
     }
 }
 
-fn contains(items: &[Value], needle: &Value) -> bool {
-    items.iter().any(|item| js::strict_equals(item, needle))
+#[must_use]
+pub fn contains<Item: Borrow<Value>>(items: &[Item], needle: &Value) -> bool {
+    items
+        .iter()
+        .any(|item| js::strict_equals(item.borrow(), needle))
 }
 
-fn unique_clones<'item>(items: impl IntoIterator<Item = &'item Value>) -> Vec<Value> {
-    let mut unique: Vec<Value> = Vec::new();
+#[must_use]
+pub fn uniq<'item>(items: impl IntoIterator<Item = &'item Value>) -> Vec<&'item Value> {
+    let mut unique: Vec<&Value> = Vec::new();
     for item in items {
         if !contains(&unique, item) {
-            unique.push(item.clone());
+            unique.push(item);
         }
     }
     unique
 }
 
-pub fn uniq(items: &[Value]) -> Vec<Value> {
-    unique_clones(items)
+#[must_use]
+pub fn uniq_owned(items: impl IntoIterator<Item = Value>) -> Vec<Value> {
+    let mut unique: Vec<Value> = Vec::new();
+    for item in items {
+        if !contains(&unique, &item) {
+            unique.push(item);
+        }
+    }
+    unique
 }
 
-pub fn union(first: &[Value], second: &[Value]) -> Vec<Value> {
-    unique_clones(first.iter().chain(second))
+#[must_use]
+pub fn union<'item>(
+    first: impl IntoIterator<Item = &'item Value>,
+    second: impl IntoIterator<Item = &'item Value>,
+) -> Vec<&'item Value> {
+    uniq(first.into_iter().chain(second))
 }
 
-pub fn intersection(first: &[Value], second: &[Value]) -> Vec<Value> {
-    unique_clones(first.iter().filter(|item| contains(second, item)))
+#[must_use]
+pub fn intersection<'item, Other: Borrow<Value>>(
+    first: &'item [Value],
+    second: &[Other],
+) -> Vec<&'item Value> {
+    uniq(first.iter().filter(|item| contains(second, item)))
 }
 
-pub fn difference(items: &[Value], excluded: &[Value]) -> Vec<Value> {
+#[must_use]
+pub fn difference<'item, Excluded: Borrow<Value>>(
+    items: &'item [Value],
+    excluded: &[Excluded],
+) -> Vec<&'item Value> {
     items
         .iter()
         .filter(|item| !contains(excluded, item))
-        .cloned()
         .collect()
 }
 
-pub fn array_like(value: Option<&Value>) -> Vec<Value> {
+#[must_use]
+pub fn array_like(value: Option<&Value>) -> &[Value] {
     match value {
-        Some(Value::Array(items)) => items.clone(),
-        _ => Vec::new(),
+        Some(Value::Array(items)) => items,
+        _ => &[],
     }
 }
 
+#[must_use]
 pub fn uniq_by_path(items: Vec<Value>, path: &[&str]) -> Vec<Value> {
     let mut unique: Vec<Value> = Vec::new();
     for item in items {
@@ -66,6 +91,7 @@ pub fn uniq_by_path(items: Vec<Value>, path: &[&str]) -> Vec<Value> {
     unique
 }
 
+#[must_use]
 pub fn order_by_path(items: Vec<Value>, path: &[&str], descending: bool) -> Vec<Value> {
     let mut indexed: Vec<(usize, Value)> = items.into_iter().enumerate().collect();
     indexed.sort_by(|(left_index, left), (right_index, right)| {
@@ -80,6 +106,7 @@ pub fn order_by_path(items: Vec<Value>, path: &[&str], descending: bool) -> Vec<
     indexed.into_iter().map(|(_, item)| item).collect()
 }
 
+#[must_use]
 pub fn compare_ascending(value: Option<&Value>, other: Option<&Value>) -> Ordering {
     if same_value_zero(value, other) {
         return Ordering::Equal;
@@ -112,10 +139,12 @@ fn to_primitive(value: Option<&Value>) -> Option<Cow<'_, Value>> {
     }
 }
 
+#[must_use]
 pub fn greater_than(value: Option<&Value>, other: Option<&Value>) -> bool {
     less_than(other, value)
 }
 
+#[must_use]
 pub fn less_than(value: Option<&Value>, other: Option<&Value>) -> bool {
     let left = to_primitive(value);
     let right = to_primitive(other);
@@ -127,6 +156,7 @@ pub fn less_than(value: Option<&Value>, other: Option<&Value>) -> bool {
     to_number(left.as_deref()) < to_number(right.as_deref())
 }
 
+#[must_use]
 pub fn to_number(value: Option<&Value>) -> f64 {
     match value {
         None | Some(Value::Object(_)) => f64::NAN,
@@ -138,10 +168,15 @@ pub fn to_number(value: Option<&Value>) -> f64 {
     }
 }
 
+#[must_use]
 pub fn js_trim(text: &str) -> &str {
     text.trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "Number() of a radix literal rounds to the nearest f64 exactly like an integer-to-float cast"
+)]
 fn string_to_number(text: &str) -> f64 {
     let trimmed = js_trim(text);
     if trimmed.is_empty() {
@@ -209,9 +244,13 @@ mod tests {
         let second = vec![json!("c"), json!("b")];
         assert_eq!(
             union(&first, &second),
-            vec![json!("a"), json!("b"), json!("c")]
+            vec![&json!("a"), &json!("b"), &json!("c")]
         );
-        assert_eq!(intersection(&first, &second), vec![json!("b")]);
-        assert_eq!(difference(&first, &second), vec![json!("a"), json!("a")]);
+        assert_eq!(intersection(&first, &second), vec![&json!("b")]);
+        assert_eq!(difference(&first, &second), vec![&json!("a"), &json!("a")]);
+        assert_eq!(
+            uniq_owned(vec![json!(1), json!(1.0), json!("1"), json!(1)]),
+            vec![json!(1), json!("1")]
+        );
     }
 }

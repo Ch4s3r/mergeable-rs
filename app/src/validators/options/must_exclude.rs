@@ -70,7 +70,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
     let regex_list = lib::concat_into_list(regex);
     let all = js::truthy(js::get(filter, "all"));
     let all_text = if all { "all" } else { "" };
-    let joined_patterns = lib::join_list(&regex_list, ", ");
+    let joined_patterns = lib::join_list(regex_list, ", ");
     let validator_name = lib::validator_name(validator_context);
     let success_description =
         format!("{validator_name} {all_text}must exclude '{joined_patterns}'");
@@ -81,7 +81,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
     let flags = lib::regex_flags(filter);
 
     let mut is_mergeable = true;
-    for pattern in &regex_list {
+    for pattern in regex_list {
         let compiled = lib::compile_user_regex(pattern, &flags)?;
         if !excludes_pattern(&compiled, input, key, all)? {
             is_mergeable = false;
@@ -100,10 +100,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn status_for(rule: Value, input: Value) -> &'static str {
+    fn status_for(rule: &Value, input: &Value) -> &'static str {
         process(
             &json!({"name": "label"}),
-            &input,
+            input,
             &json!({"must_exclude": rule}),
         )
         .unwrap()
@@ -113,11 +113,11 @@ mod tests {
     #[test]
     fn passes_when_no_label_matches_and_fails_otherwise() {
         assert_eq!(
-            status_for(json!({"regex": "test"}), json!(["A", "B", "C"])),
+            status_for(&json!({"regex": "test"}), &json!(["A", "B", "C"])),
             "pass"
         );
         assert_eq!(
-            status_for(json!({"regex": "test"}), json!(["A", "B", "the test"])),
+            status_for(&json!({"regex": "test"}), &json!(["A", "B", "the test"])),
             "fail"
         );
     }
@@ -137,15 +137,15 @@ mod tests {
     fn all_sub_option_checks_every_label() {
         assert_eq!(
             status_for(
-                json!({"regex": "test", "all": true}),
-                json!(["A", "B", "the test"])
+                &json!({"regex": "test", "all": true}),
+                &json!(["A", "B", "the test"])
             ),
             "fail"
         );
         assert_eq!(
             status_for(
-                json!({"regex": "test", "all": true}),
-                json!(["A", "B", "the"])
+                &json!({"regex": "test", "all": true}),
+                &json!(["A", "B", "the"])
             ),
             "pass"
         );
@@ -155,8 +155,8 @@ mod tests {
     fn regex_flag_none_makes_matching_case_sensitive() {
         assert_eq!(
             status_for(
-                json!({"regex": "test", "regex_flag": "none"}),
-                json!(["A", "B", "Test"])
+                &json!({"regex": "test", "regex_flag": "none"}),
+                &json!(["A", "B", "Test"])
             ),
             "pass"
         );
@@ -165,13 +165,13 @@ mod tests {
     #[test]
     fn every_regex_of_a_list_must_be_absent() {
         assert_eq!(
-            status_for(json!({"regex": ["test", "D"]}), json!(["A", "B", "C"])),
+            status_for(&json!({"regex": ["test", "D"]}), &json!(["A", "B", "C"])),
             "pass"
         );
         assert_eq!(
             status_for(
-                json!({"regex": ["^the", "F", "G"]}),
-                json!(["A", "B", "the test"])
+                &json!({"regex": ["^the", "F", "G"]}),
+                &json!(["A", "B", "the test"])
             ),
             "fail"
         );
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn title_with_odd_but_valid_regex_passes() {
         assert_eq!(
-            status_for(json!({"regex": "@#$@#$@#$"}), json!("WIP Title")),
+            status_for(&json!({"regex": "@#$@#$@#$"}), &json!("WIP Title")),
             "pass"
         );
     }

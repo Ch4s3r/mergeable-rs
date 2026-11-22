@@ -18,6 +18,7 @@ fn non_empty_environment(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
+#[must_use]
 pub fn ticket_url(ticket_id: &str) -> Option<String> {
     let protocol = environment_or("JIRA_PROTOCOL", "https");
     let host = non_empty_environment("JIRA_HOST")?;

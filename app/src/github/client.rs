@@ -29,6 +29,7 @@ const STATUSES_NEVER_RETRIED: [u16; 6] = [400, 401, 403, 404, 422, 451];
 const RETRY_ATTEMPTS: u32 = 3;
 const INSTALLATION_TOKEN_REFRESH_MARGIN: Duration = Duration::from_mins(5);
 
+#[must_use]
 pub fn encode_uri_component(text: &str) -> String {
     utf8_percent_encode(text, URI_COMPONENT_SAFE).to_string()
 }
@@ -44,6 +45,7 @@ fn js_text(value: &Value) -> Cow<'_, str> {
     }
 }
 
+#[must_use]
 pub fn header_text<'headers>(headers: &'headers HeaderMap, name: &str) -> Option<&'headers str> {
     headers
         .get_all(name)
@@ -60,6 +62,7 @@ pub struct GithubResponse {
 }
 
 impl GithubResponse {
+    #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
         header_text(&self.headers, name)
     }
@@ -469,6 +472,7 @@ impl InstallationClient {
         })
     }
 
+    #[must_use]
     pub fn base_path(&self) -> &str {
         &self.app.base_path
     }

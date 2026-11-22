@@ -1,8 +1,8 @@
 use serde_json::{Map, Value};
 
-fn output_details(input: &Value, settings: &Value, error: Option<Value>) -> Value {
+fn output_details(input: Value, settings: &Value, error: Option<Value>) -> Value {
     let mut details = Map::new();
-    details.insert("input".to_string(), input.clone());
+    details.insert("input".to_string(), input);
     details.insert("settings".to_string(), settings.clone());
     if let Some(error_value) = error {
         details.insert("error".to_string(), error_value);
@@ -10,16 +10,36 @@ fn output_details(input: &Value, settings: &Value, error: Option<Value>) -> Valu
     Value::Object(details)
 }
 
+#[must_use]
 pub fn construct_output(
     validator_context: &Value,
-    input: &Value,
+    input: Value,
+    settings: &Value,
+    status: &str,
+    description: Value,
+    error: Option<Value>,
+) -> Value {
+    construct_output_with_owned_validator(
+        validator_context.clone(),
+        input,
+        settings,
+        status,
+        description,
+        error,
+    )
+}
+
+#[must_use]
+pub fn construct_output_with_owned_validator(
+    validator_context: Value,
+    input: Value,
     settings: &Value,
     status: &str,
     description: Value,
     error: Option<Value>,
 ) -> Value {
     let mut output = Map::new();
-    output.insert("validator".to_string(), validator_context.clone());
+    output.insert("validator".to_string(), validator_context);
     output.insert("status".to_string(), Value::String(status.to_string()));
     output.insert("description".to_string(), description);
     output.insert(
@@ -29,9 +49,10 @@ pub fn construct_output(
     Value::Object(output)
 }
 
+#[must_use]
 pub fn construct_error_output(
     validator_context: &Value,
-    input: &Value,
+    input: Value,
     settings: &Value,
     description: &str,
     error: Option<Value>,
@@ -76,17 +97,20 @@ fn consolidate(outputs: Vec<Value>, context: &Value, outputs_key: &str) -> Value
     Value::Object(result)
 }
 
+#[must_use]
 pub fn consolidate_result(outputs: Vec<Value>, validator_context: &Value) -> Value {
     consolidate(outputs, validator_context, "validations")
 }
 
+#[must_use]
 pub fn consolidate_filter_result(outputs: Vec<Value>, filter_context: &Value) -> Value {
     consolidate(outputs, filter_context, "filters")
 }
 
+#[must_use]
 pub fn construct_filter_output(
     filter_context: &Value,
-    input: &Value,
+    input: Value,
     settings: &Value,
     status: &str,
     description: Value,
@@ -103,9 +127,10 @@ pub fn construct_filter_output(
     Value::Object(output)
 }
 
+#[must_use]
 pub fn construct_filter_error(
     filter_context: &Value,
-    input: &Value,
+    input: Value,
     settings: &Value,
     description: &str,
     error: Option<Value>,
@@ -120,6 +145,7 @@ pub fn construct_filter_error(
     )
 }
 
+#[must_use]
 pub fn extract_validation_stats(results: Vec<Value>) -> Value {
     let (mut pass_count, mut fail_count, mut error_count) = (0_usize, 0_usize, 0_usize);
     for result in &results {

@@ -45,10 +45,12 @@ impl From<JsError> for FetchError {
 }
 
 impl Configuration {
+    #[must_use]
     pub fn has_errors(&self) -> bool {
         !self.errors.is_empty()
     }
 
+    #[must_use]
     pub fn has_error(&self, code: u16) -> bool {
         self.errors.iter().any(|(existing, _)| *existing == code)
     }
@@ -383,12 +385,12 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
                 let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
                     .cloned()
                     .unwrap_or(Value::Null);
-                let content = api::get_content(
+                let changed_config_content = api::get_content(
                     context,
                     json!({"owner": owner, "repo": repo, "path": FILE_NAME, "ref": head_sha}),
                 )
                 .await?;
-                return Ok(parse_yaml(content.as_deref())?.unwrap_or(Value::Null));
+                return Ok(parse_yaml(changed_config_content.as_deref())?.unwrap_or(Value::Null));
             }
         }
     }
@@ -408,14 +410,14 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     }
     let mut org_config = None;
     if context.global_setting("use_org_as_default_config")? == Some(&Value::Bool(true)) {
-        let content = api::get_content(
+        let org_config_content = api::get_content(
             context,
             json!({"owner": owner, "repo": ".github", "path": format!(".github/{config_path}")}),
         )
         .await?;
-        org_config = parse_yaml(content.as_deref())?;
+        org_config = parse_yaml(org_config_content.as_deref())?;
     }
-    let config = probot_config::load(context, &config_path, org_config.as_ref()).await?;
+    let config = probot_config::load(context, &config_path, org_config).await?;
     let config = match config {
         Some(found) if !found.is_null() => found,
         _ => return Err(FetchError::NotFound),

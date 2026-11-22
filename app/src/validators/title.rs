@@ -41,9 +41,7 @@ impl Validator for Title {
         settings: &Value,
         _registry: &Registry,
     ) -> JsResult<Value> {
-        let title = js::read(event_aware::get_payload(context), "title")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        validators::process_options(settings, &title, None).await
+        let title = js::read(event_aware::get_payload(context), "title")?.unwrap_or(&Value::Null);
+        validators::process_options(settings, title, None).await
     }
 }

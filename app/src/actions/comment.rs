@@ -15,6 +15,7 @@ pub const SUPPORTED_EVENTS: [&str; 4] = [
     "schedule.repository",
 ];
 
+#[must_use]
 pub fn is_supported(event_name: &str) -> bool {
     event_aware::is_event_supported(&SUPPORTED_EVENTS, event_name)
 }
@@ -45,10 +46,8 @@ async fn fetch_comments_by_mergeable(
 
 async fn delete_old_comments(context: &Context, old_comments: &[Value]) -> JsResult<()> {
     for comment in old_comments {
-        let comment_id = js::read(Some(comment), "id")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        api::delete_comment(context, &comment_id).await?;
+        let comment_id = js::read(Some(comment), "id")?.unwrap_or(&Value::Null);
+        api::delete_comment(context, comment_id).await?;
     }
     Ok(())
 }
@@ -57,10 +56,8 @@ pub async fn remove_error_comments(context: &Context) -> JsResult<()> {
     let Some(payload) = event_aware::get_payload(context) else {
         return Ok(());
     };
-    let issue_number = js::read(Some(payload), "number")?
-        .cloned()
-        .unwrap_or(Value::Null);
-    let old_comments = fetch_comments_by_mergeable(context, &issue_number).await?;
+    let issue_number = js::read(Some(payload), "number")?.unwrap_or(&Value::Null);
+    let old_comments = fetch_comments_by_mergeable(context, issue_number).await?;
     let mut error_comments = Vec::new();
     for comment in old_comments {
         if js::read_string(&comment, &["body"])?
@@ -74,11 +71,10 @@ pub async fn remove_error_comments(context: &Context) -> JsResult<()> {
 }
 
 pub async fn handle_error(context: &Context, body: &str) -> JsResult<()> {
-    let issue_number = js::read(event_aware::get_payload(context), "number")?
-        .cloned()
-        .unwrap_or(Value::Null);
+    let issue_number =
+        js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
     remove_error_comments(context).await?;
-    api::create_comment(context, &issue_number, &Value::String(body.to_string()))
+    api::create_comment(context, issue_number, Value::String(body.to_string()))
         .await
         .map(|_| ())
 }
@@ -143,7 +139,7 @@ impl Action for Comment {
             let task_context = context.clone();
             spawn_detached(context, "action/comment", async move {
                 delete_old_comments(&task_context, &old_comments?).await?;
-                api::create_comment(&task_context, &issue_number, &Value::String(body))
+                api::create_comment(&task_context, &issue_number, Value::String(body))
                     .await
                     .map(|_| ())
             });

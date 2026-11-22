@@ -29,7 +29,7 @@ async fn validate_pull_requests(
             None,
             Some(settings),
             "fail",
-            Value::String("No pull requests associated with event".to_string()),
+            &Value::String("No pull requests associated with event".to_string()),
             None,
         ));
     }
@@ -122,11 +122,11 @@ impl Validator for BaseRef {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let payload = event_aware::get_payload(context);
-        let media_type = settings.get("mediaType").cloned();
         let mut validation_settings = settings.clone();
-        if let Value::Object(fields) = &mut validation_settings {
-            fields.shift_remove("mediaType");
-        }
+        let media_type = match &mut validation_settings {
+            Value::Object(fields) => fields.shift_remove("mediaType"),
+            _ => None,
+        };
         if context.event_name == "check_suite" {
             let pull_requests =
                 array_entries(js::read(payload, "pull_requests")?, "payload.pull_requests")?;
@@ -135,10 +135,8 @@ impl Validator for BaseRef {
         if context.event_name == "status" {
             return validate_status(context, &validation_settings, media_type).await;
         }
-        let base_ref = js::read(js::read(payload, "base")?, "ref")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        validators::process_options(&validation_settings, &base_ref, None).await
+        let base_ref = js::read(js::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
+        validators::process_options(&validation_settings, base_ref, None).await
     }
 }
 

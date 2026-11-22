@@ -44,10 +44,9 @@ impl Validator for Label {
         settings: &Value,
         _registry: &Registry,
     ) -> JsResult<Value> {
-        let issue_number = js::read(event_aware::get_payload(context), "number")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        let labels = api::list_labels_on_issue(context, &issue_number).await?;
+        let issue_number =
+            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+        let labels = api::list_labels_on_issue(context, issue_number).await?;
         validators::process_options(settings, &Value::Array(labels), None).await
     }
 }

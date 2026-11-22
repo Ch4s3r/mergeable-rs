@@ -6,6 +6,7 @@ pub enum ConfigCache {
     Redis(crate::redis_cache::RedisCache),
 }
 
+#[must_use]
 pub fn env_number(name: &str) -> Option<u64> {
     std::env::var(name)
         .ok()
@@ -13,6 +14,7 @@ pub fn env_number(name: &str) -> Option<u64> {
 }
 
 impl ConfigCache {
+    #[must_use]
     pub fn from_env() -> Self {
         if std::env::var("CACHE_STORAGE").as_deref() == Ok("redis") {
             return ConfigCache::Redis(crate::redis_cache::RedisCache::from_env());

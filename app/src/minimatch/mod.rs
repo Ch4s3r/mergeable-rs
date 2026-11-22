@@ -2,6 +2,7 @@ pub mod brace_expansion;
 use crate::error::{JsError, JsResult};
 use fancy_regex::Regex;
 use serde_json::Value;
+use std::fmt::Write as _;
 use std::sync::{Arc, LazyLock};
 
 const COMPILED_GLOB_CACHE_CAPACITY: u64 = 4096;
@@ -32,6 +33,10 @@ struct PatternList {
     regex_end: usize,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "mirrors the option and state flags of the JavaScript minimatch object"
+)]
 struct Minimatch {
     dot: bool,
     negate: bool,
@@ -183,7 +188,9 @@ fn javascript_source_to_rust(source: &str) -> Option<String> {
                     translated.push('\\');
                     translated.push(escaped);
                 }
-                Some(escaped) => translated.push_str(&format!("\\x{{{:x}}}", escaped as u32)),
+                Some(escaped) => {
+                    let _ = write!(translated, "\\x{{{:x}}}", escaped as u32);
+                }
             },
             '[' => class_body = Some(String::new()),
             other => translated.push(other),
@@ -313,6 +320,10 @@ impl Minimatch {
         self.parse(pattern, true)
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "single-pass glob parser ported from minimatch; splitting the state machine would obscure it"
+    )]
     fn parse(&self, pattern: &str, is_sub_parse: bool) -> Option<ParsedSegment> {
         let characters: Vec<char> = pattern.chars().collect();
         let mut regex_source = String::new();

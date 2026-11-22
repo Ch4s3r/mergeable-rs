@@ -50,15 +50,15 @@ impl Filter for Repository {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let mut output = Vec::new();
-        let filter_context = json!({"name": settings.get("do").cloned().unwrap_or(Value::Null)});
+        let filter_context = json!({"name": settings.get("do").unwrap_or(&Value::Null)});
 
         if js::truthy(settings.get("topics")) {
             let processed = topics::process(context, &filter_context, settings).await?;
             output.push(construct_output(
                 &filter_context,
-                &processed.input,
-                &single_setting("topics", settings),
-                &processed.result,
+                processed.input,
+                single_setting("topics", settings),
+                processed.result,
                 None,
             ));
         }
@@ -67,9 +67,9 @@ impl Filter for Repository {
             let processed = visibility::process(context, settings)?;
             output.push(construct_output(
                 &filter_context,
-                &processed.input,
-                &single_setting("visibility", settings),
-                &processed.result,
+                processed.input,
+                single_setting("visibility", settings),
+                processed.result,
                 None,
             ));
         }
@@ -78,9 +78,9 @@ impl Filter for Repository {
             let processed = name::process(context, &filter_context, settings).await?;
             output.push(construct_output(
                 &filter_context,
-                &processed.input,
-                &single_setting("name", settings),
-                &processed.result,
+                processed.input,
+                single_setting("name", settings),
+                processed.result,
                 None,
             ));
         }
@@ -103,9 +103,9 @@ mod tests {
     }
 
     async fn filter_repository(is_private: bool, repository_name: &str, settings: Value) -> Value {
-        let context = pull_request_context(PullRequest {
-            is_private,
+        let context = pull_request_context(&PullRequest {
             repository_name,
+            is_private,
             ..PullRequest::default()
         });
         process_filter(&Repository, &context, &settings, &Registry::default())

@@ -59,10 +59,8 @@ async fn check_rerun(context: &mut Context) -> JsResult<()> {
             ));
         }
     };
-    let pull_number = js::read(Some(first_pull_request), "number")?
-        .cloned()
-        .unwrap_or(Value::Null);
-    let pull_request = api::get_pull_request(context, &pull_number).await?;
+    let pull_number = js::read(Some(first_pull_request), "number")?.unwrap_or(&Value::Null);
+    let pull_request = api::get_pull_request(context, pull_number).await?;
     if let Value::Object(payload) = context.payload.to_mut() {
         match meta.get("action") {
             Some(action) => payload.insert("action".to_string(), action.clone()),
@@ -85,10 +83,9 @@ async fn milestoned(context: &mut Context) -> JsResult<()> {
     if !js::truthy(js::read_path(&context.payload, &["issue", "pull_request"])?) {
         return Ok(());
     }
-    let issue_number = js::read_path(&context.payload, &["issue", "number"])?
-        .cloned()
-        .unwrap_or(Value::Null);
-    let response = api::get_pull_request(context, &issue_number).await?;
+    let issue_number =
+        js::read_path(&context.payload, &["issue", "number"])?.unwrap_or(&Value::Null);
+    let response = api::get_pull_request(context, issue_number).await?;
     let mut pull_request = response.data;
     if let Value::Object(fields) = &mut pull_request {
         fields.insert(

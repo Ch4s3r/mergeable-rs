@@ -2,7 +2,7 @@ use crate::actions::Action;
 use crate::annotations;
 use crate::context::Context;
 use crate::error::{JsError, JsResult};
-use crate::event_aware;
+use crate::event_aware::{self, EventAttributes};
 use crate::github::api;
 use crate::js;
 use async_trait::async_trait;
@@ -27,7 +27,7 @@ fn configured_assignees(settings: &Value) -> JsResult<&Vec<Value>> {
 fn replace_annotations(
     assignee: &Value,
     payload: Option<&Value>,
-    event: &Value,
+    event: &EventAttributes<'_>,
 ) -> JsResult<String> {
     match assignee {
         Value::String(text) => {
@@ -46,7 +46,7 @@ fn replace_annotations(
 pub fn resolve_assignees(
     settings: &Value,
     payload: Option<&Value>,
-    event: &Value,
+    event: &EventAttributes<'_>,
 ) -> JsResult<Vec<String>> {
     configured_assignees(settings)?
         .iter()
@@ -85,14 +85,13 @@ impl Action for Assign {
     ) -> JsResult<()> {
         let event = event_aware::get_event_attributes(context);
         let payload = event_aware::get_payload(context);
-        let issue_number = js::read(payload, "number")?.cloned().unwrap_or(Value::Null);
+        let issue_number = js::read(payload, "number")?.unwrap_or(&Value::Null);
         let assignees = resolve_assignees(settings, payload, &event)?;
         let mut checks = Vec::new();
         for assignee in assignees {
             let author_login = js::read(js::read(payload, "user")?, "login")?;
             let candidate = Value::String(assignee);
             let is_author = author_login.is_some_and(|login| js::strict_equals(&candidate, login));
-            let issue_number = &issue_number;
             checks.push(async move {
                 if is_author {
                     Ok(Some(candidate))
@@ -107,7 +106,7 @@ impl Action for Assign {
                 authorized.push(assignee);
             }
         }
-        api::add_assignees(context, &issue_number, &Value::Array(authorized)).await?;
+        api::add_assignees(context, issue_number, &Value::Array(authorized)).await?;
         Ok(())
     }
 }
@@ -147,7 +146,7 @@ mod tests {
         let assignees = resolve_assignees(
             &json!({"assignees": ["testuser1", "testuser2"]}),
             Some(&payload),
-            &event(),
+            &EventAttributes::from_payload(&event()),
         )
         .unwrap();
         assert_eq!(assignees, vec!["testuser1", "testuser2"]);
@@ -159,7 +158,7 @@ mod tests {
         let assignees = resolve_assignees(
             &json!({"assignees": ["@author", "@sender", "@bot"]}),
             Some(&payload),
-            &event(),
+            &EventAttributes::from_payload(&event()),
         )
         .unwrap();
         assert_eq!(
@@ -177,7 +176,7 @@ mod tests {
         let error = resolve_assignees(
             &json!({}),
             Some(&json!({"user": {"login": "creator"}})),
-            &event(),
+            &EventAttributes::from_payload(&event()),
         )
         .unwrap_err();
         assert_eq!(

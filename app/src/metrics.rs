@@ -57,6 +57,7 @@ pub fn normalize_path(path: &str) -> String {
     normalized
 }
 
+#[must_use]
 pub fn normalize_status_code(status: u16) -> &'static str {
     match status {
         200..=299 => "2XX",
@@ -93,6 +94,7 @@ impl Default for Metrics {
 }
 
 impl Metrics {
+    #[must_use]
     pub fn new() -> Self {
         let mut registry = Registry::default();
         let rate_limit_remaining = Family::<InstallationLabels, Gauge<f64, AtomicU64>>::default();

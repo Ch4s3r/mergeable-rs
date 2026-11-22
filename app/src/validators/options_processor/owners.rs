@@ -13,16 +13,17 @@ pub struct SeparatedOwners {
     pub individuals: Vec<Value>,
 }
 
-pub fn separate_teams_and_individuals(owners: &[String]) -> SeparatedOwners {
+#[must_use]
+pub fn separate_teams_and_individuals(owners: Vec<String>) -> SeparatedOwners {
     let mut separated = SeparatedOwners {
         teams: Vec::new(),
         individuals: Vec::new(),
     };
     for owner in owners {
         if owner.contains('/') {
-            separated.teams.push(Value::String(owner.clone()));
+            separated.teams.push(Value::String(owner));
         } else {
-            separated.individuals.push(Value::String(owner.clone()));
+            separated.individuals.push(Value::String(owner));
         }
     }
     separated
@@ -41,9 +42,8 @@ fn extract_user_ids(owners: &[String]) -> JsResult<Vec<String>> {
 async fn retrieve_codeowners(context: &Context) -> JsResult<Option<String>> {
     let (owner, repo) = context.repo()?;
     if context.event_name == "pull_request" || context.event_name == "pull_request_review" {
-        let pull_number = js::read_path(&context.payload, &["pull_request", "number"])?
-            .cloned()
-            .unwrap_or(Value::Null);
+        let pull_number =
+            js::read_path(&context.payload, &["pull_request", "number"])?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -59,8 +59,7 @@ async fn retrieve_codeowners(context: &Context) -> JsResult<Option<String>> {
         }
         if is_owner_file_modified {
             let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
-                .cloned()
-                .unwrap_or(Value::Null);
+                .unwrap_or(&Value::Null);
             let call_parameters =
                 json!({"owner": owner, "repo": repo, "path": OWNER_FILE_PATH, "ref": head_sha});
             return api::get_content(context, call_parameters).await;
@@ -89,12 +88,8 @@ pub async fn process(payload: &Value, context: &Context) -> JsResult<Vec<Value>>
     };
     let owner_file = git_pattern::parse_owner_file(&codeowners);
 
-    let base_sha = js::read_path(payload, &["base", "sha"])?
-        .cloned()
-        .unwrap_or(Value::Null);
-    let head_sha = js::read_path(payload, &["head", "sha"])?
-        .cloned()
-        .unwrap_or(Value::Null);
+    let base_sha = js::read_path(payload, &["base", "sha"])?.unwrap_or(&Value::Null);
+    let head_sha = js::read_path(payload, &["head", "sha"])?.unwrap_or(&Value::Null);
     let compare = api::compare_commits(
         context,
         context.repo_params(json!({"base": base_sha, "head": head_sha}))?,
@@ -118,7 +113,7 @@ pub async fn process(payload: &Value, context: &Context) -> JsResult<Vec<Value>>
     }
 
     let owner_list = extract_user_ids(owner_list)?;
-    let separated = separate_teams_and_individuals(&owner_list);
+    let separated = separate_teams_and_individuals(owner_list);
     let team_members = if separated.teams.is_empty() {
         Vec::new()
     } else {
@@ -134,7 +129,7 @@ mod tests {
     #[test]
     fn owners_with_a_slash_are_teams() {
         let separated =
-            separate_teams_and_individuals(&["org/team".to_string(), "bob".to_string()]);
+            separate_teams_and_individuals(vec!["org/team".to_string(), "bob".to_string()]);
         assert_eq!(separated.teams, vec![json!("org/team")]);
         assert_eq!(separated.individuals, vec![json!("bob")]);
     }

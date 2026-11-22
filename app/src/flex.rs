@@ -11,11 +11,12 @@ use crate::settings;
 use crate::validators;
 use futures::future::join_all;
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 pub async fn execute_mergeable(mut context: Context) -> JsResult<()> {
     let registry = Registry::default();
     interceptors::run_all(&mut context).await?;
-    context.global_settings = Some(settings::instance_with_context(&context).await);
+    context.global_settings = Some(Arc::new(settings::instance_with_context(&context).await));
     let configuration = configuration::instance_with_context(&context).await;
     if configuration.has_errors() {
         return log_and_process_config_errors(&context, &configuration).await;
@@ -31,6 +32,7 @@ pub async fn execute_mergeable(mut context: Context) -> JsResult<()> {
     process_workflow(&context, &registry, &configuration).await
 }
 
+#[must_use]
 pub fn format_error_summary(configuration: &Configuration) -> String {
     let mut summary = format!(
         "Errors were found in the configuration ({}):",
@@ -77,7 +79,7 @@ pub async fn log_and_process_config_errors(
         errors = ?configuration.errors,
         "{log_type}"
     );
-    checks::run(context, &payload).await
+    checks::run(context, payload).await
 }
 
 fn is_event_in_context(when: Option<&Value>, context: &Context) -> JsResult<bool> {
@@ -108,7 +110,7 @@ fn spawn_cancelled_check(context: &Context, title: &str, summary: &str, name: Op
     payload["completed_at"] = Value::String(checks::now_iso());
     let task_context = context.clone();
     comment::spawn_detached(context, "flex", async move {
-        checks::run(&task_context, &payload).await
+        checks::run(&task_context, payload).await
     });
 }
 
@@ -186,7 +188,7 @@ fn internal_error_result(error: &JsError) -> Value {
     results::consolidate_result(
         vec![results::construct_error_output(
             &json!("An error occurred"),
-            &json!(""),
+            json!(""),
             &json!({}),
             "Internal error!",
             Some(Value::String(details)),
@@ -248,8 +250,11 @@ async fn run_actions(
     rule: &Value,
     stats: &Value,
 ) -> JsResult<Option<JsResult<()>>> {
-    let status = js::to_js_string(stats.get("validationStatus"));
-    let Some(outcome_actions) = rule.get(&status).filter(|actions| js::is_truthy(actions)) else {
+    let validation_status = js::to_js_string(stats.get("validationStatus"));
+    let Some(outcome_actions) = rule
+        .get(&validation_status)
+        .filter(|actions| js::is_truthy(actions))
+    else {
         return Ok(None);
     };
     let event_name = context.event_with_action();

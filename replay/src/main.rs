@@ -49,8 +49,7 @@ struct RunSettings {
 
 fn default_jobs() -> usize {
     std::thread::available_parallelism()
-        .map(|cpus| cpus.get() / 2)
-        .unwrap_or(1)
+        .map_or(1, |cpus| cpus.get() / 2)
         .max(1)
 }
 

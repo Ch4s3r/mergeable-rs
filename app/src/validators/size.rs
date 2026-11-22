@@ -10,7 +10,7 @@ use crate::results;
 use crate::validators::Validator;
 use async_trait::async_trait;
 use regex::Regex;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::sync::LazyLock;
 
 const ERROR_MESSAGE: &str = "Failed to validate because the 'lines' or 'max / total', 'additions' or 'deletions' option is missing. Please check the documentation.";
@@ -67,10 +67,17 @@ fn utf16_index_of(haystack: &[u16], needle: &[u16], from: usize) -> Option<usize
         .map(|offset| offset + start)
 }
 
+fn clamp_to_utf16_length(index: i64, length: usize) -> usize {
+    usize::try_from(index).map_or(0, |non_negative_index| non_negative_index.min(length))
+}
+
+fn javascript_index(index: usize) -> i64 {
+    i64::try_from(index).unwrap_or(i64::MAX)
+}
+
 fn javascript_substring(units: &[u16], start: i64, end: i64) -> String {
-    let length = units.len() as i64;
-    let clamped_start = start.clamp(0, length) as usize;
-    let clamped_end = end.clamp(0, length) as usize;
+    let clamped_start = clamp_to_utf16_length(start, units.len());
+    let clamped_end = clamp_to_utf16_length(end, units.len());
     let (from, to) = if clamped_start > clamped_end {
         (clamped_end, clamped_start)
     } else {
@@ -81,10 +88,10 @@ fn javascript_substring(units: &[u16], start: i64, end: i64) -> String {
 
 pub fn extract_file_name(file_diff: &str) -> String {
     let units = utf16_units(file_diff);
-    let start_index =
-        utf16_index_of(&units, &utf16_units("+++ b/"), 0).map_or(-1, |index| index as i64);
-    let end_index = utf16_index_of(&units, &[u16::from(b'\n')], start_index.max(0) as usize)
-        .map_or(-1, |index| index as i64);
+    let found_start = utf16_index_of(&units, &utf16_units("+++ b/"), 0);
+    let start_index = found_start.map_or(-1, javascript_index);
+    let end_index = utf16_index_of(&units, &[u16::from(b'\n')], found_start.unwrap_or(0))
+        .map_or(-1, javascript_index);
     javascript_substring(&units, start_index + 6, end_index)
 }
 
@@ -95,6 +102,7 @@ pub fn extract_file_extension(filename: &str) -> Option<String> {
         .map(|found| found.as_str().to_string())
 }
 
+#[must_use]
 pub fn changes_without_comments(diffs: &str) -> Vec<ChangedFile> {
     let mut processed_files = Vec::new();
     for file_diff in diffs.split("diff --git").skip(1) {
@@ -162,17 +170,15 @@ fn matches_patterns(file_name: &Value, patterns: &Value) -> JsResult<bool> {
 }
 
 pub fn select_listed_files(
-    files: &[Value],
+    files: Vec<Value>,
     patterns_to_include: &Value,
     patterns_to_ignore: &Value,
 ) -> JsResult<Vec<ChangedFile>> {
     let mut selected = Vec::new();
-    for file in files {
-        let file_name = js::read(Some(file), "filename")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        if !matches_patterns(&file_name, patterns_to_include)?
-            || matches_patterns(&file_name, patterns_to_ignore)?
+    for mut file in files {
+        let file_name = js::read(Some(&file), "filename")?.unwrap_or(&js::NULL);
+        if !matches_patterns(file_name, patterns_to_include)?
+            || matches_patterns(file_name, patterns_to_ignore)?
         {
             continue;
         }
@@ -180,11 +186,12 @@ pub fn select_listed_files(
         if status != Some("modified") && status != Some("added") {
             continue;
         }
+        let mut take_field = |key: &str| file.get_mut(key).map(Value::take);
         selected.push(ChangedFile {
-            filename: file_name,
-            additions: file.get("additions").cloned(),
-            deletions: file.get("deletions").cloned(),
-            changes: file.get("changes").cloned(),
+            filename: take_field("filename").unwrap_or(Value::Null),
+            additions: take_field("additions"),
+            deletions: take_field("deletions"),
+            changes: take_field("changes"),
         });
     }
     Ok(selected)
@@ -200,6 +207,7 @@ pub struct SizeChanges {
     pub total: f64,
 }
 
+#[must_use]
 pub fn sum_changes(files: &[ChangedFile]) -> SizeChanges {
     let mut changes = SizeChanges {
         additions: 0.0,
@@ -214,6 +222,7 @@ pub fn sum_changes(files: &[ChangedFile]) -> SizeChanges {
     changes
 }
 
+#[must_use]
 pub fn input_message(changes: &SizeChanges, files: &[ChangedFile]) -> String {
     let file_names: Vec<String> = files
         .iter()
@@ -231,7 +240,7 @@ pub fn input_message(changes: &SizeChanges, files: &[ChangedFile]) -> String {
     )
 }
 
-fn error_result(input: &Value, settings: &Value, message: &str) -> Value {
+fn error_result(input: Value, settings: &Value, message: &str) -> Value {
     let output = results::construct_error_output(
         &Value::String(VALIDATOR_NAME.to_string()),
         input,
@@ -254,37 +263,36 @@ fn change_count(changes: &SizeChanges, key: &str) -> Option<f64> {
 pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) -> JsResult<Value> {
     let input = Value::String(input_message(changes, files));
     let Some(lines) = settings.get("lines").filter(|value| js::is_truthy(value)) else {
-        return Ok(error_result(&input, settings, ERROR_MESSAGE));
+        return Ok(error_result(input, settings, ERROR_MESSAGE));
     };
 
-    let mut size_limits = Map::new();
-    for key in ["additions", "deletions", "total", "max"] {
-        if let Some(limit) = js::get(lines, key) {
-            size_limits.insert(key.to_string(), limit.clone());
-        }
+    let mut size_limits: Vec<(&str, &Value)> = ["additions", "deletions", "total", "max"]
+        .into_iter()
+        .filter_map(|key| Some((key, js::get(lines, key)?)))
+        .collect();
+    let has_limit =
+        |limits: &[(&str, &Value)], wanted: &str| limits.iter().any(|(key, _)| *key == wanted);
+    if has_limit(&size_limits, "max") && has_limit(&size_limits, "total") {
+        return Ok(error_result(input, settings, ERROR_MAX_TOTAL));
     }
-    if size_limits.contains_key("max") && size_limits.contains_key("total") {
-        return Ok(error_result(&input, settings, ERROR_MAX_TOTAL));
-    }
-    if let Some(max) = size_limits
-        .get("max")
-        .filter(|max| js::is_truthy(max))
-        .cloned()
+    if let Some(max_position) = size_limits
+        .iter()
+        .position(|(key, limit)| *key == "max" && js::is_truthy(limit))
     {
-        size_limits.insert("total".to_string(), max);
-        size_limits.shift_remove("max");
+        let (_, max) = size_limits.remove(max_position);
+        size_limits.push(("total", max));
     }
 
     let validator_context = json!({"name": VALIDATOR_NAME});
     let mut output = Vec::new();
-    for (key, limit) in &size_limits {
+    for (key, limit) in size_limits {
         let count = js::read(Some(limit), "count")?;
         let current = change_count(changes, key).unwrap_or(f64::NAN);
         let is_mergeable = current <= lodash::to_number(count);
         let label = if key == "total" {
             "total additions + deletions"
         } else {
-            key.as_str()
+            key
         };
         let description = if is_mergeable {
             Value::String(format!("PR size for {label} is OK!"))
@@ -299,7 +307,7 @@ pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) 
         };
         output.push(results::construct_output(
             &validator_context,
-            &input,
+            input.clone(),
             settings,
             if is_mergeable { "pass" } else { "fail" },
             description,
@@ -308,7 +316,7 @@ pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) 
     }
 
     if output.is_empty() {
-        return Ok(error_result(&input, settings, ERROR_MESSAGE));
+        return Ok(error_result(input, settings, ERROR_MESSAGE));
     }
     Ok(results::consolidate_result(output, &validator_context))
 }
@@ -353,18 +361,18 @@ impl Validator for Size {
         settings: &Value,
         _registry: &Registry,
     ) -> JsResult<Value> {
+        let default_patterns_to_include = json!(["**"]);
+        let default_patterns_to_ignore = json!([]);
         let patterns_to_include = settings
             .get("match")
             .filter(|value| js::is_truthy(value))
-            .cloned()
-            .unwrap_or_else(|| json!(["**"]));
+            .unwrap_or(&default_patterns_to_include);
         let patterns_to_ignore = settings
             .get("ignore")
             .filter(|value| js::is_truthy(value))
-            .cloned()
-            .unwrap_or_else(|| json!([]));
+            .unwrap_or(&default_patterns_to_ignore);
         let payload = event_aware::get_payload(context);
-        let pull_number = js::read(payload, "number")?.cloned().unwrap_or(Value::Null);
+        let pull_number = js::read(payload, "number")?.unwrap_or(&Value::Null);
         let listed_files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -376,12 +384,11 @@ impl Validator for Size {
             .filter(|value| js::is_truthy(value))
             .is_some_and(|lines| js::truthy(js::get(lines, "ignore_comments")));
         let modified_files = if ignore_comments {
-            let diff_url = js::read(event_aware::get_payload(context), "diff_url")?
-                .cloned()
-                .unwrap_or(Value::Null);
-            changes_without_comments(&fetch_diff(&diff_url).await?)
+            let diff_url =
+                js::read(event_aware::get_payload(context), "diff_url")?.unwrap_or(&Value::Null);
+            changes_without_comments(&fetch_diff(diff_url).await?)
         } else {
-            select_listed_files(&listed_files, &patterns_to_include, &patterns_to_ignore)?
+            select_listed_files(listed_files, patterns_to_include, patterns_to_ignore)?
         };
 
         evaluate(&sum_changes(&modified_files), &modified_files, settings)
@@ -400,20 +407,20 @@ mod tests {
         ]
     }
 
-    fn validate_listed(files: &[Value], settings: Value) -> Value {
+    fn validate_listed(files: &[Value], settings: &Value) -> Value {
         let patterns_to_include = settings
             .get("match")
             .cloned()
             .unwrap_or_else(|| json!(["**"]));
         let patterns_to_ignore = settings.get("ignore").cloned().unwrap_or_else(|| json!([]));
         let selected =
-            select_listed_files(files, &patterns_to_include, &patterns_to_ignore).unwrap();
-        evaluate(&sum_changes(&selected), &selected, &settings).unwrap()
+            select_listed_files(files.to_vec(), &patterns_to_include, &patterns_to_ignore).unwrap();
+        evaluate(&sum_changes(&selected), &selected, settings).unwrap()
     }
 
-    fn validate_diff(diff: &str, settings: Value) -> Value {
+    fn validate_diff(diff: &str, settings: &Value) -> Value {
         let files = changes_without_comments(diff);
-        evaluate(&sum_changes(&files), &files, &settings).unwrap()
+        evaluate(&sum_changes(&files), &files, settings).unwrap()
     }
 
     fn limits(additions: u64, deletions: u64, total: u64) -> Value {
@@ -444,7 +451,7 @@ mod tests {
     #[test]
     fn max_and_total_together_is_an_error() {
         let settings = json!({"do": "size", "lines": {"max": {"count": 10, "message": "Too big!"}, "total": {"count": 10, "message": "Too big!"}}});
-        let result = validate_listed(&pull_request_files(), settings);
+        let result = validate_listed(&pull_request_files(), &settings);
         assert_eq!(result["status"], "error");
         assert_eq!(result["validations"][0]["description"], ERROR_MAX_TOTAL);
     }
@@ -453,14 +460,14 @@ mod tests {
     fn max_is_a_backwards_compatible_alias_for_total() {
         let settings =
             json!({"do": "size", "lines": {"max": {"count": 10, "message": "Too big!"}}});
-        let result = validate_listed(&pull_request_files(), settings);
+        let result = validate_listed(&pull_request_files(), &settings);
         assert_eq!(result["status"], "fail");
         assert_eq!(result["validations"][0]["description"], "Too big!");
     }
 
     #[test]
     fn missing_lines_option_is_an_error() {
-        let result = validate_listed(&pull_request_files(), json!({"do": "size"}));
+        let result = validate_listed(&pull_request_files(), &json!({"do": "size"}));
         assert_eq!(result["status"], "error");
         assert_eq!(result["validations"][0]["description"], ERROR_MESSAGE);
         assert_eq!(result["validations"][0]["validator"], "Size");
@@ -470,7 +477,7 @@ mod tests {
     fn changes_above_every_count_fail_each_limit() {
         let result = validate_listed(
             &pull_request_files(),
-            json!({"do": "size", "lines": limits(10, 5, 10)}),
+            &json!({"do": "size", "lines": limits(10, 5, 10)}),
         );
         assert_eq!(result["status"], "fail");
         assert!(
@@ -484,7 +491,7 @@ mod tests {
     fn changes_equal_to_the_counts_pass_with_ok_descriptions() {
         let result = validate_listed(
             &pull_request_files(),
-            json!({"do": "size", "lines": limits(13, 7, 20)}),
+            &json!({"do": "size", "lines": limits(13, 7, 20)}),
         );
         assert_eq!(result["status"], "pass");
         assert_eq!(
@@ -510,7 +517,7 @@ mod tests {
     fn one_limit_exceeded_fails_while_others_pass() {
         let result = validate_listed(
             &pull_request_files(),
-            json!({"do": "size", "lines": limits(13, 5, 20)}),
+            &json!({"do": "size", "lines": limits(13, 5, 20)}),
         );
         assert_eq!(result["status"], "fail");
         assert_eq!(result["validations"][1]["description"], "Too big!");
@@ -521,7 +528,7 @@ mod tests {
     fn ignored_files_are_not_counted() {
         let settings = json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["another.js"]});
         assert_eq!(
-            validate_listed(&pull_request_files(), settings)["status"],
+            validate_listed(&pull_request_files(), &settings)["status"],
             "pass"
         );
     }
@@ -533,7 +540,7 @@ mod tests {
         ];
         let settings =
             json!({"do": "size", "lines": {"additions": {"count": 10, "message": "Too big!"}}});
-        assert_eq!(validate_listed(&files, settings)["status"], "fail");
+        assert_eq!(validate_listed(&files, &settings)["status"], "fail");
     }
 
     #[test]
@@ -545,19 +552,19 @@ mod tests {
             json!({"filename": "nested/two/three/big_file_3.js", "status": "modified", "additions": 30, "deletions": 0, "changes": 30}),
         ];
         let by_directory = json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["nested/one/*", "nested/two/**"]});
-        assert_eq!(validate_listed(&files, by_directory)["status"], "pass");
+        assert_eq!(validate_listed(&files, &by_directory)["status"], "pass");
         let by_name =
             json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["**/big_file_*.js"]});
-        assert_eq!(validate_listed(&files, by_name)["status"], "pass");
+        assert_eq!(validate_listed(&files, &by_name)["status"], "pass");
         let by_match =
             json!({"do": "size", "lines": limits(10, 5, 15), "match": ["not_*.js"], "ignore": []});
-        assert_eq!(validate_listed(&files, by_match)["status"], "pass");
+        assert_eq!(validate_listed(&files, &by_match)["status"], "pass");
     }
 
     #[test]
     fn input_message_lists_totals_and_file_names() {
         let selected =
-            select_listed_files(&pull_request_files(), &json!(["**"]), &json!([])).unwrap();
+            select_listed_files(pull_request_files(), &json!(["**"]), &json!([])).unwrap();
         assert_eq!(
             input_message(&sum_changes(&selected), &selected),
             "20 total, 13 additions, 7 deletions\n    Files: thing.js,another.js"
@@ -568,9 +575,12 @@ mod tests {
     fn single_line_and_block_comments_are_not_counted() {
         let settings = json!({"do": "size", "lines": {"total": {"count": 1, "message": "Too big!"}, "ignore_comments": true}});
         let with_code = "diff --git a/commentTestFiles.js b/commentTestFiles.js\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.js\n@@ -0,0 +1,5 @@\n+// this is a comment\n+ // second comment\n+ non comment\n+\n+/*\n+    Comment block\n+ */\n";
-        assert_eq!(validate_diff(with_code, settings.clone())["status"], "fail");
+        assert_eq!(
+            validate_diff(with_code, &settings.clone())["status"],
+            "fail"
+        );
         let comments_only = "diff --git a/commentTestFiles.js b/commentTestFiles.js\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.js\n@@ -0,0 +1,5 @@\n+// this is a comment\n+/*\n+    Comment block\n+ */\n";
-        let result = validate_diff(comments_only, settings);
+        let result = validate_diff(comments_only, &settings);
         assert_eq!(result["status"], "pass");
         assert_eq!(
             result["validations"][0]["description"],
@@ -582,7 +592,7 @@ mod tests {
     fn comments_in_unsupported_file_types_are_counted() {
         let settings = json!({"do": "size", "lines": {"total": {"count": 1, "message": "Too big!"}, "ignore_comments": true}});
         let diff = "diff --git a/commentTestFiles.notsupportedExtension b/commentTestFiles.notsupportedExtension\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.notsupportedExtension\n@@ -0,0 +1,5 @@\n+// this is a comment\n+/*\n+    Comment block\n+ */\n";
-        assert_eq!(validate_diff(diff, settings)["status"], "fail");
+        assert_eq!(validate_diff(diff, &settings)["status"], "fail");
     }
 
     #[test]
@@ -590,11 +600,11 @@ mod tests {
         let settings = json!({"do": "size", "lines": {"total": {"count": 0, "message": "Too big!"}, "ignore_comments": true}});
         let javascript_named = "diff --git a/commentTestFiles.py b/commentTestFiles.py\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.js\n@@ -0,0 +1,5 @@\n+# this is a comment\n+ # second comment\n+ non comment\n";
         assert_eq!(
-            validate_diff(javascript_named, settings.clone())["status"],
+            validate_diff(javascript_named, &settings.clone())["status"],
             "fail"
         );
         let python = "diff --git a/commentTestFiles.py b/commentTestFiles.py\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.py\n@@ -0,0 +1,5 @@\n+# this is a comment\n+ # second comment\n";
-        assert_eq!(validate_diff(python, settings)["status"], "pass");
+        assert_eq!(validate_diff(python, &settings)["status"], "pass");
     }
 
     #[test]

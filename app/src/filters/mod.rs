@@ -38,6 +38,7 @@ pub trait Filter: Send + Sync {
     ) -> JsResult<Value>;
 }
 
+#[must_use]
 pub fn create(key: &str) -> Option<Arc<dyn Filter>> {
     let filter: Arc<dyn Filter> = match key {
         "and" => Arc::new(and_operator::And),
@@ -84,7 +85,7 @@ pub async fn process_filter(
                 let filter_context = json!({"name": filter.name()});
                 let output = vec![results::construct_filter_error(
                     &filter_context,
-                    &Value::String(js::stringify(&supported_settings)),
+                    Value::String(js::stringify(&supported_settings)),
                     settings,
                     &error.name,
                     Some(Value::String(error.to_string())),

@@ -42,8 +42,8 @@ pub struct BenchReport {
 struct RepositoryRename {
     old_full_name: String,
     new_full_name: String,
-    old_name: String,
-    new_name: String,
+    old_repository: String,
+    new_repository: String,
 }
 
 impl RepositoryRename {
@@ -53,8 +53,8 @@ impl RepositoryRename {
         let new_name = format!("{old_name}-bench{index}");
         Some(RepositoryRename {
             new_full_name: format!("{owner}/{new_name}"),
-            old_name: old_name.to_owned(),
-            new_name,
+            old_repository: old_name.to_owned(),
+            new_repository: new_name,
             old_full_name,
         })
     }
@@ -67,8 +67,11 @@ impl RepositoryRename {
                         "full_name".to_owned(),
                         Value::String(self.new_full_name.clone()),
                     );
-                    if fields.get("name").and_then(Value::as_str) == Some(&self.old_name) {
-                        fields.insert("name".to_owned(), Value::String(self.new_name.clone()));
+                    if fields.get("name").and_then(Value::as_str) == Some(&self.old_repository) {
+                        fields.insert(
+                            "name".to_owned(),
+                            Value::String(self.new_repository.clone()),
+                        );
                     }
                 }
                 fields
@@ -172,6 +175,20 @@ fn is_success(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "request, call and kilobyte counters stay far below 2^53, so the float is exact for reporting"
+)]
+fn counter_as_float(counter: u64) -> f64 {
+    counter as f64
+}
+
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss,
+    reason = "nearest-rank of a non-negative percentile over a sample count far below 2^53, clamped to the sample count right after"
+)]
 fn percentile_milliseconds(sorted_latencies: &[Duration], percentile: f64) -> f64 {
     if sorted_latencies.is_empty() {
         return 0.0;
@@ -280,12 +297,13 @@ pub async fn bench(
         webhook_statuses,
         startup_milliseconds: startup.as_secs_f64() * 1000.0,
         duration_seconds,
-        webhooks_per_second: settings.requests as f64 / duration_seconds,
+        webhooks_per_second: counter_as_float(u64::try_from(settings.requests).unwrap_or(u64::MAX))
+            / duration_seconds,
         latency_p50_milliseconds: percentile_milliseconds(&latencies, 0.50),
         latency_p95_milliseconds: percentile_milliseconds(&latencies, 0.95),
         latency_p99_milliseconds: percentile_milliseconds(&latencies, 0.99),
-        github_calls_per_second: github_calls as f64 / duration_seconds,
-        peak_rss_megabytes: peak_kilobytes.load(Ordering::Relaxed) as f64 / 1024.0,
+        github_calls_per_second: counter_as_float(github_calls) / duration_seconds,
+        peak_rss_megabytes: counter_as_float(peak_kilobytes.load(Ordering::Relaxed)) / 1024.0,
     })
 }
 
@@ -347,8 +365,8 @@ mod tests {
         let rename = RepositoryRename {
             old_full_name: "acme/app".to_owned(),
             new_full_name: "acme/app-bench1".to_owned(),
-            old_name: "app".to_owned(),
-            new_name: "app-bench1".to_owned(),
+            old_repository: "app".to_owned(),
+            new_repository: "app-bench1".to_owned(),
         };
         let mut payload = json!({
             "repository": {"name": "app", "full_name": "acme/app", "owner": {"login": "acme"}},

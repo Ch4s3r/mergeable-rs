@@ -51,6 +51,7 @@ impl RedisSettings {
     }
 }
 
+#[must_use]
 pub fn serialize_value(value: &Value) -> Option<String> {
     (!value.is_null()).then(|| crate::js::stringify(value))
 }
@@ -74,10 +75,12 @@ fn log_cache_error(operation: &str, error: impl std::fmt::Display) {
 }
 
 impl RedisCache {
+    #[must_use]
     pub fn from_env() -> Self {
         Self::new(RedisSettings::from_env())
     }
 
+    #[must_use]
     pub fn new(settings: RedisSettings) -> Self {
         RedisCache {
             settings,

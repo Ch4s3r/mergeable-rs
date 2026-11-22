@@ -41,7 +41,7 @@ pub struct Context {
     pub event_name: String,
     pub payload: SharedPayload,
     pub github: InstallationClient,
-    pub global_settings: Option<Value>,
+    pub global_settings: Option<Arc<Value>>,
 }
 
 impl Context {
@@ -60,14 +60,17 @@ impl Context {
         }
     }
 
+    #[must_use]
     pub fn action(&self) -> Option<&Value> {
         self.payload.get("action")
     }
 
+    #[must_use]
     pub fn event_with_action(&self) -> String {
         format!("{}.{}", self.event_name, js::to_js_string(self.action()))
     }
 
+    #[must_use]
     pub fn event_label(&self) -> String {
         if js::truthy(self.action()) {
             self.event_with_action()
@@ -101,6 +104,7 @@ impl Context {
         Ok(Value::Object(params))
     }
 
+    #[must_use]
     pub fn repository_full_name(&self) -> String {
         js::to_js_string(js::get_path(&self.payload, &["repository", "full_name"]))
     }

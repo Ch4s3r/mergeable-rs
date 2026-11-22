@@ -16,18 +16,18 @@ async fn validate_filter(
         return Ok(Some(
             process(validator_context, input, filter, "and")
                 .await?
-                .to_value(),
+                .into_value(),
         ));
     }
     if js::truthy(js::read(Some(filter), "or")?) {
         return Ok(Some(
             process(validator_context, input, filter, "or")
                 .await?
-                .to_value(),
+                .into_value(),
         ));
     }
-    let raw_output = options::process(validator_context, input, filter, true).await?;
-    Ok(js::get(&raw_output, "0").cloned())
+    let mut raw_output = options::process(validator_context, input, filter, true).await?;
+    Ok(js::get_mut(&mut raw_output, "0").map(Value::take))
 }
 
 pub fn process<'call>(

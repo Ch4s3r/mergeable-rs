@@ -135,6 +135,7 @@ fn parse_comma_parts(text: &str) -> Vec<String> {
     parts
 }
 
+#[must_use]
 pub fn expand_top(pattern: &str) -> Vec<String> {
     if pattern.is_empty() {
         return Vec::new();

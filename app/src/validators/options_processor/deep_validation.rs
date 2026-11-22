@@ -39,15 +39,15 @@ pub async fn check_if_issue_have_property(
 ) -> JsResult<Vec<Value>> {
     let mut output = Vec::new();
     for issue_number in issues {
-        let issue = api::get_issue(context, &Value::String(issue_number.clone()))
+        let mut issue = api::get_issue(context, &Value::String(issue_number.clone()))
             .await?
             .ok_or_else(|| JsError::reading_property_of_undefined("data"))?;
         if let Some(value) = issue
             .data
-            .get(property)
+            .get_mut(property)
             .filter(|value| js::is_truthy(value))
         {
-            output.push(value.clone());
+            output.push(value.take());
         }
     }
     Ok(output)
@@ -66,7 +66,13 @@ mod tests {
 
     #[test]
     fn missing_body_closes_nothing() {
-        assert!(check_if_closes_an_issue(None).is_empty());
-        assert!(check_if_closes_an_issue(Some(&Value::Null)).is_empty());
+        assert_eq!(
+            check_if_closes_an_issue(None),
+            [] as [std::string::String; 0]
+        );
+        assert_eq!(
+            check_if_closes_an_issue(Some(&Value::Null)),
+            [] as [std::string::String; 0]
+        );
     }
 }

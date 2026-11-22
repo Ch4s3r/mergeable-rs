@@ -34,10 +34,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn status_for(match_value: Value, input: Value) -> &'static str {
+    fn status_for(match_value: &Value, input: &Value) -> &'static str {
         process(
             &json!({"name": "label"}),
-            &input,
+            input,
             &json!({"ends_with": {"match": match_value}}),
         )
         .unwrap()
@@ -47,24 +47,30 @@ mod tests {
     #[test]
     fn passes_when_input_ends_with_any_match_of_a_list() {
         let matches = json!(["end1", "end2"]);
-        assert_eq!(status_for(matches.clone(), json!("the test end1")), "pass");
-        assert_eq!(status_for(matches.clone(), json!("the test end2")), "pass");
-        assert_eq!(status_for(matches, json!("some title")), "fail");
+        assert_eq!(
+            status_for(&matches.clone(), &json!("the test end1")),
+            "pass"
+        );
+        assert_eq!(
+            status_for(&matches.clone(), &json!("the test end2")),
+            "pass"
+        );
+        assert_eq!(status_for(&matches, &json!("some title")), "fail");
     }
 
     #[test]
     fn passes_when_string_or_one_list_item_ends_with_match() {
-        assert_eq!(status_for(json!("test"), json!("the test")), "pass");
+        assert_eq!(status_for(&json!("test"), &json!("the test")), "pass");
         assert_eq!(
-            status_for(json!("test"), json!(["A", "B", "the test"])),
+            status_for(&json!("test"), &json!(["A", "B", "the test"])),
             "pass"
         );
-        assert_eq!(status_for(json!("test"), json!(["the test"])), "pass");
+        assert_eq!(status_for(&json!("test"), &json!(["the test"])), "pass");
     }
 
     #[test]
     fn fails_when_input_does_not_end_with_match() {
-        assert_eq!(status_for(json!("test"), json!("test the")), "fail");
+        assert_eq!(status_for(&json!("test"), &json!("test the")), "fail");
     }
 
     #[test]

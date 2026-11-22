@@ -34,8 +34,7 @@ impl Validator for HeadRef {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let head_ref = js::read(js::read(event_aware::get_payload(context), "head")?, "ref")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        validators::process_options(settings, &head_ref, None).await
+            .unwrap_or(&Value::Null);
+        validators::process_options(settings, head_ref, None).await
     }
 }

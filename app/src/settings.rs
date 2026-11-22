@@ -9,6 +9,7 @@ use std::sync::LazyLock;
 
 static SETTINGS_CACHE: LazyLock<ConfigCache> = LazyLock::new(ConfigCache::from_env);
 
+#[must_use]
 pub fn settings_path() -> String {
     match std::env::var("SETTINGS_PATH") {
         Ok(path) if !path.is_empty() => path,
@@ -24,6 +25,7 @@ fn use_settings_cache() -> bool {
     env_is_true("USE_SETTINGS_CACHE")
 }
 
+#[must_use]
 pub fn default_config_path() -> String {
     std::env::var("CONFIG_PATH").unwrap_or_default()
 }
@@ -62,19 +64,19 @@ async fn fetch_settings_file(context: &Context) -> JsResult<Value> {
         return Ok(cached);
     }
     let file_path = format!(".github/{settings_path}");
-    let mut content = api::get_content(
+    let mut settings_file_content = api::get_content(
         context,
         json!({"owner": owner, "repo": ".github", "path": file_path}),
     )
     .await?;
-    if content.is_none() {
-        content = api::get_content(
+    if settings_file_content.is_none() {
+        settings_file_content = api::get_content(
             context,
             json!({"owner": owner, "repo": repo, "path": file_path}),
         )
         .await?;
     }
-    let parsed = match content {
+    let parsed = match settings_file_content {
         Some(text) => {
             yaml::parse(&text).map_err(|error| JsError::named("YAMLException", error.message))?
         }

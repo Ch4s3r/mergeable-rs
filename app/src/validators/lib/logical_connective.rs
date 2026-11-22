@@ -52,7 +52,17 @@ pub async fn process(
     } else {
         "fail"
     };
-    for (count, result) in output.iter().enumerate() {
+    let output_count = output.len();
+    let negated_first_status = match output
+        .first()
+        .and_then(|first| js::as_str(first.get("status")))
+    {
+        Some("error") => Some("error"),
+        Some("pass") => Some("fail"),
+        Some("fail") => Some("pass"),
+        _ => None,
+    };
+    for (count, mut result) in output.into_iter().enumerate() {
         let result_status = js::as_str(result.get("status"));
         if result_status == Some("error") {
             status = "error";
@@ -64,12 +74,12 @@ pub async fn process(
             status = "fail";
         }
         let result_name = js::to_js_string(result.get("name"));
-        let Some(Value::Array(result_validations)) = result.get("validations") else {
+        let Some(Value::Array(result_validations)) = result.get_mut("validations").map(Value::take)
+        else {
             return Err(JsError::type_error("result.validations is not iterable"));
         };
-        for validation in result_validations {
-            let mut renamed = validation.clone();
-            let description = js::to_js_string(validation.get("description"));
+        for mut renamed in result_validations {
+            let description = js::to_js_string(renamed.get("description"));
             if let Value::Object(fields) = &mut renamed {
                 fields.insert(
                     "description".to_string(),
@@ -85,22 +95,16 @@ pub async fn process(
 
     let mut final_status = Some(status);
     if validator_name == "Not" {
-        if output.len() != 1 {
+        if output_count != 1 {
             return Ok(error_result(
                 validator_name,
                 settings,
                 &format!(
-                    "Failed to validate because the 'validate' option does not have exactly one element, but {}",
-                    output.len()
+                    "Failed to validate because the 'validate' option does not have exactly one element, but {output_count}"
                 ),
             ));
         }
-        final_status = match js::as_str(output[0].get("status")) {
-            Some("error") => Some("error"),
-            Some("pass") => Some("fail"),
-            Some("fail") => Some("pass"),
-            _ => None,
-        };
+        final_status = negated_first_status;
     }
 
     let mut combined = Map::new();

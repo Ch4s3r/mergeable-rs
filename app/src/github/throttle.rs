@@ -80,6 +80,7 @@ pub struct RequestThrottle {
 }
 
 impl RequestThrottle {
+    #[must_use]
     pub fn like_probot(enabled: bool) -> Self {
         RequestThrottle {
             enabled,

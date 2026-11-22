@@ -1,6 +1,7 @@
 use crate::error::{JsError, JsResult};
 use serde_json::{Map, Value};
 
+#[must_use]
 pub fn truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
@@ -13,10 +14,12 @@ pub fn truthy(value: Option<&Value>) -> bool {
     }
 }
 
+#[must_use]
 pub fn is_truthy(value: &Value) -> bool {
     truthy(Some(value))
 }
 
+#[must_use]
 pub fn type_of(value: Option<&Value>) -> &'static str {
     match value {
         None => "undefined",
@@ -27,6 +30,7 @@ pub fn type_of(value: Option<&Value>) -> &'static str {
     }
 }
 
+#[must_use]
 pub fn number_to_string(number: &serde_json::Number) -> String {
     if let Some(integer) = number.as_i64() {
         return integer.to_string();
@@ -38,6 +42,7 @@ pub fn number_to_string(number: &serde_json::Number) -> String {
     float_to_string(float)
 }
 
+#[must_use]
 pub fn float_to_string(float: f64) -> String {
     if float.is_nan() {
         return "NaN".to_string();
@@ -61,6 +66,7 @@ pub fn float_to_string(float: f64) -> String {
     }
 }
 
+#[must_use]
 pub fn to_js_string(value: Option<&Value>) -> String {
     match value {
         None => "undefined".to_string(),
@@ -86,10 +92,12 @@ pub fn to_js_string(value: Option<&Value>) -> String {
     }
 }
 
+#[must_use]
 pub fn stringify(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_default()
 }
 
+#[must_use]
 pub fn stringify_optional(value: Option<&Value>) -> String {
     match value {
         None => "undefined".to_string(),
@@ -97,6 +105,7 @@ pub fn stringify_optional(value: Option<&Value>) -> String {
     }
 }
 
+#[must_use]
 pub fn get<'value>(value: &'value Value, key: &str) -> Option<&'value Value> {
     match value {
         Value::Object(map) => map.get(key),
@@ -105,6 +114,7 @@ pub fn get<'value>(value: &'value Value, key: &str) -> Option<&'value Value> {
     }
 }
 
+#[must_use]
 pub fn get_path<'value>(value: &'value Value, path: &[&str]) -> Option<&'value Value> {
     let mut current = value;
     for key in path {
@@ -121,6 +131,34 @@ pub fn read<'value>(value: Option<&'value Value>, key: &str) -> JsResult<Option<
         ))),
         Some(present) => Ok(get(present, key)),
     }
+}
+
+#[must_use]
+pub fn get_mut<'value>(value: &'value mut Value, key: &str) -> Option<&'value mut Value> {
+    match value {
+        Value::Object(map) => map.get_mut(key),
+        Value::Array(items) => key
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| items.get_mut(index)),
+        _ => None,
+    }
+}
+
+pub fn take(value: Option<&mut Value>, key: &str) -> JsResult<Option<Value>> {
+    read(value.as_deref(), key)?;
+    Ok(value
+        .and_then(|present| get_mut(present, key))
+        .map(Value::take))
+}
+
+pub fn take_path(value: &mut Value, path: &[&str]) -> JsResult<Option<Value>> {
+    read_path(value, path)?;
+    let mut current = Some(value);
+    for key in path {
+        current = current.and_then(|present| get_mut(present, key));
+    }
+    Ok(current.map(Value::take))
 }
 
 pub fn read_path<'value>(value: &'value Value, path: &[&str]) -> JsResult<Option<&'value Value>> {
@@ -162,6 +200,7 @@ pub fn includes(container: Option<&Value>, needle: &Value) -> JsResult<bool> {
     }
 }
 
+#[must_use]
 pub fn strict_equals(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (Value::Number(first), Value::Number(second)) => first.as_f64() == second.as_f64(),
@@ -170,22 +209,50 @@ pub fn strict_equals(left: &Value, right: &Value) -> bool {
     }
 }
 
-pub fn as_array_or_wrap(value: &Value) -> Vec<Value> {
+pub static NULL: Value = Value::Null;
+
+#[must_use]
+pub fn as_array_or_wrap(value: &Value) -> &[Value] {
     match value {
-        Value::Array(items) => items.clone(),
-        other => vec![other.clone()],
+        Value::Array(items) => items,
+        other => std::slice::from_ref(other),
     }
 }
 
-pub fn concat(base: &[Value], addition: &Value) -> Vec<Value> {
-    let mut combined = base.to_vec();
-    match addition {
-        Value::Array(items) => combined.extend(items.iter().cloned()),
-        other => combined.push(other.clone()),
+#[must_use]
+pub fn into_array_or_wrap(value: Value) -> Vec<Value> {
+    match value {
+        Value::Array(items) => items,
+        other => vec![other],
     }
-    combined
 }
 
+pub fn concat<'value>(
+    base: &'value [Value],
+    addition: &'value Value,
+) -> impl Iterator<Item = &'value Value> {
+    base.iter().chain(as_array_or_wrap(addition))
+}
+
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a JavaScript length or index is a Number; lengths stay far below 2^53 where f64 is exact"
+)]
+pub fn number_from_length(length: usize) -> f64 {
+    length as f64
+}
+
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "a JavaScript Date time value is a Number; valid timestamps stay within 8.64e15 ms where f64 is exact"
+)]
+pub fn number_from_timestamp_milliseconds(milliseconds: i64) -> f64 {
+    milliseconds as f64
+}
+
+#[must_use]
 pub fn object() -> Map<String, Value> {
     Map::new()
 }
@@ -249,7 +316,7 @@ mod tests {
         assert_eq!(to_js_string(Some(&json!(3))), "3");
         assert_eq!(float_to_string(1e21), "1e+21");
         assert_eq!(float_to_string(1.5e-7), "1.5e-7");
-        assert_eq!(float_to_string(0.000001), "0.000001");
+        assert_eq!(float_to_string(0.000_001), "0.000001");
         assert_eq!(to_js_string(None), "undefined");
     }
 

@@ -8,6 +8,7 @@ use crate::validators::options_processor::list_processor;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
+use std::borrow::Cow;
 
 pub struct LastComment;
 
@@ -30,25 +31,22 @@ fn is_bot_comment(comment: &Value) -> JsResult<bool> {
     }
 }
 
-pub fn without_bot_comments(comments: Vec<Value>, exclude_bots: bool) -> JsResult<Vec<Value>> {
-    if !exclude_bots {
-        return Ok(comments);
-    }
+static EMPTY_BODY: Value = Value::String(String::new());
+
+pub fn without_bot_comments(comments: &[Value], exclude_bots: bool) -> JsResult<Vec<&Value>> {
     let mut kept = Vec::new();
     for comment in comments {
-        if !is_bot_comment(&comment)? {
+        if !exclude_bots || !is_bot_comment(comment)? {
             kept.push(comment);
         }
     }
     Ok(kept)
 }
 
-pub fn last_comment_body(comments: &[Value]) -> JsResult<Value> {
+pub fn last_comment_body<'comment>(comments: &[&'comment Value]) -> JsResult<&'comment Value> {
     match comments.last() {
-        None => Ok(Value::String(String::new())),
-        Some(comment) => Ok(js::read(Some(comment), "body")?
-            .cloned()
-            .unwrap_or(Value::Null)),
+        None => Ok(&EMPTY_BODY),
+        Some(comment) => Ok(js::read(Some(comment), "body")?.unwrap_or(&js::NULL)),
     }
 }
 
@@ -87,17 +85,15 @@ async fn comment_author_filter(
     })
 }
 
-async fn filter_by_comment_author(
-    comments: Vec<Value>,
+async fn filter_by_comment_author<'comment>(
+    comments: &'comment [Value],
     filter: &CommentAuthorFilter,
-) -> JsResult<Vec<Value>> {
+) -> JsResult<Vec<&'comment Value>> {
     let candidates = without_bot_comments(comments, filter.exclude_bots)?;
     let mut kept = Vec::new();
     for comment in candidates {
-        let login = js::read(js::read(Some(&comment), "user")?, "login")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        let result = validators::process_options(&filter.author_option, &login, None).await?;
+        let login = js::read(js::read(Some(comment), "user")?, "login")?.unwrap_or(&Value::Null);
+        let result = validators::process_options(&filter.author_option, login, None).await?;
         if result.get("status").and_then(Value::as_str) != Some("fail") {
             kept.push(comment);
         }
@@ -106,12 +102,12 @@ async fn filter_by_comment_author(
 }
 
 pub async fn evaluate(
-    comments: Vec<Value>,
+    comments: &[Value],
     filter: &CommentAuthorFilter,
     remaining_settings: &Value,
 ) -> JsResult<Value> {
     let comments = filter_by_comment_author(comments, filter).await?;
-    validators::process_options(remaining_settings, &last_comment_body(&comments)?, None).await
+    validators::process_options(remaining_settings, last_comment_body(&comments)?, None).await
 }
 
 #[async_trait]
@@ -145,23 +141,25 @@ impl Validator for LastComment {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let filter = comment_author_filter(context, settings).await?;
-        let mut remaining_settings = settings.clone();
-        if let Value::Object(map) = &mut remaining_settings {
+        let mut remaining_settings = Cow::Borrowed(settings);
+        if settings.get("comment_author").is_some()
+            && let Value::Object(map) = remaining_settings.to_mut()
+        {
             map.shift_remove("comment_author");
         }
 
-        let issue_number = js::read(event_aware::get_payload(context), "number")?
-            .cloned()
-            .unwrap_or(Value::Null);
+        let issue_number =
+            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+        let listed_comments;
         let comments = if context.event_name == "issue_comment" {
             let comment = context
                 .payload
                 .get("comment")
-                .cloned()
                 .ok_or_else(|| JsError::reading_property_of_undefined("user"))?;
-            vec![comment]
+            std::slice::from_ref(comment)
         } else {
-            api::list_comments(context, &issue_number).await?
+            listed_comments = api::list_comments(context, issue_number).await?;
+            listed_comments.as_slice()
         };
 
         evaluate(comments, &filter, &remaining_settings).await
@@ -182,8 +180,8 @@ mod tests {
             comment("a bot comment", "Some[BOT]"),
             comment("human", "user_b"),
         ];
-        let kept = without_bot_comments(comments, true).unwrap();
-        assert_eq!(last_comment_body(&kept).unwrap(), json!("human"));
+        let kept = without_bot_comments(&comments, true).unwrap();
+        assert_eq!(last_comment_body(&kept).unwrap(), &json!("human"));
         assert_eq!(kept.len(), 1);
     }
 
@@ -193,18 +191,18 @@ mod tests {
             comment("human", "user_b"),
             comment("a bot comment", "some[bot]"),
         ];
-        let kept = without_bot_comments(comments, false).unwrap();
-        assert_eq!(last_comment_body(&kept).unwrap(), json!("a bot comment"));
+        let kept = without_bot_comments(&comments, false).unwrap();
+        assert_eq!(last_comment_body(&kept).unwrap(), &json!("a bot comment"));
     }
 
     #[test]
     fn no_remaining_comment_validates_an_empty_body() {
-        assert_eq!(last_comment_body(&[]).unwrap(), json!(""));
+        assert_eq!(last_comment_body(&[]).unwrap(), &json!(""));
     }
 
     #[test]
     fn comment_without_user_throws_like_node() {
-        let error = without_bot_comments(vec![json!({"body": "x"})], true).unwrap_err();
+        let error = without_bot_comments(&[json!({"body": "x"})], true).unwrap_err();
         assert_eq!(
             error.to_string(),
             "TypeError: Cannot read properties of undefined (reading 'login')"
@@ -232,7 +230,7 @@ mod tests {
         filter: CommentAuthorFilter,
         settings: Value,
     ) -> Value {
-        evaluate(comments(bodies, authors), &filter, &settings)
+        evaluate(&comments(bodies, authors), &filter, &settings)
             .await
             .unwrap()
     }

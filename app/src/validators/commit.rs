@@ -56,15 +56,19 @@ fn includes_merge_branch(message: Option<&Value>) -> JsResult<bool> {
     }
 }
 
-fn read_each(commits: &[Option<Value>], path: &[&str]) -> JsResult<Vec<Value>> {
+fn take_each(commits: &mut [Option<Value>], path: &[&str]) -> JsResult<Vec<Value>> {
     commits
-        .iter()
+        .iter_mut()
         .map(|commit| {
             let mut current = commit.as_ref();
             for key in path {
                 current = js::read(current, key)?;
             }
-            Ok(current.cloned().unwrap_or(Value::Null))
+            let mut target = commit.as_mut();
+            for key in path {
+                target = target.and_then(|present| js::get_mut(present, key));
+            }
+            Ok(target.map_or(Value::Null, Value::take))
         })
         .collect()
 }
@@ -80,12 +84,8 @@ pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult
 
     if single_commit_only && ordered.len() != 1 {
         let messages = ordered
-            .iter()
-            .map(|commit| {
-                Ok(js::read(Some(commit), "message")?
-                    .cloned()
-                    .unwrap_or(Value::Null))
-            })
+            .into_iter()
+            .map(|mut commit| Ok(js::take(Some(&mut commit), "message")?.unwrap_or(Value::Null)))
             .collect::<JsResult<Vec<Value>>>()?;
         return Ok(CommitPlan::SkippedForMultipleCommits(messages));
     }
@@ -108,13 +108,13 @@ pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult
         selected = vec![selected.into_iter().next_back().flatten()];
     }
 
-    let mut inputs = read_each(&selected, &["message"])?;
+    let mut inputs = take_each(&mut selected, &["message"])?;
     let mut fail_message = DEFAULT_FAIL_MESSAGE;
     if message_type == Some("author_email") {
-        inputs = read_each(&selected, &["author", "email"])?;
+        inputs = take_each(&mut selected, &["author", "email"])?;
         fail_message = DEFAULT_FAIL_AUTHOR_EMAIL_MESSAGE;
     } else if message_type == Some("committer_email") {
-        inputs = read_each(&selected, &["committer", "email"])?;
+        inputs = take_each(&mut selected, &["committer", "email"])?;
         fail_message = DEFAULT_FAIL_COMMITTER_EMAIL_MESSAGE;
     }
     Ok(CommitPlan::Check(CommitSelection {
@@ -123,6 +123,7 @@ pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult
     }))
 }
 
+#[must_use]
 pub fn must_include_rule(message_settings: &Value, fail_message: &str) -> Value {
     let mut rule = Map::new();
     rule.insert("all".to_string(), Value::Bool(true));
@@ -143,15 +144,15 @@ pub fn must_include_rule(message_settings: &Value, fail_message: &str) -> Value 
     json!({"must_include": Value::Object(rule)})
 }
 
-fn output(input: &Value, settings: &Value, status: Value, description: Value) -> Value {
+fn output(input: Value, settings: &Value, status: Value, description: Value) -> Value {
+    let mut details = Map::new();
+    details.insert("input".to_string(), input);
+    details.insert("settings".to_string(), settings.clone());
     let mut result = Map::new();
     result.insert("validator".to_string(), validator_context());
     result.insert("status".to_string(), status);
     result.insert("description".to_string(), description);
-    result.insert(
-        "details".to_string(),
-        json!({"input": input, "settings": settings}),
-    );
+    result.insert("details".to_string(), Value::Object(details));
     results::consolidate_result(vec![Value::Object(result)], &validator_context())
 }
 
@@ -198,10 +199,9 @@ impl Validator for Commit {
         _registry: &Registry,
     ) -> JsResult<Value> {
         let message_settings = check_settings(settings)?;
-        let pull_number = js::read(event_aware::get_payload(context), "number")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        let commits = api::list_commits(context, &pull_number).await?;
+        let pull_number =
+            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+        let commits = api::list_commits(context, pull_number).await?;
         evaluate(commits, settings, message_settings)
     }
 }
@@ -214,7 +214,7 @@ pub fn evaluate(
     let selection = match select_commits(commits, message_settings)? {
         CommitPlan::SkippedForMultipleCommits(messages) => {
             return Ok(output(
-                &Value::Array(messages),
+                Value::Array(messages),
                 settings,
                 Value::String("pass".to_string()),
                 Value::String(
@@ -233,7 +233,7 @@ pub fn evaluate(
         result.description
     };
     Ok(output(
-        &inputs,
+        inputs,
         settings,
         Value::String(result.status.to_string()),
         description,
@@ -396,9 +396,9 @@ mod tests {
         );
     }
 
-    fn run(commits: Vec<Value>, settings: Value) -> Value {
-        let message_settings = check_settings(&settings).unwrap().clone();
-        evaluate(commits, &settings, &message_settings).unwrap()
+    fn run(commits: Vec<Value>, settings: &Value) -> Value {
+        let message_settings = check_settings(settings).unwrap().clone();
+        evaluate(commits, settings, &message_settings).unwrap()
     }
 
     #[test]
@@ -408,12 +408,12 @@ mod tests {
             commit("2024-01-01T00:00:00Z", "fix: this", "a@x", "c@x"),
             commit("2024-01-02T00:00:00Z", "feat: that", "a@x", "c@x"),
         ];
-        assert_eq!(run(mixed, settings.clone())["status"], "fail");
+        assert_eq!(run(mixed, &settings.clone())["status"], "fail");
         let all_features = vec![
             commit("2024-01-01T00:00:00Z", "feat: this", "a@x", "c@x"),
             commit("2024-01-02T00:00:00Z", "feat: that", "a@x", "c@x"),
         ];
-        let result = run(all_features, settings);
+        let result = run(all_features, &settings);
         assert_eq!(result["status"], "pass");
         assert_eq!(
             result["validations"][0]["description"],
@@ -429,13 +429,13 @@ mod tests {
             commit("2024-01-01T00:00:00Z", "fix: this", "a@x", "c@x"),
             commit("2024-01-02T00:00:00Z", "test", "a@x", "c@x"),
         ];
-        let skipped = run(two, settings.clone());
+        let skipped = run(two, &settings.clone());
         assert_eq!(
             skipped["validations"][0]["description"],
             "Since there are more than one commits, Skipping validation"
         );
         let one = vec![commit("2024-01-01T00:00:00Z", "fix: this", "a@x", "c@x")];
-        let failed = run(one, settings);
+        let failed = run(one, &settings);
         assert_eq!(
             failed["validations"][0]["description"],
             DEFAULT_FAIL_MESSAGE
@@ -451,14 +451,14 @@ mod tests {
             "support@github.com",
             "valdis@github1.com",
         )];
-        assert_eq!(run(matching, settings.clone())["status"], "pass");
+        assert_eq!(run(matching, &settings.clone())["status"], "pass");
         let other_domain = vec![commit(
             "2024-01-01T00:00:00Z",
             "fix",
             "support1@github1.com",
             "valdis@github.com",
         )];
-        let result = run(other_domain, settings);
+        let result = run(other_domain, &settings);
         assert_eq!(result["status"], "fail");
         assert_eq!(
             result["validations"][0]["description"],

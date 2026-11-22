@@ -27,7 +27,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
         format!("{validator_name} count is less than \"{count_text}\""),
     );
     let is_mergeable = match input {
-        Value::Array(items) => items.len() as f64 >= count_limit,
+        Value::Array(items) => js::number_from_length(items.len()) >= count_limit,
         _ => return Err(JsError::error(UNKNOWN_INPUT_TYPE_ERROR)),
     };
     Ok(OptionResult::decided(

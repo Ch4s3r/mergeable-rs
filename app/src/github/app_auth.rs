@@ -44,6 +44,7 @@ pub fn octokit_error_message(data: &Value) -> String {
     }
 }
 
+#[must_use]
 pub fn next_page_url(link_header: &str) -> Option<String> {
     link_header.split(',').find_map(|part| {
         let (target, relation) = part.split_once(';')?;
@@ -57,6 +58,7 @@ pub fn next_page_url(link_header: &str) -> Option<String> {
     })
 }
 
+#[must_use]
 pub fn items_of_page(data: Value) -> Vec<Value> {
     match data {
         Value::Array(items) => items,

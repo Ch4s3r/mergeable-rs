@@ -77,15 +77,19 @@ fn output_for(
     match outcome {
         Ok(result) => results::construct_output(
             validator_context,
-            input,
+            input.clone(),
             setting,
             result.status,
             result.description,
             None,
         ),
-        Err(error) => {
-            results::construct_error_output(validator_context, input, setting, &error.message, None)
-        }
+        Err(error) => results::construct_error_output(
+            validator_context,
+            input.clone(),
+            setting,
+            &error.message,
+            None,
+        ),
     }
 }
 
@@ -139,7 +143,7 @@ pub async fn process(
                 );
                 pushed_synchronously.push(results::construct_error_output(
                     validator_context,
-                    input,
+                    input.clone(),
                     &setting,
                     &description,
                     None,

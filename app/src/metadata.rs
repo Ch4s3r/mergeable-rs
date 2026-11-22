@@ -4,10 +4,12 @@ use serde_json::Value;
 const DATA_START: &str = "<!-- #mergeable-data";
 const DATA_END: &str = "#mergeable-data -->";
 
+#[must_use]
 pub fn serialize(data: &Value) -> String {
     format!("{DATA_START} {} {DATA_END}", crate::js::stringify(data))
 }
 
+#[must_use]
 pub fn exists(text: Option<&str>) -> bool {
     text.is_some_and(|content| content.contains(DATA_START) && content.contains(DATA_END))
 }

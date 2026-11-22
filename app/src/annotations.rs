@@ -1,9 +1,11 @@
 use crate::error::JsResult;
+use crate::event_aware::EventAttributes;
 use crate::js;
 use serde_json::Value;
 
 const ANNOTATIONS: [&str; 5] = ["@author", "@action", "@bot", "@repository", "@sender"];
 
+#[must_use]
 pub fn bot_name() -> String {
     match std::env::var("APP_NAME") {
         Ok(name) if !name.is_empty() => format!("{name}[bot]"),
@@ -11,16 +13,23 @@ pub fn bot_name() -> String {
     }
 }
 
-fn annotation_value(annotation: &str, payload: Option<&Value>, event: &Value) -> JsResult<String> {
+fn annotation_value(
+    annotation: &str,
+    payload: Option<&Value>,
+    event: &EventAttributes<'_>,
+) -> JsResult<String> {
     Ok(match annotation {
         "@author" => js::to_js_string(js::read(js::read(payload, "user")?, "login")?),
-        "@action" => js::to_js_string(event.get("action")),
+        "@action" => js::to_js_string(event.action),
         "@bot" => bot_name(),
-        "@repository" => match js::get_path(event, &["repository", "full_name"]) {
+        "@repository" => match event
+            .repository
+            .and_then(|repository| js::get(repository, "full_name"))
+        {
             None | Some(Value::Null) => String::new(),
             Some(full_name) => js::to_js_string(Some(full_name)),
         },
-        _ => match js::read(event.get("sender"), "login")? {
+        _ => match js::read(event.sender, "login")? {
             None | Some(Value::Null) => String::new(),
             Some(login) => js::to_js_string(Some(login)),
         },
@@ -42,7 +51,7 @@ fn replace_first_unescaped(text: &mut String, annotation: &str, replacement: &st
 pub fn search_and_replace_special_annotations(
     template: &str,
     payload: Option<&Value>,
-    event: &Value,
+    event: &EventAttributes<'_>,
 ) -> JsResult<String> {
     let mut result = template.to_string();
     for annotation in ANNOTATIONS {
@@ -73,7 +82,7 @@ mod tests {
         let rendered = search_and_replace_special_annotations(
             "hi @author and \\@author by @sender in @repository",
             Some(&payload),
-            &event(),
+            &EventAttributes::from_payload(&event()),
         )
         .unwrap();
         assert_eq!(rendered, "hi alice and @author by octocat in acme/app");
@@ -82,15 +91,23 @@ mod tests {
     #[test]
     fn escaped_annotation_at_start_is_replaced_after_unescaping() {
         let payload = json!({"user": {"login": "alice"}});
-        let rendered =
-            search_and_replace_special_annotations("\\@author", Some(&payload), &event()).unwrap();
+        let rendered = search_and_replace_special_annotations(
+            "\\@author",
+            Some(&payload),
+            &EventAttributes::from_payload(&event()),
+        )
+        .unwrap();
         assert_eq!(rendered, "alice");
     }
 
     #[test]
     fn missing_author_on_payload_is_a_type_error_even_without_annotation() {
-        let error = search_and_replace_special_annotations("plain", Some(&json!({})), &event())
-            .unwrap_err();
+        let error = search_and_replace_special_annotations(
+            "plain",
+            Some(&json!({})),
+            &EventAttributes::from_payload(&event()),
+        )
+        .unwrap_err();
         assert_eq!(
             error.to_string(),
             "TypeError: Cannot read properties of undefined (reading 'login')"

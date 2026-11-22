@@ -180,18 +180,14 @@ pub async fn list_labels_on_issue(context: &Context, issue_number: &Value) -> Js
         params,
     )
     .await?;
-    labels_names(&response.data)
+    take_from_each(response.data, "name")
 }
 
-fn labels_names(data: &Value) -> JsResult<Vec<Value>> {
+fn take_from_each(data: Value, key: &str) -> JsResult<Vec<Value>> {
     match data {
-        Value::Array(labels) => labels
-            .iter()
-            .map(|label| {
-                Ok(js::read(Some(label), "name")?
-                    .cloned()
-                    .unwrap_or(Value::Null))
-            })
+        Value::Array(items) => items
+            .into_iter()
+            .map(|mut item| Ok(js::take(Some(&mut item), key)?.unwrap_or(Value::Null)))
             .collect(),
         _ => Err(JsError::type_error("res.data.map is not a function")),
     }
@@ -230,9 +226,12 @@ pub async fn set_labels(
 pub async fn create_comment(
     context: &Context,
     issue_number: &Value,
-    body: &Value,
+    body: Value,
 ) -> JsResult<GithubResponse> {
-    let params = context.repo_params(json!({"issue_number": issue_number, "body": body}))?;
+    let mut extra = serde_json::Map::new();
+    extra.insert("issue_number".to_string(), issue_number.clone());
+    extra.insert("body".to_string(), body);
+    let params = context.repo_params(Value::Object(extra))?;
     call(
         context,
         "issues.createComment",
@@ -319,25 +318,11 @@ pub async fn list_members_in_org(
         )
         .await
     {
-        Ok(response) => logins(&response.data),
+        Ok(response) => take_from_each(response.data, "login"),
         Err(error) if error.status == Some(404) => {
             Err(JsError::team_not_found(format!("{org}/{team_slug}")))
         }
         Err(error) => log_and_rethrow(error, context, "teams.listMembersInOrg"),
-    }
-}
-
-fn logins(data: &Value) -> JsResult<Vec<Value>> {
-    match data {
-        Value::Array(users) => users
-            .iter()
-            .map(|user| {
-                Ok(js::read(Some(user), "login")?
-                    .cloned()
-                    .unwrap_or(Value::Null))
-            })
-            .collect(),
-        _ => Err(JsError::type_error("res.data.map is not a function")),
     }
 }
 
@@ -370,17 +355,7 @@ pub async fn project_list_columns(context: &Context, params: Value) -> JsResult<
         params,
     )
     .await?;
-    match &response.data {
-        Value::Array(columns) => columns
-            .iter()
-            .map(|column| {
-                Ok(js::read(Some(column), "id")?
-                    .cloned()
-                    .unwrap_or(Value::Null))
-            })
-            .collect(),
-        _ => Err(JsError::type_error("res.data.map is not a function")),
-    }
+    take_from_each(response.data, "id")
 }
 
 pub async fn project_list_for_repo(context: &Context, params: Value) -> JsResult<Vec<Value>> {
@@ -391,16 +366,16 @@ pub async fn project_list_for_repo(context: &Context, params: Value) -> JsResult
         params,
     )
     .await?;
-    match &response.data {
+    match response.data {
         Value::Array(projects) => Ok(projects
-            .iter()
-            .map(|project| {
+            .into_iter()
+            .map(|mut project| {
                 let mut summary = serde_json::Map::new();
-                if let Some(id) = project.get("id") {
-                    summary.insert("id".to_string(), id.clone());
+                if let Some(id) = project.get_mut("id") {
+                    summary.insert("id".to_string(), id.take());
                 }
-                if let Some(name) = project.get("name") {
-                    summary.insert("name".to_string(), name.clone());
+                if let Some(name) = project.get_mut("name") {
+                    summary.insert("name".to_string(), name.take());
                 }
                 Value::Object(summary)
             })
@@ -438,7 +413,7 @@ pub async fn list_collaborators(context: &Context, params: Value) -> JsResult<Ve
         params,
     )
     .await?;
-    logins(&response.data)
+    take_from_each(response.data, "login")
 }
 
 pub async fn get_all_topics(context: &Context, params: Value) -> JsResult<Value> {
@@ -531,16 +506,16 @@ pub async fn get_pull_request(context: &Context, pull_number: &Value) -> JsResul
 pub async fn request_reviewers(
     context: &Context,
     pull_number: &Value,
-    reviewers: Option<&Value>,
-    team_reviewers: Option<&Value>,
+    reviewers: Option<Value>,
+    team_reviewers: Option<Value>,
 ) -> JsResult<Option<GithubResponse>> {
     let mut extra = serde_json::Map::new();
     extra.insert("pull_number".to_string(), pull_number.clone());
     if let Some(users) = reviewers {
-        extra.insert("reviewers".to_string(), users.clone());
+        extra.insert("reviewers".to_string(), users);
     }
     if let Some(teams) = team_reviewers {
-        extra.insert("team_reviewers".to_string(), teams.clone());
+        extra.insert("team_reviewers".to_string(), teams);
     }
     let params = context.repo_params(Value::Object(extra))?;
     debug_call(context, "pulls.requestReview");
@@ -602,19 +577,22 @@ pub async fn list_commits(context: &Context, pull_number: &Value) -> JsResult<Ve
         params,
     )
     .await?;
-    commits
-        .iter()
-        .map(|commit| {
-            let details = js::read(Some(commit), "commit")?;
-            let author = js::read(details, "author")?;
-            Ok(json!({
-                "message": js::read(details, "message")?.cloned().unwrap_or(Value::Null),
-                "date": js::read(author, "date")?.cloned().unwrap_or(Value::Null),
-                "author": author.cloned().unwrap_or(Value::Null),
-                "committer": js::read(details, "committer")?.cloned().unwrap_or(Value::Null),
-            }))
-        })
-        .collect()
+    commits.into_iter().map(commit_summary).collect()
+}
+
+fn commit_summary(mut commit: Value) -> JsResult<Value> {
+    let mut details = js::take(Some(&mut commit), "commit")?;
+    let author = js::read(details.as_ref(), "author")?;
+    let date = js::read(author, "date")?.cloned().unwrap_or(Value::Null);
+    let message = js::take(details.as_mut(), "message")?.unwrap_or(Value::Null);
+    let author = js::take(details.as_mut(), "author")?.unwrap_or(Value::Null);
+    let committer = js::take(details.as_mut(), "committer")?.unwrap_or(Value::Null);
+    let mut summary = serde_json::Map::new();
+    summary.insert("message".to_string(), message);
+    summary.insert("date".to_string(), date);
+    summary.insert("author".to_string(), author);
+    summary.insert("committer".to_string(), committer);
+    Ok(Value::Object(summary))
 }
 
 pub async fn rate_limit(

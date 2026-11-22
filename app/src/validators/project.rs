@@ -117,21 +117,21 @@ async fn project_card_urls(
         }
     }
     cards
-        .iter()
-        .map(|card| match card {
+        .into_iter()
+        .map(|mut card| match card {
             Value::Null => Err(JsError::type_error(
                 "Cannot read properties of null (reading 'content_url')",
             )),
-            other => Ok(js::get(other, "content_url").cloned()),
+            _ => Ok(js::get_mut(&mut card, "content_url").map(Value::take)),
         })
         .collect()
 }
 
-fn project_names(projects: &[Value]) -> Value {
+fn project_names(projects: Vec<Value>) -> Value {
     Value::Array(
         projects
-            .iter()
-            .map(|project| project.get("name").cloned().unwrap_or(Value::Null))
+            .into_iter()
+            .map(|mut project| project.get_mut("name").map_or(Value::Null, Value::take))
             .collect(),
     )
 }
@@ -181,7 +181,7 @@ impl Validator for Project {
         let Some(project_name) = project_name.filter(|name| js::is_truthy(name)) else {
             let output = results::construct_error_output(
                 &Value::String("project".to_string()),
-                &Value::Array(projects),
+                Value::Array(projects),
                 settings,
                 MATCH_NOT_FOUND_ERROR,
                 None,
@@ -203,7 +203,7 @@ impl Validator for Project {
 
         let output = results::construct_output(
             &validator_context,
-            &project_names(&projects),
+            project_names(projects),
             settings,
             if is_mergeable { "pass" } else { "fail" },
             if is_mergeable {

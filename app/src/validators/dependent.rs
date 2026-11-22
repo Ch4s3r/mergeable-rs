@@ -18,16 +18,12 @@ const VALIDATOR_NAME: &str = "Dependent";
 
 pub struct Dependent;
 
-fn modified_file_names(files: &[Value]) -> JsResult<Vec<Value>> {
+fn modified_file_names(files: Vec<Value>) -> JsResult<Vec<Value>> {
     let mut modified = Vec::new();
-    for file in files {
-        let status = js::read(Some(file), "status")?;
-        if js::as_str(status) == Some("modified") || js::as_str(status) == Some("added") {
-            modified.push(
-                js::read(Some(file), "filename")?
-                    .cloned()
-                    .unwrap_or(Value::Null),
-            );
+    for mut file in files {
+        let status = js::as_str(js::read(Some(&file), "status")?);
+        if status == Some("modified") || status == Some("added") {
+            modified.push(js::take(Some(&mut file), "filename")?.unwrap_or(Value::Null));
         }
     }
     Ok(modified)
@@ -36,7 +32,7 @@ fn modified_file_names(files: &[Value]) -> JsResult<Vec<Value>> {
 fn error_result(modified_files: Vec<Value>, settings: &Value, message: &str) -> Value {
     let output = results::construct_error_output(
         &Value::String(VALIDATOR_NAME.to_string()),
-        &Value::Array(modified_files),
+        Value::Array(modified_files),
         settings,
         message,
         None,
@@ -53,7 +49,7 @@ fn any_file_matches(modified_files: &[Value], pattern: &Value) -> JsResult<bool>
     Ok(false)
 }
 
-fn join_values(values: &[Value], separator: &str) -> String {
+fn join_values(values: &[&Value], separator: &str) -> String {
     values
         .iter()
         .map(|value| match value {
@@ -64,7 +60,7 @@ fn join_values(values: &[Value], separator: &str) -> String {
         .join(separator)
 }
 
-pub fn evaluate(files: &[Value], settings: &Value) -> JsResult<Value> {
+pub fn evaluate(files: Vec<Value>, settings: &Value) -> JsResult<Value> {
     let modified_files = modified_file_names(files)?;
     let changed_option = settings.get("changed").filter(|value| js::is_truthy(value));
     if !js::truthy(settings.get("files")) && changed_option.is_none() {
@@ -75,8 +71,8 @@ pub fn evaluate(files: &[Value], settings: &Value) -> JsResult<Value> {
         ));
     }
 
-    let dependent_files: Vec<Value>;
-    let file_difference: Vec<Value>;
+    let dependent_files: &[Value];
+    let file_difference: Vec<&Value>;
     let is_mergeable: bool;
     if let Some(changed) = changed_option {
         let Some(trigger_pattern) = js::read(Some(changed), "file")? else {
@@ -87,13 +83,13 @@ pub fn evaluate(files: &[Value], settings: &Value) -> JsResult<Value> {
                 js::read(Some(changed), "required")?.filter(|value| js::is_truthy(value));
             lodash::array_like(required.or(changed.get("files")))
         } else {
-            Vec::new()
+            &[]
         };
-        file_difference = lodash::difference(&dependent_files, &modified_files);
+        file_difference = lodash::difference(dependent_files, &modified_files);
         is_mergeable = file_difference.is_empty();
     } else {
         dependent_files = lodash::array_like(settings.get("files"));
-        file_difference = lodash::difference(&dependent_files, &modified_files);
+        file_difference = lodash::difference(dependent_files, &modified_files);
         is_mergeable = file_difference.len() == dependent_files.len() || file_difference.is_empty();
     }
 
@@ -105,12 +101,12 @@ pub fn evaluate(files: &[Value], settings: &Value) -> JsResult<Value> {
         None => Value::String(format!(
             "One or more files ({}) are missing from your pull request because they are dependent on the following: {}",
             join_values(&file_difference, ", "),
-            join_values(&lodash::difference(&dependent_files, &file_difference), ",")
+            join_values(&lodash::difference(dependent_files, &file_difference), ",")
         )),
     };
     let output = results::construct_output(
         &Value::String(VALIDATOR_NAME.to_string()),
-        &Value::Array(modified_files),
+        Value::Array(modified_files),
         settings,
         if is_mergeable { "pass" } else { "fail" },
         if is_mergeable {
@@ -150,15 +146,14 @@ impl Validator for Dependent {
         settings: &Value,
         _registry: &Registry,
     ) -> JsResult<Value> {
-        let pull_number = js::read(event_aware::get_payload(context), "number")?
-            .cloned()
-            .unwrap_or(Value::Null);
+        let pull_number =
+            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
         )
         .await?;
-        evaluate(&files, settings)
+        evaluate(files, settings)
     }
 }
 
@@ -173,36 +168,36 @@ mod tests {
             .collect()
     }
 
-    fn status_of(files: &[Value], settings: Value) -> Value {
-        evaluate(files, &settings).unwrap()["status"].clone()
+    fn status_of(files: &[Value], settings: &Value) -> Value {
+        evaluate(files.to_vec(), settings).unwrap()["status"].clone()
     }
 
     #[test]
     fn changed_file_present_with_all_dependent_files_passes() {
         let files = modified(&["package-lock.json", "yarn.lock", "package.json", "a.js"]);
         let settings = json!({"do": "dependent", "changed": {"file": "package.json", "files": ["package-lock.json", "yarn.lock"]}});
-        assert_eq!(status_of(&files, settings), "pass");
+        assert_eq!(status_of(&files, &settings), "pass");
         let one_dependent = json!({"do": "dependent", "changed": {"file": "package.json", "files": ["package-lock.json"]}});
-        assert_eq!(status_of(&files, one_dependent), "pass");
+        assert_eq!(status_of(&files, &one_dependent), "pass");
     }
 
     #[test]
     fn changed_file_present_without_dependent_file_fails() {
         let files = modified(&["package.json", "a.js", "b.js"]);
         let settings = json!({"do": "dependent", "changed": {"file": "package.json", "files": ["package-lock.json"]}});
-        assert_eq!(status_of(&files, settings), "fail");
+        assert_eq!(status_of(&files, &settings), "fail");
     }
 
     #[test]
     fn required_sub_option_is_an_alias_for_files() {
         let settings = json!({"do": "dependent", "changed": {"file": "package.json", "required": ["package-lock.json"]}});
-        assert_eq!(status_of(&[], settings), "pass");
+        assert_eq!(status_of(&[], &settings), "pass");
     }
 
     #[test]
     fn missing_file_sub_option_is_an_error() {
         let settings = json!({"do": "dependent", "changed": {"required": ["package-lock.json"]}});
-        let result = evaluate(&[], &settings).unwrap();
+        let result = evaluate(Vec::new(), &settings).unwrap();
         assert_eq!(result["status"], "error");
         assert_eq!(
             result["validations"][0]["description"],
@@ -213,7 +208,7 @@ mod tests {
 
     #[test]
     fn missing_files_and_changed_options_is_an_error() {
-        let result = evaluate(&[], &json!({"do": "dependent"})).unwrap();
+        let result = evaluate(Vec::new(), &json!({"do": "dependent"})).unwrap();
         assert_eq!(
             result["validations"][0]["description"],
             FILES_NOT_FOUND_ERROR
@@ -223,13 +218,13 @@ mod tests {
     #[test]
     fn glob_in_changed_file_matches_nested_files() {
         let settings = json!({"do": "dependent", "changed": {"file": "**/*.js", "files": ["package-lock.json"]}});
-        assert_eq!(status_of(&modified(&["a.js"]), settings.clone()), "fail");
+        assert_eq!(status_of(&modified(&["a.js"]), &settings.clone()), "fail");
         assert_eq!(
-            status_of(&modified(&["test/test.js"]), settings.clone()),
+            status_of(&modified(&["test/test.js"]), &settings.clone()),
             "fail"
         );
         assert_eq!(
-            status_of(&modified(&["test/test.js", "package-lock.json"]), settings),
+            status_of(&modified(&["test/test.js", "package-lock.json"]), &settings),
             "pass"
         );
     }
@@ -237,7 +232,7 @@ mod tests {
     #[test]
     fn untouched_dependent_files_pass() {
         assert_eq!(
-            status_of(&[], json!({"do": "dependent", "files": ["a.js", "b.go"]})),
+            status_of(&[], &json!({"do": "dependent", "files": ["a.js", "b.go"]})),
             "pass"
         );
     }
@@ -251,7 +246,7 @@ mod tests {
         assert_eq!(
             status_of(
                 &files,
-                json!({"do": "dependent", "files": ["package.json", "yarn.lock"]})
+                &json!({"do": "dependent", "files": ["package.json", "yarn.lock"]})
             ),
             "pass"
         );
@@ -260,7 +255,7 @@ mod tests {
     #[test]
     fn only_some_dependent_files_modified_fails_with_default_description() {
         let result = evaluate(
-            &modified(&["package.json"]),
+            modified(&["package.json"]),
             &json!({"do": "dependent", "files": ["package.json", "yarn.lock"]}),
         )
         .unwrap();
@@ -274,7 +269,7 @@ mod tests {
     #[test]
     fn custom_message_replaces_the_default_description() {
         let settings = json!({"do": "dependent", "files": ["package.json", "yarn.lock"], "message": "Test Message"});
-        let result = evaluate(&modified(&["package.json"]), &settings).unwrap();
+        let result = evaluate(modified(&["package.json"]), &settings).unwrap();
         assert_eq!(result["validations"][0]["description"], "Test Message");
     }
 }

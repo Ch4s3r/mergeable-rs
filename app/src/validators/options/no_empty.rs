@@ -44,16 +44,16 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn assert_status(enabled: bool, input: Value, list_input: Value, expected: &str) {
+    fn assert_status(enabled: bool, input: &Value, list_input: &Value, expected: &str) {
         let rule = json!({"no_empty": {"enabled": enabled}});
         assert_eq!(
-            process(&json!({"name": "label"}), &input, &rule)
+            process(&json!({"name": "label"}), input, &rule)
                 .unwrap()
                 .status,
             expected
         );
         assert_eq!(
-            process(&json!({"name": "label"}), &list_input, &rule)
+            process(&json!({"name": "label"}), list_input, &rule)
                 .unwrap()
                 .status,
             expected
@@ -62,16 +62,16 @@ mod tests {
 
     #[test]
     fn non_empty_input_passes_and_disabled_option_always_passes() {
-        assert_status(true, json!("NOT EMPTY"), json!([""]), "pass");
-        assert_status(false, json!("NOT EMPTY"), json!([""]), "pass");
-        assert_status(false, json!(""), json!([""]), "pass");
+        assert_status(true, &json!("NOT EMPTY"), &json!([""]), "pass");
+        assert_status(false, &json!("NOT EMPTY"), &json!([""]), "pass");
+        assert_status(false, &json!(""), &json!([""]), "pass");
     }
 
     #[test]
     fn empty_or_missing_input_fails() {
-        assert_status(true, json!(""), json!([]), "fail");
-        assert_status(true, Value::Null, json!([]), "fail");
-        assert_status(true, json!("  \n "), json!([]), "fail");
+        assert_status(true, &json!(""), &json!([]), "fail");
+        assert_status(true, &Value::Null, &json!([]), "fail");
+        assert_status(true, &json!("  \n "), &json!([]), "fail");
     }
 
     #[test]

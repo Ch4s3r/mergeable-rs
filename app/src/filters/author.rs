@@ -7,6 +7,7 @@ use crate::registry::Registry;
 use crate::validators::options_processor::teams;
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use std::borrow::Cow;
 
 pub struct Author;
 
@@ -38,22 +39,20 @@ impl Filter for Author {
     ) -> JsResult<Value> {
         let payload = event_aware::get_payload(context)
             .ok_or_else(|| JsError::reading_property_of_undefined("user"))?;
-        let mut remaining_settings = settings.clone();
+        let mut remaining_settings = Cow::Borrowed(settings);
 
         if js::truthy(settings.get("team")) {
             let result = teams::process_team_option(context, settings, Some(payload)).await?;
             if result.get("status").and_then(Value::as_str) != Some("pass") {
                 return Ok(result);
             }
-            if let Value::Object(fields) = &mut remaining_settings {
+            if let Value::Object(fields) = remaining_settings.to_mut() {
                 fields.shift_remove("team");
             }
         }
 
-        let login = js::read(js::read(Some(payload), "user")?, "login")?
-            .cloned()
-            .unwrap_or(Value::Null);
-        filters::process_options(self, context, &login, &remaining_settings).await
+        let login = js::read(js::read(Some(payload), "user")?, "login")?.unwrap_or(&Value::Null);
+        filters::process_options(self, context, login, &remaining_settings).await
     }
 }
 
@@ -74,7 +73,7 @@ mod tests {
     }
 
     async fn filter_author(settings: Value) -> Value {
-        let context = pull_request_context(PullRequest {
+        let context = pull_request_context(&PullRequest {
             author: AUTHOR_NAME,
             ..PullRequest::default()
         });
