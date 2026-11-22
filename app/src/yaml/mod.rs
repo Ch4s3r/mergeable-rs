@@ -3,46 +3,49 @@ mod mark;
 mod types;
 mod value;
 
+use crate::error::ErrorKind;
 use serde_json::Value;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Dialect {
-    JsYaml3,
-    JsYaml4,
+    Lenient,
+    Strict,
 }
 
 #[derive(Debug, Clone)]
 pub struct YamlError {
-    pub name: &'static str,
+    pub kind: ErrorKind,
     pub message: String,
 }
 
 impl YamlError {
-    fn yaml_exception(message: String) -> Self {
+    fn syntax(message: String) -> Self {
         Self {
-            name: "YAMLException",
+            kind: ErrorKind::Yaml,
             message,
         }
     }
 
     #[must_use]
-    pub fn is_yaml_exception(&self) -> bool {
-        self.name == "YAMLException"
+    pub fn is_syntax_error(&self) -> bool {
+        self.kind == ErrorKind::Yaml
     }
 }
 
 impl std::fmt::Display for YamlError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "{}", self.message)
+        formatter.write_str(&self.message)
     }
 }
 
+impl std::error::Error for YamlError {}
+
 pub fn parse(text: &str) -> Result<Option<Value>, YamlError> {
-    load_single_document(text, Dialect::JsYaml3)
+    load_single_document(text, Dialect::Lenient)
 }
 
-pub fn parse_like_js_yaml_4(text: &str) -> Result<Option<Value>, YamlError> {
-    load_single_document(text, Dialect::JsYaml4)
+pub fn parse_strict(text: &str) -> Result<Option<Value>, YamlError> {
+    load_single_document(text, Dialect::Strict)
 }
 
 const LOADER_STACK_BYTES: usize = 64 * 1024 * 1024;
@@ -54,12 +57,12 @@ fn load_single_document(text: &str, dialect: Dialect) -> Result<Option<Value>, Y
             .stack_size(LOADER_STACK_BYTES)
             .spawn_scoped(scope, || load_on_current_thread(text, dialect))
             .map_err(|error| YamlError {
-                name: "Error",
+                kind: ErrorKind::General,
                 message: error.to_string(),
             })?
             .join()
             .map_err(|_| YamlError {
-                name: "RangeError",
+                kind: ErrorKind::OutOfRange,
                 message: "Maximum call stack size exceeded".to_string(),
             })?
     })
@@ -72,7 +75,7 @@ fn load_on_current_thread(text: &str, dialect: Dialect) -> Result<Option<Value>,
         return Ok(None);
     };
     if documents.next().is_some() {
-        return Err(YamlError::yaml_exception(
+        return Err(YamlError::syntax(
             "expected a single document in the stream, but found more".to_string(),
         ));
     }

@@ -1,18 +1,20 @@
-use crate::error::JsResult;
-use crate::validators::options::lib::{OptionResult, and_or_processor};
+use crate::error::Result;
+use crate::validators::options::lib::OptionResult;
+use crate::validators::options::lib::and_or_processor::{self, Connective};
 use serde_json::Value;
 
 pub async fn process(
     validator_context: &Value,
     input: &Value,
     rule: &Value,
-) -> JsResult<OptionResult> {
-    and_or_processor::process(validator_context, input, rule, "and").await
+) -> Result<OptionResult> {
+    and_or_processor::process(validator_context, input, rule, Connective::And).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validators::options::lib::OptionStatus;
     use serde_json::json;
 
     fn label_context() -> Value {
@@ -28,7 +30,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            "pass"
+            OptionStatus::Pass
         );
     }
 
@@ -39,7 +41,7 @@ mod tests {
         let result = process(&label_context(), &json!(["B"]), &rule)
             .await
             .unwrap();
-        assert_eq!(result.status, "fail");
+        assert_eq!(result.status, OptionStatus::Fail);
         assert_eq!(
             result.description,
             json!("(label does not include \"A\"  ***AND***  label does not exclude \"B\")")
@@ -53,7 +55,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "Input type invalid, expected array type as input"
         );
     }
@@ -67,7 +69,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            "error"
+            OptionStatus::Error
         );
         let unknown_option =
             json!({"and": [{"must_inclde": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
@@ -76,7 +78,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            "error"
+            OptionStatus::Error
         );
     }
 
@@ -87,7 +89,7 @@ mod tests {
         let result = process(&label_context(), &json!(["B"]), &rule)
             .await
             .unwrap();
-        assert_eq!(result.status, "error");
+        assert_eq!(result.status, OptionStatus::Error);
         assert_eq!(
             result.description,
             json!(

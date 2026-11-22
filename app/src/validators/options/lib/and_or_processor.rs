@@ -1,44 +1,69 @@
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use crate::validators::options;
-use crate::validators::options::lib::OptionResult;
+use crate::validators::options::lib::{OptionResult, OptionStatus};
 use futures::future::{BoxFuture, join_all};
 use serde_json::Value;
 
 const UNKNOWN_INPUT_TYPE_ERROR: &str = "Input type invalid, expected array type as input";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Connective {
+    And,
+    Or,
+}
+
+impl Connective {
+    fn key(self) -> &'static str {
+        match self {
+            Connective::And => "and",
+            Connective::Or => "or",
+        }
+    }
+
+    fn separator(self) -> &'static str {
+        match self {
+            Connective::And => " ***AND*** ",
+            Connective::Or => " ***OR*** ",
+        }
+    }
+
+    fn combine(self, previous: bool, next: bool) -> bool {
+        match self {
+            Connective::And => previous && next,
+            Connective::Or => previous || next,
+        }
+    }
+}
+
 async fn validate_filter(
     validator_context: &Value,
     input: &Value,
     filter: &Value,
-) -> JsResult<Option<Value>> {
-    if js::truthy(js::read(Some(filter), "and")?) {
-        return Ok(Some(
-            process(validator_context, input, filter, "and")
-                .await?
-                .into_value(),
-        ));
-    }
-    if js::truthy(js::read(Some(filter), "or")?) {
-        return Ok(Some(
-            process(validator_context, input, filter, "or")
-                .await?
-                .into_value(),
-        ));
+) -> Result<Option<Value>> {
+    for connective in [Connective::And, Connective::Or] {
+        if json_value::truthy(json_value::read(Some(filter), connective.key())?) {
+            return Ok(Some(
+                process(validator_context, input, filter, connective)
+                    .await?
+                    .into_value(),
+            ));
+        }
     }
     let mut raw_output = options::process(validator_context, input, filter, true).await?;
-    Ok(js::get_mut(&mut raw_output, "0").map(Value::take))
+    Ok(json_value::get_mut(&mut raw_output, "0").map(Value::take))
 }
 
 pub fn process<'call>(
     validator_context: &'call Value,
     input: &'call Value,
     rule: &'call Value,
-    key: &'call str,
-) -> BoxFuture<'call, JsResult<OptionResult>> {
+    connective: Connective,
+) -> BoxFuture<'call, Result<OptionResult>> {
     Box::pin(async move {
-        let Some(Value::Array(filters)) = js::get(rule, key) else {
-            return Err(JsError::error(UNKNOWN_INPUT_TYPE_ERROR));
+        let key = connective.key();
+        let Some(Value::Array(filters)) = json_value::get(rule, key) else {
+            return Err(Error::general(UNKNOWN_INPUT_TYPE_ERROR));
         };
         let validated: Vec<Option<Value>> = join_all(
             filters
@@ -47,22 +72,21 @@ pub fn process<'call>(
         )
         .await
         .into_iter()
-        .collect::<JsResult<_>>()?;
+        .collect::<Result<_>>()?;
 
-        let is_and = key == "and";
         let mut is_mergeable: Option<bool> = None;
         let mut descriptions = String::new();
         let mut does_error_exist = false;
         let mut error_message = String::from("Error occurred: \n");
 
         for result in &validated {
-            let status = js::read(result.as_ref(), "status")?;
-            let description_text = js::to_js_string(
+            let status = json_value::read(result.as_ref(), "status")?;
+            let description_text = json_value::to_display_string(
                 result
                     .as_ref()
-                    .and_then(|present| js::get(present, "description")),
+                    .and_then(|present| json_value::get(present, "description")),
             );
-            let status_text = js::as_str(status);
+            let status_text = json_value::as_str(status);
             if status_text == Some("error") {
                 does_error_exist = true;
                 error_message.push_str("- ");
@@ -71,15 +95,13 @@ pub fn process<'call>(
             }
             let result_success = status_text == Some("pass");
             is_mergeable = Some(match is_mergeable {
-                Some(previous) if is_and => previous && result_success,
-                Some(previous) => previous || result_success,
+                Some(previous) => connective.combine(previous, result_success),
                 None => result_success,
             });
             if status_text == Some("fail") {
                 if descriptions.encode_utf16().count() > 2 {
-                    let connective = if is_and { " ***AND*** " } else { " ***OR*** " };
                     descriptions.push(' ');
-                    descriptions.push_str(connective);
+                    descriptions.push_str(connective.separator());
                     descriptions.push(' ');
                     descriptions.push_str(&description_text);
                 } else {
@@ -90,7 +112,7 @@ pub fn process<'call>(
 
         if does_error_exist {
             return Ok(OptionResult {
-                status: "error",
+                status: OptionStatus::Error,
                 description: Value::String(error_message),
             });
         }

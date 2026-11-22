@@ -21,10 +21,10 @@ fn is_match(pattern: &LazyLock<Option<Regex>>, text: &str) -> bool {
         .is_some_and(|compiled| compiled.is_match(text))
 }
 
-struct BalancedMatch {
-    pre: String,
-    body: String,
-    post: String,
+struct BalancedMatch<'text> {
+    pre: &'text str,
+    body: &'text str,
+    post: &'text str,
 }
 
 fn balanced_range(text: &str) -> Option<(usize, usize)> {
@@ -74,31 +74,21 @@ fn balanced_range(text: &str) -> Option<(usize, usize)> {
     result
 }
 
-fn balanced(text: &str) -> Option<BalancedMatch> {
+fn balanced(text: &str) -> Option<BalancedMatch<'_>> {
     let (start, end) = balanced_range(text)?;
     Some(BalancedMatch {
-        pre: text[..start].to_string(),
-        body: text[start + 1..end].to_string(),
-        post: text[end + 1..].to_string(),
+        pre: &text[..start],
+        body: &text[start + 1..end],
+        post: &text[end + 1..],
     })
 }
 
 fn escape_braces(text: &str) -> String {
-    text.split("\\\\")
-        .collect::<Vec<_>>()
-        .join(ESCAPED_SLASH)
-        .split("\\{")
-        .collect::<Vec<_>>()
-        .join(ESCAPED_OPEN)
-        .split("\\}")
-        .collect::<Vec<_>>()
-        .join(ESCAPED_CLOSE)
-        .split("\\,")
-        .collect::<Vec<_>>()
-        .join(ESCAPED_COMMA)
-        .split("\\.")
-        .collect::<Vec<_>>()
-        .join(ESCAPED_PERIOD)
+    text.replace("\\\\", ESCAPED_SLASH)
+        .replace("\\{", ESCAPED_OPEN)
+        .replace("\\}", ESCAPED_CLOSE)
+        .replace("\\,", ESCAPED_COMMA)
+        .replace("\\.", ESCAPED_PERIOD)
 }
 
 fn unescape_braces(text: &str) -> String {
@@ -119,10 +109,10 @@ fn parse_comma_parts(text: &str) -> Vec<String> {
     let mut parts: Vec<String> = found.pre.split(',').map(str::to_string).collect();
     if let Some(last) = parts.last_mut() {
         last.push('{');
-        last.push_str(&found.body);
+        last.push_str(found.body);
         last.push('}');
     }
-    let mut post_parts = parse_comma_parts(&found.post);
+    let mut post_parts = parse_comma_parts(found.post);
     if !found.post.is_empty() {
         if !post_parts.is_empty() {
             let first_post = post_parts.remove(0);
@@ -140,10 +130,10 @@ pub fn expand_top(pattern: &str) -> Vec<String> {
     if pattern.is_empty() {
         return Vec::new();
     }
-    let mut text = pattern.to_string();
-    if text.starts_with("{}") {
-        text = format!("\\{{\\}}{}", &text[2..]);
-    }
+    let text = match pattern.strip_prefix("{}") {
+        Some(rest) => format!("\\{{\\}}{rest}"),
+        None => pattern.to_string(),
+    };
     expand(&escape_braces(&text), true)
         .iter()
         .map(|expansion| unescape_braces(expansion))
@@ -167,12 +157,12 @@ fn expand(text: &str, is_top: bool) -> Vec<String> {
     if found.pre.ends_with('$') {
         return vec![text.to_string()];
     }
-    let is_numeric_sequence = is_match(&NUMERIC_SEQUENCE, &found.body);
-    let is_alpha_sequence = is_match(&ALPHA_SEQUENCE, &found.body);
+    let is_numeric_sequence = is_match(&NUMERIC_SEQUENCE, found.body);
+    let is_alpha_sequence = is_match(&ALPHA_SEQUENCE, found.body);
     let is_sequence = is_numeric_sequence || is_alpha_sequence;
     let is_options = found.body.contains(',');
     if !is_sequence && !is_options {
-        if is_match(&COMMA_BEFORE_CLOSE, &found.post) {
+        if is_match(&COMMA_BEFORE_CLOSE, found.post) {
             let rewritten = format!(
                 "{}{{{}{}{}",
                 found.pre, found.body, ESCAPED_CLOSE, found.post
@@ -184,7 +174,7 @@ fn expand(text: &str, is_top: bool) -> Vec<String> {
     let parts: Vec<String> = if is_sequence {
         found.body.split("..").map(str::to_string).collect()
     } else {
-        let comma_parts = parse_comma_parts(&found.body);
+        let comma_parts = parse_comma_parts(found.body);
         if comma_parts.len() == 1 {
             let embraced: Vec<String> = expand(&comma_parts[0], false)
                 .iter()
@@ -194,7 +184,7 @@ fn expand(text: &str, is_top: bool) -> Vec<String> {
                 let post = if found.post.is_empty() {
                     vec![String::new()]
                 } else {
-                    expand(&found.post, false)
+                    expand(found.post, false)
                 };
                 return post
                     .iter()
@@ -209,7 +199,7 @@ fn expand(text: &str, is_top: bool) -> Vec<String> {
     let post = if found.post.is_empty() {
         vec![String::new()]
     } else {
-        expand(&found.post, false)
+        expand(found.post, false)
     };
     let items: Vec<String> = if is_sequence {
         sequence_items(&parts, is_alpha_sequence)
@@ -244,7 +234,7 @@ fn sequence_items(parts: &[String], is_alpha_sequence: bool) -> Vec<String> {
     let pad = parts.iter().any(|part| is_match(&PADDED_NUMBER, part));
     let mut items = Vec::new();
     if increment == 0 {
-        // ponytail: brace-expansion loops forever on a zero step; return no items instead of hanging
+        // ponytail: a zero step never terminates; it yields no items instead of hanging
         return items;
     }
     let mut current = start;

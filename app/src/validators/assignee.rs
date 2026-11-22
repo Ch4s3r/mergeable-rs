@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::options_processor::map_logins;
 use crate::validators::{self, Validator};
@@ -25,11 +25,11 @@ impl Validator for Assignee {
         ]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "min": {"count": "number", "message": "string"},
             "max": {"count": "number", "message": "string"}
-        }))
+        })
     }
 
     async fn validate(
@@ -37,8 +37,8 @@ impl Validator for Assignee {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
-        let assignees = js::read(event_aware::get_payload(context), "assignees")?;
+    ) -> Result<Value> {
+        let assignees = json_value::read(event_aware::get_payload(context), "assignees")?;
         let logins = map_logins(assignees, "assignees")?;
         validators::process_options(settings, &Value::Array(logins), None).await
     }

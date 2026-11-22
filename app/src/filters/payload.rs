@@ -1,9 +1,8 @@
 use crate::context::Context;
-use crate::error::JsResult;
-use crate::event_aware;
+use crate::error::Result;
 use crate::filters::options::lib::{consolidate_results, construct_error};
 use crate::filters::{self, Filter};
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -20,7 +19,7 @@ const OPTION_NAMES: [&str; 5] = [
 
 pub struct Payload;
 
-type FieldWalk<'walk> = Pin<Box<dyn Future<Output = JsResult<()>> + Send + 'walk>>;
+type FieldWalk<'walk> = Pin<Box<dyn Future<Output = Result<()>> + Send + 'walk>>;
 
 fn with_path_as_name(field: &Value, current_path: &str) -> Value {
     let mut named = field.clone();
@@ -39,7 +38,7 @@ fn recurse_through_fields<'walk>(
     field: &'walk Value,
 ) -> FieldWalk<'walk> {
     Box::pin(async move {
-        for key in js::object_keys(Some(field))? {
+        for key in json_value::object_keys(Some(field))? {
             if key == "do" {
                 continue;
             }
@@ -50,7 +49,7 @@ fn recurse_through_fields<'walk>(
                 continue;
             }
             let nested_path = format!("{current_path}.{key}");
-            match js::read(Some(payload), &key)? {
+            match json_value::read(Some(payload), &key)? {
                 None => output.push(construct_error(
                     &json!({"name": "payload"}),
                     json!(""),
@@ -59,7 +58,7 @@ fn recurse_through_fields<'walk>(
                     None,
                 )),
                 Some(nested_payload) => {
-                    let nested_field = js::get(field, &key).unwrap_or(&Value::Null);
+                    let nested_field = json_value::get(field, &key).unwrap_or(&Value::Null);
                     recurse_through_fields(
                         filter,
                         context,
@@ -91,8 +90,8 @@ impl Filter for Payload {
         ]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({}))
+    fn supported_settings(&self) -> Value {
+        json!({})
     }
 
     fn checks_settings(&self) -> bool {
@@ -104,14 +103,14 @@ impl Filter for Payload {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let mut output = Vec::new();
         recurse_through_fields(
             self,
             context,
             "payload".to_string(),
             &mut output,
-            event_aware::get_all_payload(context),
+            &context.payload,
             settings,
         )
         .await?;
@@ -247,7 +246,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn nested_field_under_a_null_value_throws_like_node() {
+    async fn nested_field_under_a_null_value_fails_with_a_type_error() {
         let settings = json!({"do": "payload", "pull_request": {"milestone": {"title": {"must_include": {"regex": "v1"}}}}});
         let payload =
             json!({"repository": {"full_name": "test-repo"}, "pull_request": {"milestone": null}});

@@ -1,9 +1,8 @@
-use crate::actions::comment::spawn_detached;
-use crate::actions::{Action, get_actionables};
+use crate::actions::{Action, actionables, spawn_detached};
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use async_trait::async_trait;
 use serde_json::Value;
 
@@ -27,24 +26,15 @@ impl Action for Close {
         &SUPPORTED_EVENTS
     }
 
-    async fn before_validate(
-        &self,
-        _context: &Context,
-        _rule: &Value,
-        _rule_name: Option<&Value>,
-    ) -> JsResult<()> {
-        Ok(())
-    }
-
     async fn after_validate(
         &self,
         context: &Context,
         _settings: &Value,
         _rule_name: Option<&Value>,
-        results: &Value,
-    ) -> JsResult<()> {
-        for issue in get_actionables(context, results) {
-            let issue_number = js::read(Some(&*issue), "number")?
+        validation_report: &Value,
+    ) -> Result<()> {
+        for issue in actionables(context, validation_report) {
+            let issue_number = json_value::read(Some(&*issue), "number")?
                 .cloned()
                 .unwrap_or(Value::Null);
             let task_context = context.clone();

@@ -21,13 +21,13 @@ fn spaces(count: i64) -> String {
     " ".repeat(usize::try_from(count).unwrap_or(0))
 }
 
-pub(super) fn format_js_yaml_3(reason: &str, mark: &Mark) -> String {
+pub(super) fn format_lenient_error(reason: &str, mark: &Mark) -> String {
     let mut location = format!(
         "at line {}, column {}",
         to_i64(mark.line) + 1,
         mark.column + 1
     );
-    if let Some(snippet) = js_yaml_3_snippet(mark) {
+    if let Some(snippet) = lenient_snippet(mark) {
         location.push_str(":\n");
         location.push_str(&snippet);
     }
@@ -38,7 +38,7 @@ fn is_snippet_boundary(unit: u16) -> bool {
     matches!(unit, 0x00 | 0x0D | 0x0A | 0x85 | 0x2028 | 0x2029)
 }
 
-fn js_yaml_3_snippet(mark: &Mark) -> Option<String> {
+fn lenient_snippet(mark: &Mark) -> Option<String> {
     const INDENT: i64 = 4;
     const HALF_WIDTH_LIMIT: usize = 36;
     let buffer = &mark.buffer;
@@ -79,16 +79,16 @@ fn js_yaml_3_snippet(mark: &Mark) -> Option<String> {
     ))
 }
 
-pub(super) fn format_js_yaml_4(reason: &str, mark: &Mark) -> String {
+pub(super) fn format_strict_error(reason: &str, mark: &Mark) -> String {
     let mut location = format!("({}:{})", to_i64(mark.line) + 1, mark.column + 1);
-    if let Some(snippet) = js_yaml_4_snippet(mark) {
+    if let Some(snippet) = strict_snippet(mark) {
         location.push_str("\n\n");
         location.push_str(&snippet);
     }
     format!("{reason} {location}")
 }
 
-fn js_slice(buffer: &[u16], start: i64, end: Option<i64>) -> &[u16] {
+fn utf16_slice(buffer: &[u16], start: i64, end: Option<i64>) -> &[u16] {
     let length = to_i64(buffer.len());
     let clamp = |index: i64| {
         let absolute = if index < 0 { length + index } else { index };
@@ -127,7 +127,7 @@ fn snippet_line(
         tail = " ...";
         line_end = Some(position + maximum_half_length - to_i64(tail.len()));
     }
-    let units: Vec<u16> = js_slice(buffer, line_start, line_end)
+    let units: Vec<u16> = utf16_slice(buffer, line_start, line_end)
         .iter()
         .map(|unit| {
             if *unit == TAB {
@@ -184,7 +184,7 @@ fn line_table(buffer: &[u16], position: i64) -> LineTable {
     }
 }
 
-fn js_yaml_4_snippet(mark: &Mark) -> Option<String> {
+fn strict_snippet(mark: &Mark) -> Option<String> {
     const MAXIMUM_LENGTH: i64 = 79;
     const INDENT: i64 = 1;
     const LINES_BEFORE: i64 = 3;

@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use crate::validators::options::lib::construct_output;
@@ -9,20 +9,24 @@ use crate::validators::{self, Validator};
 use async_trait::async_trait;
 use futures::future::join_all;
 use serde_json::{Map, Value, json};
+use std::borrow::Cow;
 
 pub struct BaseRef;
 
 async fn validate_pull_requests(
     pull_requests: impl IntoIterator<Item = &Value>,
     settings: &Value,
-) -> JsResult<Value> {
+) -> Result<Value> {
     let validator_context = json!({"name": "baseRef"});
     let base_refs: Vec<&Value> = pull_requests
         .into_iter()
         .map(|pull_request| {
-            Ok(js::read(js::read(Some(pull_request), "base")?, "ref")?.unwrap_or(&Value::Null))
+            Ok(
+                json_value::read(json_value::read(Some(pull_request), "base")?, "ref")?
+                    .unwrap_or(&Value::Null),
+            )
         })
-        .collect::<JsResult<_>>()?;
+        .collect::<Result<_>>()?;
     if base_refs.is_empty() {
         return Ok(construct_output(
             &validator_context,
@@ -40,18 +44,18 @@ async fn validate_pull_requests(
     )
     .await
     .into_iter()
-    .collect::<JsResult<_>>()?;
+    .collect::<Result<_>>()?;
     Ok(results::consolidate_result(outputs, &validator_context))
 }
 
-fn array_entries<'list>(list: Option<&'list Value>, expression: &str) -> JsResult<&'list [Value]> {
+fn array_entries<'list>(list: Option<&'list Value>, expression: &str) -> Result<&'list [Value]> {
     match list {
         Some(Value::Array(items)) => Ok(items),
-        None => Err(JsError::reading_property_of_undefined("map")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("map")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'map')",
         )),
-        Some(_) => Err(JsError::type_error(format!(
+        Some(_) => Err(Error::type_mismatch(format!(
             "{expression}.map is not a function"
         ))),
     }
@@ -61,11 +65,11 @@ async fn validate_status(
     context: &Context,
     settings: &Value,
     media_type: Option<Value>,
-) -> JsResult<Value> {
-    let owner = js::read_path(&context.payload, &["repository", "owner", "login"])?
+) -> Result<Value> {
+    let owner = json_value::read_path(&context.payload, &["repository", "owner", "login"])?
         .cloned()
         .unwrap_or(Value::Null);
-    let repo = js::read_path(&context.payload, &["repository", "name"])?
+    let repo = json_value::read_path(&context.payload, &["repository", "name"])?
         .cloned()
         .unwrap_or(Value::Null);
     let commit_sha = context.payload.get("sha").cloned().unwrap_or(Value::Null);
@@ -73,7 +77,7 @@ async fn validate_status(
     request.insert("owner".to_string(), owner);
     request.insert("repo".to_string(), repo);
     request.insert("commit_sha".to_string(), commit_sha);
-    if let Some(requested_media_type) = media_type.filter(js::is_truthy) {
+    if let Some(requested_media_type) = media_type.filter(json_value::is_truthy) {
         request.insert("mediaType".to_string(), requested_media_type);
     }
     let pulls = context
@@ -84,11 +88,11 @@ async fn validate_status(
         )
         .await?;
     let Value::Array(pull_requests) = &pulls.data else {
-        return Err(JsError::type_error("pulls.data.filter is not a function"));
+        return Err(Error::type_mismatch("pulls.data.filter is not a function"));
     };
     let open_pull_requests = pull_requests
         .iter()
-        .filter(|pull_request| js::as_str(pull_request.get("state")) == Some("open"));
+        .filter(|pull_request| json_value::as_str(pull_request.get("state")) == Some("open"));
     validate_pull_requests(open_pull_requests, settings).await
 }
 
@@ -107,12 +111,12 @@ impl Validator for BaseRef {
         ]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "must_include": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "must_exclude": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "mediaType": {"previews": "array"}
-        }))
+        })
     }
 
     async fn validate(
@@ -120,22 +124,28 @@ impl Validator for BaseRef {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let payload = event_aware::get_payload(context);
-        let mut validation_settings = settings.clone();
-        let media_type = match &mut validation_settings {
-            Value::Object(fields) => fields.shift_remove("mediaType"),
-            _ => None,
+        let mut validation_settings = Cow::Borrowed(settings);
+        let media_type = match settings.get("mediaType") {
+            Some(_) => match validation_settings.to_mut() {
+                Value::Object(fields) => fields.shift_remove("mediaType"),
+                _ => None,
+            },
+            None => None,
         };
         if context.event_name == "check_suite" {
-            let pull_requests =
-                array_entries(js::read(payload, "pull_requests")?, "payload.pull_requests")?;
+            let pull_requests = array_entries(
+                json_value::read(payload, "pull_requests")?,
+                "payload.pull_requests",
+            )?;
             return validate_pull_requests(pull_requests, &validation_settings).await;
         }
         if context.event_name == "status" {
             return validate_status(context, &validation_settings, media_type).await;
         }
-        let base_ref = js::read(js::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
+        let base_ref =
+            json_value::read(json_value::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
         validators::process_options(&validation_settings, base_ref, None).await
     }
 }

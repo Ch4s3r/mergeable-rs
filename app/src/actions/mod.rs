@@ -1,10 +1,11 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
-use crate::js;
+use crate::json_value;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::borrow::Cow;
+use std::future::Future;
 use std::sync::Arc;
 
 pub mod assign;
@@ -21,17 +22,19 @@ pub trait Action: Send + Sync {
     fn supported_events(&self) -> &'static [&'static str];
     async fn before_validate(
         &self,
-        context: &Context,
-        rule: &Value,
-        rule_name: Option<&Value>,
-    ) -> JsResult<()>;
+        _context: &Context,
+        _rule: &Value,
+        _rule_name: Option<&Value>,
+    ) -> Result<()> {
+        Ok(())
+    }
     async fn after_validate(
         &self,
         context: &Context,
         settings: &Value,
         rule_name: Option<&Value>,
-        results: &Value,
-    ) -> JsResult<()>;
+        validation_report: &Value,
+    ) -> Result<()>;
 }
 
 #[must_use]
@@ -53,14 +56,17 @@ pub fn is_event_supported(action: &dyn Action, event_name: &str) -> bool {
     event_aware::is_event_supported(action.supported_events(), event_name)
 }
 
-fn log_usage(action: &dyn Action, context: &Context, settings: &Value, log_type: &str) {
-    tracing::info!(
-        event_id = %context.event_id,
-        repo = %context.repository_full_name(),
-        action = action.name(),
-        settings = %settings,
-        "{log_type}"
-    );
+pub fn spawn_detached(
+    context: &Context,
+    task_name: &'static str,
+    task: impl Future<Output = Result<()>> + Send + 'static,
+) {
+    let event_id = context.event_id.clone();
+    tokio::spawn(async move {
+        if let Err(error) = task.await {
+            tracing::error!(task = task_name, %event_id, %error, "action.task.failed");
+        }
+    });
 }
 
 pub async fn process_before_validate(
@@ -68,8 +74,14 @@ pub async fn process_before_validate(
     context: &Context,
     rule: &Value,
     rule_name: Option<&Value>,
-) -> JsResult<()> {
-    log_usage(action, context, rule, "action_before_validate_execute");
+) -> Result<()> {
+    tracing::info!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        action = action.name(),
+        settings = %rule,
+        "action.before_validate.started"
+    );
     action.before_validate(context, rule, rule_name).await
 }
 
@@ -78,28 +90,36 @@ pub async fn process_after_validate(
     context: &Context,
     settings: &Value,
     rule_name: Option<&Value>,
-    results: &Value,
-) -> JsResult<()> {
-    log_usage(action, context, settings, "action_after_validate_execute");
+    validation_report: &Value,
+) -> Result<()> {
+    tracing::info!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        action = action.name(),
+        %settings,
+        "action.after_validate.started"
+    );
     action
-        .after_validate(context, settings, rule_name, results)
+        .after_validate(context, settings, rule_name, validation_report)
         .await
 }
 
-pub fn get_actionables<'value>(
+pub fn actionables<'value>(
     context: &'value Context,
-    results: &'value Value,
+    validation_report: &'value Value,
 ) -> Vec<Cow<'value, Value>> {
     let schedule_results = if context.event_name == "schedule" {
-        js::get_path(results, &["validationSuites", "0", "schedule"])
-            .filter(|schedule| js::is_truthy(schedule))
+        json_value::get_path(validation_report, &["validationSuites", "0", "schedule"])
+            .filter(|schedule| json_value::is_truthy(schedule))
     } else {
         None
     };
     match schedule_results {
         Some(schedule) => {
-            let issues = schedule.get("issues").map_or(&[][..], js::as_array_or_wrap);
-            js::concat(issues, schedule.get("pulls").unwrap_or(&js::NULL))
+            let issues = schedule
+                .get("issues")
+                .map_or(&[][..], json_value::as_array_or_wrap);
+            json_value::concat(issues, schedule.get("pulls").unwrap_or(&json_value::NULL))
                 .map(Cow::Borrowed)
                 .collect()
         }
@@ -112,5 +132,8 @@ pub fn get_actionables<'value>(
 #[must_use]
 pub fn is_comment_on_plain_issue(context: &Context) -> bool {
     context.event_name == "issue_comment"
-        && !js::truthy(js::get_path(&context.payload, &["issue", "pull_request"]))
+        && !json_value::truthy(json_value::get_path(
+            &context.payload,
+            &["issue", "pull_request"],
+        ))
 }

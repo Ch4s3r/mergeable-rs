@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
@@ -19,12 +19,12 @@ impl Validator for HeadRef {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "jira": {"regex": "string", "regex_flag": "string", "message": "string"},
             "must_include": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "must_exclude": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"}
-        }))
+        })
     }
 
     async fn validate(
@@ -32,9 +32,12 @@ impl Validator for HeadRef {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
-        let head_ref = js::read(js::read(event_aware::get_payload(context), "head")?, "ref")?
-            .unwrap_or(&Value::Null);
+    ) -> Result<Value> {
+        let head_ref = json_value::read(
+            json_value::read(event_aware::get_payload(context), "head")?,
+            "ref",
+        )?
+        .unwrap_or(&Value::Null);
         validators::process_options(settings, head_ref, None).await
     }
 }

@@ -1,18 +1,18 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::validators::options::lib::compile_constant_pattern;
-use crate::validators::options::lib::js_regex::JsRegexFlags;
+use crate::validators::options::lib::user_pattern::PatternFlags;
 use serde_json::Value;
 use std::sync::LazyLock;
 
 static CLOSES_ISSUE_REGEX: LazyLock<Option<fancy_regex::Regex>> = LazyLock::new(|| {
     compile_constant_pattern(
         "\\b(closes?|closed|fix|fixes?|fixed|resolves?|resolved)\\b.#[0-9]*",
-        JsRegexFlags {
+        PatternFlags {
             ignore_case: true,
-            ..JsRegexFlags::default()
+            ..PatternFlags::default()
         },
     )
 });
@@ -21,7 +21,7 @@ pub fn check_if_closes_an_issue(description: Option<&Value>) -> Vec<String> {
     let Some(closes_issue_regex) = CLOSES_ISSUE_REGEX.as_ref() else {
         return Vec::new();
     };
-    let text = js::to_js_string(description);
+    let text = json_value::to_display_string(description);
     closes_issue_regex
         .find_iter(&text)
         .map_while(Result::ok)
@@ -36,16 +36,16 @@ pub async fn check_if_issue_have_property(
     context: &Context,
     issues: &[String],
     property: &str,
-) -> JsResult<Vec<Value>> {
+) -> Result<Vec<Value>> {
     let mut output = Vec::new();
     for issue_number in issues {
         let mut issue = api::get_issue(context, &Value::String(issue_number.clone()))
             .await?
-            .ok_or_else(|| JsError::reading_property_of_undefined("data"))?;
+            .ok_or_else(|| Error::missing_property("data"))?;
         if let Some(value) = issue
             .data
             .get_mut(property)
-            .filter(|value| js::is_truthy(value))
+            .filter(|value| json_value::is_truthy(value))
         {
             output.push(value.take());
         }

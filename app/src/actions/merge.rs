@@ -1,10 +1,9 @@
-use crate::actions::comment::spawn_detached;
-use crate::actions::{Action, is_comment_on_plain_issue};
+use crate::actions::{Action, is_comment_on_plain_issue, spawn_detached};
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::template;
 use async_trait::async_trait;
 use futures::future::join_all;
@@ -27,7 +26,7 @@ pub fn merge_parameters(
     commit_title: Option<&Value>,
     commit_message: Option<&Value>,
     pull_request: &Value,
-) -> JsResult<Value> {
+) -> Result<Value> {
     let mut parameters = Map::new();
     parameters.insert("pull_number".to_string(), pull_number.clone());
     parameters.insert("merge_method".to_string(), merge_method.clone());
@@ -59,11 +58,12 @@ async fn merge_unmerged_pull_request(
     context: Context,
     pull_number: Value,
     merge_settings: Arc<MergeSettings>,
-) -> JsResult<()> {
+) -> Result<()> {
     let pull_request = api::get_pull_request(&context, &pull_number).await?.data;
-    let is_blocked =
-        js::as_str(js::read(Some(&pull_request), "mergeable_state")?) == Some("blocked");
-    let is_open = js::as_str(js::read(Some(&pull_request), "state")?) == Some("open");
+    let is_blocked = json_value::as_str(json_value::read(Some(&pull_request), "mergeable_state")?)
+        == Some("blocked");
+    let is_open =
+        json_value::as_str(json_value::read(Some(&pull_request), "state")?) == Some("open");
     if is_blocked || !is_open {
         return Ok(());
     }
@@ -80,20 +80,20 @@ async fn merge_unmerged_pull_request(
         .map(|_| ())
 }
 
-fn log_detached_failure(context: &Context, error: &JsError) {
+fn log_detached_failure(context: &Context, error: &Error) {
     tracing::error!(event_id = %context.event_id, %error, "merge action failed");
 }
 
-fn validated_merge_method(settings: &Value) -> JsResult<Value> {
+fn validated_merge_method(settings: &Value) -> Result<Value> {
     let configured = settings.get("merge_method");
-    if !js::truthy(configured) {
+    if !json_value::truthy(configured) {
         return Ok(Value::String("merge".to_string()));
     }
     let is_supported = configured
         .and_then(Value::as_str)
         .is_some_and(|method| MERGE_METHOD_OPTIONS.contains(&method));
     if !is_supported {
-        return Err(JsError::unsupported_setting(format!(
+        return Err(Error::unsupported_setting(format!(
             "Unknown Merge method, supported options are {}",
             MERGE_METHOD_OPTIONS.join(", ")
         )));
@@ -101,23 +101,23 @@ fn validated_merge_method(settings: &Value) -> JsResult<Value> {
     Ok(configured.cloned().unwrap_or(Value::Null))
 }
 
-fn as_pull_request_list(value: Option<&Value>) -> JsResult<&[Value]> {
+fn as_pull_request_list(value: Option<&Value>) -> Result<&[Value]> {
     match value {
         Some(Value::Array(items)) => Ok(items),
-        None => Err(JsError::reading_property_of_undefined("map")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("map")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'map')",
         )),
-        Some(_) => Err(JsError::type_error(
+        Some(_) => Err(Error::type_mismatch(
             "relatedPullRequests.map is not a function",
         )),
     }
 }
 
-async fn related_pull_requests(context: &Context) -> JsResult<Vec<Cow<'_, Value>>> {
+async fn related_pull_requests(context: &Context) -> Result<Vec<Cow<'_, Value>>> {
     match context.event_name.as_str() {
         "status" => {
-            let commit_sha = js::to_js_string(context.payload.get("sha"));
+            let commit_sha = json_value::to_display_string(context.payload.get("sha"));
             let (owner, repo) = context.repo()?;
             let query = format!("repo:{owner}/{repo} is:open {commit_sha}")
                 .trim()
@@ -130,14 +130,14 @@ async fn related_pull_requests(context: &Context) -> JsResult<Vec<Cow<'_, Value>
             match found {
                 Value::Array(items) => Ok(items
                     .into_iter()
-                    .filter(|item| js::truthy(item.get("pull_request")))
+                    .filter(|item| json_value::truthy(item.get("pull_request")))
                     .map(Cow::Owned)
                     .collect()),
-                Value::Null => Err(JsError::reading_property_of_undefined("filter")),
-                _ => Err(JsError::type_error("results.filter is not a function")),
+                Value::Null => Err(Error::missing_property("filter")),
+                _ => Err(Error::type_mismatch("results.filter is not a function")),
             }
         }
-        "check_suite" => Ok(as_pull_request_list(js::read(
+        "check_suite" => Ok(as_pull_request_list(json_value::read(
             event_aware::get_payload(context),
             "pull_requests",
         )?)?
@@ -163,22 +163,13 @@ impl Action for Merge {
         &SUPPORTED_EVENTS
     }
 
-    async fn before_validate(
-        &self,
-        _context: &Context,
-        _rule: &Value,
-        _rule_name: Option<&Value>,
-    ) -> JsResult<()> {
-        Ok(())
-    }
-
     async fn after_validate(
         &self,
         context: &Context,
         settings: &Value,
         _rule_name: Option<&Value>,
         _results: &Value,
-    ) -> JsResult<()> {
+    ) -> Result<()> {
         if is_comment_on_plain_issue(context) {
             return Ok(());
         }
@@ -192,11 +183,11 @@ impl Action for Merge {
             .await?
             .iter()
             .map(|pull_request| {
-                Ok(js::read(Some(pull_request), "number")?
+                Ok(json_value::read(Some(pull_request), "number")?
                     .cloned()
                     .unwrap_or(Value::Null))
             })
-            .collect::<JsResult<Vec<Value>>>()?;
+            .collect::<Result<Vec<Value>>>()?;
         let merged_checks = join_all(
             pull_numbers
                 .iter()
@@ -225,6 +216,7 @@ impl Action for Merge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorKind;
 
     fn pull_request() -> Value {
         json!({"mergeable_state": "clean", "state": "open", "title": "some pr", "body": "some <> ' message", "number": 10})
@@ -242,9 +234,9 @@ mod tests {
     #[test]
     fn unknown_merge_method_is_an_unsupported_setting() {
         let error = validated_merge_method(&json!({"merge_method": "fast-forward"})).unwrap_err();
-        assert!(error.is_named("UnSupportedSettingError"));
+        assert_eq!(error.kind(), ErrorKind::UnsupportedSetting);
         assert_eq!(
-            error.message,
+            error.message(),
             "Unknown Merge method, supported options are merge, rebase, squash"
         );
     }

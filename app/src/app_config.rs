@@ -1,10 +1,21 @@
 use base64::Engine as _;
 use std::time::Duration;
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "flat set of independent on/off switches read from environment variables"
-)]
+const DEVELOPMENT_SCHEDULER_INTERVAL_SECONDS: &str = "2";
+const DEFAULT_SCHEDULER_INTERVAL_SECONDS: &str = "3600";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFormat {
+    Json,
+    Pretty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    Development,
+    Production,
+}
+
 pub struct AppConfig {
     pub app_id: String,
     pub private_key_pem: String,
@@ -14,12 +25,10 @@ pub struct AppConfig {
     pub port: u16,
     pub github_base_url: String,
     pub log_level: String,
-    pub log_json: bool,
-    pub development_mode: bool,
-    pub scheduler_enabled: bool,
-    pub scheduler_interval_seconds_text: String,
-    pub scheduler_interval_milliseconds: f64,
-    pub ratelimit_endpoint_enabled: bool,
+    pub log_format: LogFormat,
+    pub run_mode: RunMode,
+    pub scheduler_interval_milliseconds: Option<f64>,
+    pub rate_limit_endpoint_enabled: bool,
     pub metrics_endpoint_enabled: bool,
     pub github_throttle_enabled: bool,
     pub github_retry_base_delay: Duration,
@@ -27,6 +36,10 @@ pub struct AppConfig {
 
 fn variable(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
+}
+
+fn flag(name: &str) -> bool {
+    variable(name).as_deref() == Some("true")
 }
 
 fn read_private_key() -> Result<String, String> {
@@ -48,6 +61,18 @@ fn read_private_key() -> Result<String, String> {
     Err("missing PRIVATE_KEY or PRIVATE_KEY_PATH".to_string())
 }
 
+fn scheduler_interval_milliseconds(run_mode: RunMode) -> Option<f64> {
+    if !flag("MERGEABLE_SCHEDULER") {
+        return None;
+    }
+    let interval_seconds = match run_mode {
+        RunMode::Development => DEVELOPMENT_SCHEDULER_INTERVAL_SECONDS.to_string(),
+        RunMode::Production => variable("MERGEABLE_SCHEDULER_INTERVAL")
+            .unwrap_or_else(|| DEFAULT_SCHEDULER_INTERVAL_SECONDS.to_string()),
+    };
+    Some(crate::scheduler::parse_decimal_number(&interval_seconds) * 1000.0)
+}
+
 impl AppConfig {
     pub fn from_env() -> Result<Self, String> {
         let github_base_url = match variable("GHE_HOST") {
@@ -57,14 +82,16 @@ impl AppConfig {
             ),
             None => "https://api.github.com".to_string(),
         };
-        let development_mode = variable("NODE_ENV").as_deref() == Some("development");
-        let scheduler_interval_seconds_text = if development_mode {
-            "2".to_string()
+        let run_mode = if variable("NODE_ENV").as_deref() == Some("development") {
+            RunMode::Development
         } else {
-            variable("MERGEABLE_SCHEDULER_INTERVAL").unwrap_or_else(|| "3600".to_string())
+            RunMode::Production
         };
-        let scheduler_interval_milliseconds =
-            crate::scheduler::js_number(&scheduler_interval_seconds_text) * 1000.0;
+        let log_format = if variable("LOG_FORMAT").as_deref() == Some("pretty") {
+            LogFormat::Pretty
+        } else {
+            LogFormat::Json
+        };
         Ok(AppConfig {
             app_id: variable("APP_ID").ok_or("missing APP_ID")?,
             private_key_pem: read_private_key()?,
@@ -77,15 +104,11 @@ impl AppConfig {
                 .unwrap_or(3000),
             github_base_url,
             log_level: variable("LOG_LEVEL").unwrap_or_else(|| "info".to_string()),
-            log_json: variable("LOG_FORMAT").as_deref() != Some("pretty"),
-            development_mode,
-            scheduler_enabled: variable("MERGEABLE_SCHEDULER").as_deref() == Some("true"),
-            scheduler_interval_milliseconds,
-            scheduler_interval_seconds_text,
-            ratelimit_endpoint_enabled: variable("ENABLE_GITHUB_RATELIMIT_ENDPOINT").as_deref()
-                == Some("true"),
-            metrics_endpoint_enabled: variable("ENABLE_METRICS_ENDPOINT").as_deref()
-                == Some("true"),
+            log_format,
+            run_mode,
+            scheduler_interval_milliseconds: scheduler_interval_milliseconds(run_mode),
+            rate_limit_endpoint_enabled: flag("ENABLE_GITHUB_RATELIMIT_ENDPOINT"),
+            metrics_endpoint_enabled: flag("ENABLE_METRICS_ENDPOINT"),
             github_throttle_enabled: variable("GITHUB_THROTTLE").as_deref() != Some("false"),
             github_retry_base_delay: Duration::from_millis(
                 variable("GITHUB_RETRY_BASE_MS")

@@ -1,15 +1,15 @@
 use crate::actions::{Action, is_comment_on_plain_issue};
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::Result;
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::metadata;
 use crate::template;
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 pub const SUPPORTED_EVENTS: [&str; 25] = [
     "pull_request.assigned",
@@ -40,15 +40,18 @@ pub const SUPPORTED_EVENTS: [&str; 25] = [
 ];
 
 #[must_use]
-pub fn create_check_name(name: Option<&Value>) -> String {
+pub fn check_name(name: Option<&Value>) -> String {
     match name {
         None => "Mergeable".to_string(),
-        Some(present) => format!("Mergeable: {}", js::to_js_string(Some(present))),
+        Some(present) => format!(
+            "Mergeable: {}",
+            json_value::to_display_string(Some(present))
+        ),
     }
 }
 
 #[must_use]
-pub fn now_iso() -> String {
+pub fn current_timestamp() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
@@ -57,21 +60,18 @@ pub fn is_supported(event_name: &str) -> bool {
     event_aware::is_event_supported(&SUPPORTED_EVENTS, event_name)
 }
 
-fn rule_name_key(rule_name: Option<&Value>) -> String {
-    match rule_name {
-        None => "\u{0}undefined".to_string(),
-        Some(name) => js::stringify(name),
-    }
+fn rule_name_key(rule_name: Option<&Value>) -> Option<String> {
+    rule_name.map(json_value::stringify)
 }
 
-pub async fn create_checks(context: &Context, payload: Value) -> JsResult<Value> {
+pub async fn create_checks(context: &Context, payload: Value) -> Result<Value> {
     let mut params = match payload {
         Value::Object(fields) => fields,
         _ => Map::new(),
     };
-    let check_name = create_check_name(params.get("name"));
+    let check_name = check_name(params.get("name"));
     params.insert("name".to_string(), Value::String(check_name));
-    let (head_branch, head_sha) = if js::truthy(context.payload.get("check_suite")) {
+    let (head_branch, head_sha) = if json_value::truthy(context.payload.get("check_suite")) {
         let suite = &context.payload["check_suite"];
         (
             suite.get("head_branch").cloned(),
@@ -79,16 +79,16 @@ pub async fn create_checks(context: &Context, payload: Value) -> JsResult<Value>
         )
     } else if context.event_name == "issue_comment" {
         let issue_number =
-            js::read_path(&context.payload, &["issue", "number"])?.unwrap_or(&Value::Null);
+            json_value::read_path(&context.payload, &["issue", "number"])?.unwrap_or(&Value::Null);
         let mut pull_request = api::get_pull_request(context, issue_number).await?.data;
         (
-            js::take_path(&mut pull_request, &["head", "ref"])?,
-            js::take_path(&mut pull_request, &["head", "sha"])?,
+            json_value::take_path(&mut pull_request, &["head", "ref"])?,
+            json_value::take_path(&mut pull_request, &["head", "sha"])?,
         )
     } else {
         (
-            js::read_path(&context.payload, &["pull_request", "head", "ref"])?.cloned(),
-            js::read_path(&context.payload, &["pull_request", "head", "sha"])?.cloned(),
+            json_value::read_path(&context.payload, &["pull_request", "head", "ref"])?.cloned(),
+            json_value::read_path(&context.payload, &["pull_request", "head", "sha"])?.cloned(),
         )
     };
     insert_defined(&mut params, "head_branch", head_branch);
@@ -111,7 +111,7 @@ fn insert_defined(params: &mut Map<String, Value>, key: &str, value: Option<Valu
     }
 }
 
-pub async fn run(context: &Context, payload: Value) -> JsResult<()> {
+pub async fn run(context: &Context, payload: Value) -> Result<()> {
     if is_comment_on_plain_issue(context) {
         return Ok(());
     }
@@ -125,15 +125,15 @@ async fn update_checks(
     state: Option<&Value>,
     status: Option<&Value>,
     output: Option<Value>,
-) -> JsResult<()> {
+) -> Result<()> {
     let output = output
         .unwrap_or_else(|| json!({"title": "Test SUCCESS output", "summary": "Success summary"}));
-    let state = if js::truthy(state) {
+    let state = if json_value::truthy(state) {
         state.cloned().unwrap_or(Value::Null)
     } else {
         Value::String("completed".to_string())
     };
-    let conclusion = if js::truthy(status) {
+    let conclusion = if json_value::truthy(status) {
         status.cloned().unwrap_or(Value::Null)
     } else {
         Value::String("success".to_string())
@@ -146,7 +146,10 @@ async fn update_checks(
     check.insert("check_run_id".to_string(), check_run_id);
     if is_completed {
         check.insert("conclusion".to_string(), conclusion);
-        check.insert("completed_at".to_string(), Value::String(now_iso()));
+        check.insert(
+            "completed_at".to_string(),
+            Value::String(current_timestamp()),
+        );
     }
     let params = context.repo_params(Value::Object(check))?;
     api::update_checks(context, params).await.map(|_| ())
@@ -154,22 +157,22 @@ async fn update_checks(
 
 #[derive(Default)]
 pub struct Checks {
-    check_run_results: Mutex<HashMap<String, Value>>,
+    check_runs_by_rule_name: Mutex<HashMap<Option<String>, Value>>,
 }
 
 impl Checks {
     fn populate_payload_with_result(
         payload_settings: &Value,
-        results: &Value,
+        validation_report: &Value,
         context: &Context,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let mut output = Map::new();
         let payload = event_aware::get_payload(context);
         let event = event_aware::get_event_attributes(context);
-        let keys = js::object_keys(Some(payload_settings))?;
-        let template_data = template::template_data(payload, results);
+        let keys = json_value::object_keys(Some(payload_settings))?;
+        let template_data = template::template_data(payload, validation_report);
         for key in keys {
-            let template_value = js::get(payload_settings, &key).unwrap_or(&Value::Null);
+            let template_value = json_value::get(payload_settings, &key).unwrap_or(&Value::Null);
             let rendered = template::populate_template_with_data(
                 template_value,
                 &template_data,
@@ -197,7 +200,7 @@ impl Action for Checks {
         context: &Context,
         _rule: &Value,
         rule_name: Option<&Value>,
-    ) -> JsResult<()> {
+    ) -> Result<()> {
         if is_comment_on_plain_issue(context) {
             return Ok(());
         }
@@ -213,11 +216,11 @@ impl Action for Checks {
         if let Some(name) = rule_name {
             payload.insert("name".to_string(), name.clone());
         }
-        payload.insert("started_at".to_string(), Value::String(now_iso()));
+        payload.insert("started_at".to_string(), Value::String(current_timestamp()));
         let result = create_checks(context, Value::Object(payload)).await?;
-        self.check_run_results
+        self.check_runs_by_rule_name
             .lock()
-            .map_err(|_| JsError::error("check run results poisoned"))?
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(rule_name_key(rule_name), result);
         Ok(())
     }
@@ -227,28 +230,28 @@ impl Action for Checks {
         context: &Context,
         settings: &Value,
         rule_name: Option<&Value>,
-        results: &Value,
-    ) -> JsResult<()> {
+        validation_report: &Value,
+    ) -> Result<()> {
         if is_comment_on_plain_issue(context) {
             return Ok(());
         }
         let check_run_id_outcome = {
-            let check_run_results = self
-                .check_run_results
+            let check_runs = self
+                .check_runs_by_rule_name
                 .lock()
-                .map_err(|_| JsError::error("check run results poisoned"))?;
-            let check_run_result = check_run_results.get(&rule_name_key(rule_name));
-            js::read(check_run_result, "data")
-                .and_then(|data| js::read(data, "id"))
+                .unwrap_or_else(PoisonError::into_inner);
+            let check_run_result = check_runs.get(&rule_name_key(rule_name));
+            json_value::read(check_run_result, "data")
+                .and_then(|data| json_value::read(data, "id"))
                 .map(|id| id.cloned().unwrap_or(Value::Null))
         };
         let mut payload = match settings
             .get("payload")
-            .filter(|payload| js::is_truthy(payload))
+            .filter(|payload| json_value::is_truthy(payload))
         {
             Some(payload_settings) => Some(Self::populate_payload_with_result(
                 payload_settings,
-                results,
+                validation_report,
                 context,
             )?),
             None => None,
@@ -267,7 +270,7 @@ impl Action for Checks {
         update_checks(
             context,
             check_run_id,
-            create_check_name(rule_name),
+            check_name(rule_name),
             settings.get("state"),
             settings.get("status"),
             payload,

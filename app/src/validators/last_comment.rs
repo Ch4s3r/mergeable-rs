@@ -1,8 +1,8 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::options_processor::list_processor;
 use crate::validators::{self, Validator};
@@ -17,15 +17,15 @@ pub struct CommentAuthorFilter {
     pub author_option: Value,
 }
 
-fn is_bot_comment(comment: &Value) -> JsResult<bool> {
-    let user = js::read(Some(comment), "user")?;
-    match js::read(user, "login")? {
+fn is_bot_comment(comment: &Value) -> Result<bool> {
+    let user = json_value::read(Some(comment), "user")?;
+    match json_value::read(user, "login")? {
         Some(Value::String(login)) => Ok(login.to_lowercase().ends_with("[bot]")),
-        None => Err(JsError::reading_property_of_undefined("toLowerCase")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("toLowerCase")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'toLowerCase')",
         )),
-        Some(_) => Err(JsError::type_error(
+        Some(_) => Err(Error::type_mismatch(
             "c.user.login.toLowerCase is not a function",
         )),
     }
@@ -33,7 +33,7 @@ fn is_bot_comment(comment: &Value) -> JsResult<bool> {
 
 static EMPTY_BODY: Value = Value::String(String::new());
 
-pub fn without_bot_comments(comments: &[Value], exclude_bots: bool) -> JsResult<Vec<&Value>> {
+pub fn without_bot_comments(comments: &[Value], exclude_bots: bool) -> Result<Vec<&Value>> {
     let mut kept = Vec::new();
     for comment in comments {
         if !exclude_bots || !is_bot_comment(comment)? {
@@ -43,17 +43,14 @@ pub fn without_bot_comments(comments: &[Value], exclude_bots: bool) -> JsResult<
     Ok(kept)
 }
 
-pub fn last_comment_body<'comment>(comments: &[&'comment Value]) -> JsResult<&'comment Value> {
+pub fn last_comment_body<'comment>(comments: &[&'comment Value]) -> Result<&'comment Value> {
     match comments.last() {
         None => Ok(&EMPTY_BODY),
-        Some(comment) => Ok(js::read(Some(comment), "body")?.unwrap_or(&js::NULL)),
+        Some(comment) => Ok(json_value::read(Some(comment), "body")?.unwrap_or(&json_value::NULL)),
     }
 }
 
-async fn comment_author_filter(
-    context: &Context,
-    settings: &Value,
-) -> JsResult<CommentAuthorFilter> {
+async fn comment_author_filter(context: &Context, settings: &Value) -> Result<CommentAuthorFilter> {
     let mut exclude_bots = true;
     let mut author_option = Map::new();
     if let Some(do_value) = settings.get("do") {
@@ -61,16 +58,16 @@ async fn comment_author_filter(
     }
     if let Some(comment_author) = settings
         .get("comment_author")
-        .filter(|value| js::is_truthy(value))
+        .filter(|value| json_value::is_truthy(value))
     {
-        if let Some(one_of) =
-            js::read(Some(comment_author), "one_of")?.filter(|value| js::is_truthy(value))
+        if let Some(one_of) = json_value::read(Some(comment_author), "one_of")?
+            .filter(|value| json_value::is_truthy(value))
         {
             let candidates = list_processor::process(one_of, context).await?;
             author_option.insert("one_of".to_string(), Value::Array(candidates));
         }
-        if let Some(none_of) =
-            js::read(Some(comment_author), "none_of")?.filter(|value| js::is_truthy(value))
+        if let Some(none_of) = json_value::read(Some(comment_author), "none_of")?
+            .filter(|value| json_value::is_truthy(value))
         {
             let candidates = list_processor::process(none_of, context).await?;
             author_option.insert("none_of".to_string(), Value::Array(candidates));
@@ -88,11 +85,12 @@ async fn comment_author_filter(
 async fn filter_by_comment_author<'comment>(
     comments: &'comment [Value],
     filter: &CommentAuthorFilter,
-) -> JsResult<Vec<&'comment Value>> {
+) -> Result<Vec<&'comment Value>> {
     let candidates = without_bot_comments(comments, filter.exclude_bots)?;
     let mut kept = Vec::new();
     for comment in candidates {
-        let login = js::read(js::read(Some(comment), "user")?, "login")?.unwrap_or(&Value::Null);
+        let login = json_value::read(json_value::read(Some(comment), "user")?, "login")?
+            .unwrap_or(&Value::Null);
         let result = validators::process_options(&filter.author_option, login, None).await?;
         if result.get("status").and_then(Value::as_str) != Some("fail") {
             kept.push(comment);
@@ -105,7 +103,7 @@ pub async fn evaluate(
     comments: &[Value],
     filter: &CommentAuthorFilter,
     remaining_settings: &Value,
-) -> JsResult<Value> {
+) -> Result<Value> {
     let comments = filter_by_comment_author(comments, filter).await?;
     validators::process_options(remaining_settings, last_comment_body(&comments)?, None).await
 }
@@ -126,12 +124,12 @@ impl Validator for LastComment {
         ]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "must_include": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "must_exclude": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "comment_author": {"one_of": "array", "none_of": "array", "no_bots": "boolean"},
-        }))
+        })
     }
 
     async fn validate(
@@ -139,7 +137,7 @@ impl Validator for LastComment {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let filter = comment_author_filter(context, settings).await?;
         let mut remaining_settings = Cow::Borrowed(settings);
         if settings.get("comment_author").is_some()
@@ -149,13 +147,13 @@ impl Validator for LastComment {
         }
 
         let issue_number =
-            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let listed_comments;
         let comments = if context.event_name == "issue_comment" {
             let comment = context
                 .payload
                 .get("comment")
-                .ok_or_else(|| JsError::reading_property_of_undefined("user"))?;
+                .ok_or_else(|| Error::missing_property("user"))?;
             std::slice::from_ref(comment)
         } else {
             listed_comments = api::list_comments(context, issue_number).await?;
@@ -201,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn comment_without_user_throws_like_node() {
+    fn comment_without_user_fails_with_a_missing_property_error() {
         let error = without_bot_comments(&[json!({"body": "x"})], true).unwrap_err();
         assert_eq!(
             error.to_string(),

@@ -1,6 +1,6 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use serde_json::{Map, Value};
 
 pub mod and;
@@ -18,7 +18,7 @@ async fn run_option(
     filter_context: &Value,
     input: &Value,
     rule: &Value,
-) -> JsResult<Value> {
+) -> Result<Value> {
     match key {
         "and" => and::process(context, filter_context, input, rule).await,
         "boolean" => boolean::process(context, filter_context, input, rule),
@@ -27,7 +27,7 @@ async fn run_option(
         "none_of" => none_of::process(context, filter_context, input, rule).await,
         "one_of" => one_of::process(context, filter_context, input, rule).await,
         "or" => or::process(context, filter_context, input, rule).await,
-        unknown => Err(JsError::error(format!(
+        unknown => Err(Error::general(format!(
             "Cannot find module './options/{unknown}'"
         ))),
     }
@@ -35,7 +35,7 @@ async fn run_option(
 
 fn is_option_unsupported(filter_context: &Value, key: &str) -> bool {
     let supported_options = filter_context.get("supportedOptions");
-    js::truthy(supported_options)
+    json_value::truthy(supported_options)
         && !matches!(supported_options, Some(Value::Array(options)) if options.iter().any(|option| option.as_str() == Some(key)))
 }
 
@@ -44,24 +44,24 @@ pub async fn process(
     filter_context: &Value,
     input: &Value,
     settings: &Value,
-) -> JsResult<Value> {
+) -> Result<Value> {
     let mut output = Vec::new();
     let listed_settings = match settings {
         Value::Array(items) => items.as_slice(),
         single => std::slice::from_ref(single),
     };
     for setting in listed_settings {
-        for key in js::object_keys(Some(setting))? {
+        for key in json_value::object_keys(Some(setting))? {
             if key == "do" {
                 continue;
             }
             let mut rule_fields = Map::new();
-            if let Some(option_value) = js::get(setting, &key) {
+            if let Some(option_value) = json_value::get(setting, &key) {
                 rule_fields.insert(key.clone(), option_value.clone());
             }
             let rule = Value::Object(rule_fields);
             if is_option_unsupported(filter_context, &key) {
-                let filter_name = js::to_js_string(filter_context.get("name"));
+                let filter_name = json_value::to_display_string(filter_context.get("name"));
                 output.push(lib::construct_error(
                     filter_context,
                     input.clone(),
@@ -83,7 +83,7 @@ pub async fn process(
                     filter_context,
                     input.clone(),
                     &rule,
-                    &error.message,
+                    error.message(),
                     None,
                 )),
             }

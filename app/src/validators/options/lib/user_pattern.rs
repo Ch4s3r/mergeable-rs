@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 const COMPILED_PATTERN_CACHE_CAPACITY: u64 = 4096;
 
 static COMPILED_PATTERNS: LazyLock<
-    moka::sync::Cache<(String, JsRegexFlags), Result<fancy_regex::Regex, JsRegexSyntaxError>>,
+    moka::sync::Cache<(String, PatternFlags), Result<fancy_regex::Regex, InvalidPatternError>>,
 > = LazyLock::new(|| moka::sync::Cache::new(COMPILED_PATTERN_CACHE_CAPACITY));
 
 const WORD_CLASS_ITEMS: &str = "0-9A-Za-z_";
@@ -17,9 +17,9 @@ const NEVER_MATCHING_CLASS: &str = "[^\\x00-\\x{10FFFF}]";
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "one field per JavaScript RegExp flag (g, i, m, s, u, y)"
+    reason = "one field per regular expression flag (g, i, m, s, u, y)"
 )]
-pub struct JsRegexFlags {
+pub struct PatternFlags {
     pub global: bool,
     pub ignore_case: bool,
     pub multiline: bool,
@@ -28,10 +28,10 @@ pub struct JsRegexFlags {
     pub sticky: bool,
 }
 
-impl JsRegexFlags {
+impl PatternFlags {
     #[must_use]
     pub fn parse(flags: &str) -> Option<Self> {
-        let mut parsed = JsRegexFlags::default();
+        let mut parsed = PatternFlags::default();
         let mut seen = String::new();
         for flag in flags.chars() {
             if seen.contains(flag) {
@@ -59,34 +59,34 @@ impl JsRegexFlags {
 }
 
 #[derive(Debug)]
-pub struct JsRegex {
+pub struct UserPattern {
     compiled: fancy_regex::Regex,
-    flags: JsRegexFlags,
+    flags: PatternFlags,
     last_index: Cell<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct JsRegexSyntaxError;
+pub struct InvalidPatternError;
 
-impl JsRegex {
-    pub fn new(pattern: &str, flags: &str) -> Result<Self, JsRegexSyntaxError> {
-        let parsed_flags = JsRegexFlags::parse(flags).ok_or(JsRegexSyntaxError)?;
+impl UserPattern {
+    pub fn new(pattern: &str, flags: &str) -> Result<Self, InvalidPatternError> {
+        let parsed_flags = PatternFlags::parse(flags).ok_or(InvalidPatternError)?;
         let compiled = COMPILED_PATTERNS.get_with((pattern.to_string(), parsed_flags), || {
             let translated = translate(pattern, parsed_flags)?;
-            fancy_regex::Regex::new(&translated).map_err(|_| JsRegexSyntaxError)
+            fancy_regex::Regex::new(&translated).map_err(|_| InvalidPatternError)
         })?;
-        Ok(JsRegex {
+        Ok(UserPattern {
             compiled,
             flags: parsed_flags,
             last_index: Cell::new(0),
         })
     }
 
-    pub fn test(&self, text: &str) -> bool {
+    pub fn is_match(&self, text: &str) -> bool {
         self.find(text).is_some()
     }
 
-    pub fn exec_first_match(&self, text: &str) -> Option<String> {
+    pub fn first_match(&self, text: &str) -> Option<String> {
         self.find(text)
             .map(|(start, end)| text[start..end].to_string())
     }
@@ -132,7 +132,12 @@ fn utf16_index_to_byte_offset(text: &str, utf16_index: usize) -> usize {
     text.len()
 }
 
-fn count_capture_groups(pattern: &[char]) -> (usize, bool) {
+struct CaptureGroupSummary {
+    count: usize,
+    has_named_groups: bool,
+}
+
+fn summarize_capture_groups(pattern: &[char]) -> CaptureGroupSummary {
     let mut count = 0;
     let mut has_named_groups = false;
     let mut index = 0;
@@ -156,17 +161,21 @@ fn count_capture_groups(pattern: &[char]) -> (usize, bool) {
         }
         index += 1;
     }
-    (count, has_named_groups)
+    CaptureGroupSummary {
+        count,
+        has_named_groups,
+    }
 }
 
-fn escape_literal(character: char) -> String {
+fn push_escaped_literal(output: &mut String, character: char) {
     if "\\.+*?()|[]{}^$#&-~".contains(character) {
-        return format!("\\{character}");
+        output.push('\\');
+        output.push(character);
+    } else if character.is_ascii() && !character.is_ascii_graphic() {
+        let _ = write!(output, "\\x{{{:X}}}", u32::from(character));
+    } else {
+        output.push(character);
     }
-    if character.is_ascii() && !character.is_ascii_graphic() {
-        return format!("\\x{{{:X}}}", character as u32);
-    }
-    character.to_string()
 }
 
 fn hex_value(characters: &[char]) -> Option<u32> {
@@ -179,7 +188,7 @@ fn hex_value(characters: &[char]) -> Option<u32> {
 
 struct Translator<'pattern> {
     pattern: &'pattern [char],
-    flags: JsRegexFlags,
+    flags: PatternFlags,
     capture_groups: usize,
     has_named_groups: bool,
     position: usize,
@@ -193,14 +202,14 @@ enum EscapeTranslation {
     Raw(String),
 }
 
-pub fn translate(pattern: &str, flags: JsRegexFlags) -> Result<String, JsRegexSyntaxError> {
+pub fn translate(pattern: &str, flags: PatternFlags) -> Result<String, InvalidPatternError> {
     let characters: Vec<char> = pattern.chars().collect();
-    let (capture_groups, has_named_groups) = count_capture_groups(&characters);
+    let capture_groups = summarize_capture_groups(&characters);
     let mut translator = Translator {
         pattern: &characters,
         flags,
-        capture_groups,
-        has_named_groups,
+        capture_groups: capture_groups.count,
+        has_named_groups: capture_groups.has_named_groups,
         position: 0,
         output: String::new(),
     };
@@ -216,7 +225,7 @@ impl Translator<'_> {
         self.pattern.get(self.position + offset).copied()
     }
 
-    fn translate_sequence(&mut self) -> Result<(), JsRegexSyntaxError> {
+    fn translate_sequence(&mut self) -> Result<(), InvalidPatternError> {
         while let Some(character) = self.peek(0) {
             match character {
                 '\\' => self.translate_escape_outside_class()?,
@@ -255,7 +264,7 @@ impl Translator<'_> {
                         self.output.push_str(&quantifier);
                         self.position += length;
                     } else if self.flags.unicode {
-                        return Err(JsRegexSyntaxError);
+                        return Err(InvalidPatternError);
                     } else {
                         self.output.push_str("\\{");
                         self.position += 1;
@@ -263,7 +272,7 @@ impl Translator<'_> {
                 }
                 '}' | ']' => {
                     if self.flags.unicode {
-                        return Err(JsRegexSyntaxError);
+                        return Err(InvalidPatternError);
                     }
                     self.output.push('\\');
                     self.output.push(character);
@@ -282,7 +291,7 @@ impl Translator<'_> {
                     }
                 }
                 other => {
-                    self.output.push_str(&escape_literal_if_needed(other));
+                    push_literal_outside_class(&mut self.output, other);
                     self.position += 1;
                 }
             }
@@ -315,7 +324,7 @@ impl Translator<'_> {
         (self.peek(offset) == Some('}')).then_some(offset + 1)
     }
 
-    fn translate_escape_outside_class(&mut self) -> Result<(), JsRegexSyntaxError> {
+    fn translate_escape_outside_class(&mut self) -> Result<(), InvalidPatternError> {
         match self.peek(1) {
             Some('b') => {
                 self.position += 2;
@@ -351,11 +360,11 @@ impl Translator<'_> {
                     return Ok(());
                 }
                 if self.flags.unicode {
-                    return Err(JsRegexSyntaxError);
+                    return Err(InvalidPatternError);
                 }
                 self.position += 1;
                 let literal = self.legacy_octal_escape();
-                self.output.push_str(&escape_literal(literal));
+                push_escaped_literal(&mut self.output, literal);
                 Ok(())
             }
             Some('k') if self.has_named_groups || self.flags.unicode => {
@@ -371,14 +380,14 @@ impl Translator<'_> {
                         let _ = write!(self.output, "\\k<{name}>");
                         Ok(())
                     }
-                    _ => Err(JsRegexSyntaxError),
+                    _ => Err(InvalidPatternError),
                 }
             }
             _ => {
                 let translation = self.translate_common_escape()?;
                 match translation {
                     EscapeTranslation::Literal(character) => {
-                        self.output.push_str(&escape_literal(character));
+                        push_escaped_literal(&mut self.output, character);
                     }
                     EscapeTranslation::ClassItems(items) => {
                         self.output.push('[');
@@ -422,8 +431,8 @@ impl Translator<'_> {
         char::from_u32(value).unwrap_or('\u{FFFD}')
     }
 
-    fn translate_common_escape(&mut self) -> Result<EscapeTranslation, JsRegexSyntaxError> {
-        let escaped = self.peek(1).ok_or(JsRegexSyntaxError)?;
+    fn translate_common_escape(&mut self) -> Result<EscapeTranslation, InvalidPatternError> {
+        let escaped = self.peek(1).ok_or(InvalidPatternError)?;
         self.position += 2;
         Ok(match escaped {
             'd' => EscapeTranslation::ClassItems(DIGIT_CLASS_ITEMS),
@@ -454,7 +463,7 @@ impl Translator<'_> {
                 }
                 _ => {
                     if self.flags.unicode {
-                        return Err(JsRegexSyntaxError);
+                        return Err(InvalidPatternError);
                     }
                     self.position -= 1;
                     EscapeTranslation::Literal('\\')
@@ -469,7 +478,7 @@ impl Translator<'_> {
                 }
                 _ => {
                     if self.flags.unicode {
-                        return Err(JsRegexSyntaxError);
+                        return Err(InvalidPatternError);
                     }
                     EscapeTranslation::Literal('x')
                 }
@@ -479,9 +488,9 @@ impl Translator<'_> {
                 let close = self.pattern[self.position..]
                     .iter()
                     .position(|character| *character == '}')
-                    .ok_or(JsRegexSyntaxError)?;
+                    .ok_or(InvalidPatternError)?;
                 if self.peek(0) != Some('{') {
-                    return Err(JsRegexSyntaxError);
+                    return Err(InvalidPatternError);
                 }
                 let property: String = self.pattern[self.position..=(self.position + close)]
                     .iter()
@@ -491,32 +500,32 @@ impl Translator<'_> {
             }
             other => {
                 if self.flags.unicode && other.is_ascii_alphanumeric() {
-                    return Err(JsRegexSyntaxError);
+                    return Err(InvalidPatternError);
                 }
                 EscapeTranslation::Literal(other)
             }
         })
     }
 
-    fn translate_unicode_escape(&mut self) -> Result<EscapeTranslation, JsRegexSyntaxError> {
+    fn translate_unicode_escape(&mut self) -> Result<EscapeTranslation, InvalidPatternError> {
         if self.flags.unicode && self.peek(0) == Some('{') {
             let close = self.pattern[self.position..]
                 .iter()
                 .position(|character| *character == '}')
-                .ok_or(JsRegexSyntaxError)?;
+                .ok_or(InvalidPatternError)?;
             let value = hex_value(&self.pattern[self.position + 1..self.position + close])
-                .ok_or(JsRegexSyntaxError)?;
+                .ok_or(InvalidPatternError)?;
             self.position += close + 1;
             return char::from_u32(value)
                 .map(EscapeTranslation::Literal)
-                .ok_or(JsRegexSyntaxError);
+                .ok_or(InvalidPatternError);
         }
         let end = (self.position + 4).min(self.pattern.len());
         let Some(value) =
             hex_value(&self.pattern[self.position..end]).filter(|_| end == self.position + 4)
         else {
             if self.flags.unicode {
-                return Err(JsRegexSyntaxError);
+                return Err(InvalidPatternError);
             }
             return Ok(EscapeTranslation::Literal('u'));
         };
@@ -542,7 +551,7 @@ impl Translator<'_> {
         ))
     }
 
-    fn translate_class(&mut self) -> Result<(), JsRegexSyntaxError> {
+    fn translate_class(&mut self) -> Result<(), InvalidPatternError> {
         self.position += 1;
         let negated = self.peek(0) == Some('^');
         if negated {
@@ -560,7 +569,7 @@ impl Translator<'_> {
         let mut class = String::from(if negated { "[^" } else { "[" });
         let mut previous_was_class_escape = false;
         loop {
-            let character = self.peek(0).ok_or(JsRegexSyntaxError)?;
+            let character = self.peek(0).ok_or(InvalidPatternError)?;
             match character {
                 ']' => {
                     self.position += 1;
@@ -584,13 +593,13 @@ impl Translator<'_> {
                     {
                         self.position += 1;
                         let literal = self.legacy_octal_escape();
-                        class.push_str(&escape_literal(literal));
+                        push_escaped_literal(&mut class, literal);
                         previous_was_class_escape = false;
                         continue;
                     }
                     match self.translate_common_escape()? {
                         EscapeTranslation::Literal(literal) => {
-                            class.push_str(&escape_literal(literal));
+                            push_escaped_literal(&mut class, literal);
                             previous_was_class_escape = false;
                         }
                         EscapeTranslation::ClassItems(items) => {
@@ -644,11 +653,10 @@ impl Translator<'_> {
     }
 }
 
-fn escape_literal_if_needed(character: char) -> String {
+fn push_literal_outside_class(output: &mut String, character: char) {
     match character {
-        '*' | '+' | '?' | '|' | ')' => character.to_string(),
-        '#' | '&' | '~' | '-' | ' ' => escape_literal(character),
-        other => other.to_string(),
+        '#' | '&' | '~' | '-' | ' ' => push_escaped_literal(output, character),
+        other => output.push(other),
     }
 }
 
@@ -657,9 +665,9 @@ mod tests {
     use super::*;
 
     fn matches(pattern: &str, flags: &str, text: &str) -> bool {
-        JsRegex::new(pattern, flags)
+        UserPattern::new(pattern, flags)
             .expect("pattern compiles")
-            .test(text)
+            .is_match(text)
     }
 
     #[test]
@@ -669,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn word_and_digit_classes_are_ascii_only_like_javascript() {
+    fn word_and_digit_classes_are_ascii_only() {
         assert!(!matches("^\\w+$", "", "café"));
         assert!(!matches("^\\d$", "", "\u{0663}"));
         assert!(matches("\\bfix\\b", "i", "éfix"));
@@ -682,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn javascript_only_syntax_is_translated() {
+    fn pattern_syntax_unknown_to_the_regex_engine_is_translated() {
         assert!(matches("a{,2}", "", "a{,2}"));
         assert!(matches("[\\w-.]+", "", "a-b.c"));
         assert!(matches("[^]", "", "\n"));
@@ -695,18 +703,18 @@ mod tests {
 
     #[test]
     fn invalid_patterns_and_flags_are_rejected() {
-        assert!(JsRegex::new("(", "").is_err());
-        assert!(JsRegex::new("*a", "").is_err());
-        assert!(JsRegex::new("a", "x").is_err());
-        assert!(JsRegex::new("a", "gg").is_err());
+        assert!(UserPattern::new("(", "").is_err());
+        assert!(UserPattern::new("*a", "").is_err());
+        assert!(UserPattern::new("a", "x").is_err());
+        assert!(UserPattern::new("a", "gg").is_err());
     }
 
     #[test]
-    fn global_flag_makes_test_stateful_like_last_index() {
-        let regex = JsRegex::new("bug", "gi").expect("pattern compiles");
+    fn global_flag_makes_repeated_tests_stateful() {
+        let regex = UserPattern::new("bug", "gi").expect("pattern compiles");
         let results: Vec<bool> = ["bug", "bug", "bug"]
             .iter()
-            .map(|text| regex.test(text))
+            .map(|text| regex.is_match(text))
             .collect();
         assert_eq!(results, vec![true, false, true]);
     }

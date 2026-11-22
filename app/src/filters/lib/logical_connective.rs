@@ -1,10 +1,47 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::filters::options::lib::{consolidate_results, construct_error};
-use crate::flex;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
+use crate::results::Status;
+use crate::workflow;
 use serde_json::{Map, Value, json};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Connective {
+    And,
+    Or,
+    Not,
+}
+
+impl Connective {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Connective::And => "And",
+            Connective::Or => "Or",
+            Connective::Not => "Not",
+        }
+    }
+
+    fn combined_status(self, statuses: &[Option<Status>]) -> Option<Status> {
+        let any = |wanted: Status| statuses.contains(&Some(wanted));
+        match self {
+            _ if any(Status::Error) && self != Connective::Not => Some(Status::Error),
+            Connective::And => Some(if any(Status::Fail) {
+                Status::Fail
+            } else {
+                Status::Pass
+            }),
+            Connective::Or => Some(if any(Status::Pass) {
+                Status::Pass
+            } else {
+                Status::Fail
+            }),
+            Connective::Not => statuses.first().copied().flatten().map(Status::negated),
+        }
+    }
+}
 
 const OPTION_MISSING_ERROR_MESSAGE: &str = "Failed to filter because the 'filter' option is missing or empty. Please check the documentation.";
 
@@ -21,25 +58,16 @@ fn single_error(name: &str, settings: &Value, message: &str, filter_context: &Va
     )
 }
 
-fn negated_status(status: Option<&str>) -> Option<&'static str> {
-    match status {
-        Some("error") => Some("error"),
-        Some("pass") => Some("fail"),
-        Some("fail") => Some("pass"),
-        _ => None,
-    }
-}
-
-fn prefix_descriptions(mut result: Value, option_number: usize) -> JsResult<Vec<Value>> {
-    let result_name = js::to_js_string(result.get("name"));
+fn prefix_descriptions(mut result: Value, option_number: usize) -> Result<Vec<Value>> {
+    let result_name = json_value::to_display_string(result.get("name"));
     let Some(Value::Array(sub_filters)) = result.get_mut("filters").map(Value::take) else {
-        return Err(JsError::type_error("result.filters is not iterable"));
+        return Err(Error::type_mismatch("result.filters is not iterable"));
     };
     Ok(sub_filters
         .into_iter()
         .map(|mut sub_filter| {
             if let Value::Object(fields) = &mut sub_filter {
-                let description = js::to_js_string(fields.get("description"));
+                let description = json_value::to_display_string(fields.get("description"));
                 fields.insert(
                     "description".to_string(),
                     Value::String(format!(
@@ -56,8 +84,9 @@ pub async fn process(
     context: &Context,
     settings: Option<&Value>,
     registry: &Registry,
-    name: &str,
-) -> JsResult<Value> {
+    connective: Connective,
+) -> Result<Value> {
+    let name = connective.name();
     let filter_context = json!({"name": name});
     let listed_settings = settings.unwrap_or(&Value::Null);
 
@@ -81,53 +110,29 @@ pub async fn process(
         ));
     }
 
-    let output = flex::filter_results(context, registry, &rules).await?;
+    let output = workflow::filter_results(context, registry, &rules).await?;
+    let statuses: Vec<Option<Status>> = output.iter().map(Status::of).collect();
+    let sub_filter_count = output.len();
 
     let mut filters = Vec::new();
-    let mut status = if name == "And" { "pass" } else { "fail" };
-    let mut count = 0;
-    let negated_first_status = negated_status(
-        output
-            .first()
-            .and_then(|only| only.get("status"))
-            .and_then(Value::as_str),
-    );
-    for result in output {
-        let result_status = result.get("status").and_then(Value::as_str);
-        if result_status == Some("error") {
-            status = "error";
-        }
-        if name == "Or" && result_status == Some("pass") && status != "error" {
-            status = "pass";
-        }
-        if name == "And" && result_status == Some("fail") && status != "error" {
-            status = "fail";
-        }
-        filters.extend(prefix_descriptions(result, count + 1)?);
-        count += 1;
+    for (option_index, result) in output.into_iter().enumerate() {
+        filters.extend(prefix_descriptions(result, option_index + 1)?);
     }
 
-    let mut final_status = Some(status);
-    if name == "Not" {
-        if count != 1 {
-            return Ok(single_error(
-                name,
-                listed_settings,
-                &format!(
-                    "Failed to validate because the 'filter' option does not have exactly one element, but {count}"
-                ),
-                &json!({}),
-            ));
-        }
-        final_status = negated_first_status;
+    if connective == Connective::Not && sub_filter_count != 1 {
+        return Ok(single_error(
+            name,
+            listed_settings,
+            &format!(
+                "Failed to validate because the 'filter' option does not have exactly one element, but {sub_filter_count}"
+            ),
+            &json!({}),
+        ));
     }
 
     let mut combined = Map::new();
-    if let Some(present_status) = final_status {
-        combined.insert(
-            "status".to_string(),
-            Value::String(present_status.to_string()),
-        );
+    if let Some(status) = connective.combined_status(&statuses) {
+        combined.insert("status".to_string(), status.into());
     }
     combined.insert("name".to_string(), Value::String(name.to_string()));
     combined.insert("filters".to_string(), Value::Array(filters));

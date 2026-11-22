@@ -1,10 +1,10 @@
-use crate::error::JsResult;
-use crate::js;
+use crate::error::Result;
+use crate::json_value;
 use crate::validators::options_processor::map_logins;
 use serde_json::Value;
 
-pub fn process(payload: Option<&Value>) -> JsResult<Vec<Value>> {
-    map_logins(js::read(payload, "assignees")?, "payload.assignees")
+pub fn process(payload: Option<&Value>) -> Result<Vec<Value>> {
+    map_logins(json_value::read(payload, "assignees")?, "payload.assignees")
 }
 
 #[cfg(test)]

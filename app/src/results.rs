@@ -1,4 +1,76 @@
 use serde_json::{Map, Value};
+use std::fmt;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Status {
+    Pass,
+    Fail,
+    Error,
+}
+
+impl Status {
+    pub const ALL: [Status; 3] = [Status::Pass, Status::Fail, Status::Error];
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Status::Pass => "pass",
+            Status::Fail => "fail",
+            Status::Error => "error",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        Status::ALL
+            .into_iter()
+            .find(|status| status.as_str() == text)
+    }
+
+    #[must_use]
+    pub fn of(output: &Value) -> Option<Self> {
+        output
+            .get("status")
+            .and_then(Value::as_str)
+            .and_then(Self::parse)
+    }
+
+    #[must_use]
+    pub fn from_check(passed: bool) -> Self {
+        if passed { Status::Pass } else { Status::Fail }
+    }
+
+    #[must_use]
+    pub fn negated(self) -> Self {
+        match self {
+            Status::Pass => Status::Fail,
+            Status::Fail => Status::Pass,
+            Status::Error => Status::Error,
+        }
+    }
+
+    fn most_severe(statuses: impl IntoIterator<Item = Option<Status>>) -> Status {
+        statuses.into_iter().flatten().max().unwrap_or(Status::Pass)
+    }
+}
+
+impl fmt::Display for Status {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl From<Status> for Value {
+    fn from(status: Status) -> Self {
+        Value::String(status.as_str().to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidationSummary {
+    pub status: Status,
+    pub report: Value,
+}
 
 fn output_details(input: Value, settings: &Value, error: Option<Value>) -> Value {
     let mut details = Map::new();
@@ -67,30 +139,11 @@ pub fn construct_error_output(
     )
 }
 
-pub fn consolidate_status<'item>(
-    statuses: impl Iterator<Item = Option<&'item str>>,
-) -> &'static str {
-    let mut status = "pass";
-    for item_status in statuses {
-        if item_status == Some("fail") && status != "error" {
-            status = "fail";
-        }
-        if item_status == Some("error") {
-            status = "error";
-        }
-    }
-    status
-}
-
-fn status_of(output: &Value) -> Option<&str> {
-    output.get("status").and_then(Value::as_str)
-}
-
 fn consolidate(outputs: Vec<Value>, context: &Value, outputs_key: &str) -> Value {
-    let status = consolidate_status(outputs.iter().map(status_of));
+    let status = Status::most_severe(outputs.iter().map(Status::of));
     let mut result = Map::new();
-    result.insert("status".to_string(), Value::String(status.to_string()));
-    if let Some(name) = crate::js::get(context, "name") {
+    result.insert("status".to_string(), status.into());
+    if let Some(name) = crate::json_value::get(context, "name") {
         result.insert("name".to_string(), name.clone());
     }
     result.insert(outputs_key.to_string(), Value::Array(outputs));
@@ -107,8 +160,7 @@ pub fn consolidate_filter_result(outputs: Vec<Value>, filter_context: &Value) ->
     consolidate(outputs, filter_context, "filters")
 }
 
-#[must_use]
-pub fn construct_filter_output(
+fn construct_filter_output(
     filter_context: &Value,
     input: Value,
     settings: &Value,
@@ -146,46 +198,57 @@ pub fn construct_filter_error(
 }
 
 #[must_use]
-pub fn extract_validation_stats(results: Vec<Value>) -> Value {
-    let (mut pass_count, mut fail_count, mut error_count) = (0_usize, 0_usize, 0_usize);
-    for result in &results {
-        match status_of(result) {
-            Some("pass") => pass_count += 1,
-            Some("fail") => fail_count += 1,
-            Some("error") => error_count += 1,
-            _ => {}
-        }
-    }
-    let validation_status = if error_count > 0 {
-        "error"
-    } else if fail_count > 0 {
-        "fail"
-    } else {
-        "pass"
+pub fn summarize_validations(results: Vec<Value>) -> ValidationSummary {
+    let statuses: Vec<Option<Status>> = results.iter().map(Status::of).collect();
+    let count_of = |wanted: Status| {
+        statuses
+            .iter()
+            .filter(|status| **status == Some(wanted))
+            .count()
     };
+    let (pass_count, fail_count, error_count) = (
+        count_of(Status::Pass),
+        count_of(Status::Fail),
+        count_of(Status::Error),
+    );
+    let status = Status::most_severe(statuses.iter().copied());
     let failures: Vec<Value> = results
         .iter()
-        .filter(|result| status_of(result) == Some("fail"))
-        .cloned()
+        .zip(&statuses)
+        .filter(|(_, status)| **status == Some(Status::Fail))
+        .map(|(result, _)| result.clone())
         .collect();
-    let mut stats = Map::new();
-    stats.insert(
-        "validationStatus".to_string(),
-        Value::String(validation_status.to_string()),
-    );
-    stats.insert("validationCount".to_string(), Value::from(results.len()));
-    stats.insert("passCount".to_string(), Value::from(pass_count));
-    stats.insert("failCount".to_string(), Value::from(fail_count));
-    stats.insert("errorCount".to_string(), Value::from(error_count));
-    stats.insert("validationSuites".to_string(), Value::Array(results));
-    stats.insert("failures".to_string(), Value::Array(failures));
-    Value::Object(stats)
+    let mut report = Map::new();
+    report.insert("validationStatus".to_string(), status.into());
+    report.insert("validationCount".to_string(), Value::from(results.len()));
+    report.insert("passCount".to_string(), Value::from(pass_count));
+    report.insert("failCount".to_string(), Value::from(fail_count));
+    report.insert("errorCount".to_string(), Value::from(error_count));
+    report.insert("validationSuites".to_string(), Value::Array(results));
+    report.insert("failures".to_string(), Value::Array(failures));
+    ValidationSummary {
+        status,
+        report: Value::Object(report),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn negating_swaps_pass_and_fail_but_keeps_error() {
+        assert_eq!(Status::Pass.negated(), Status::Fail);
+        assert_eq!(Status::Fail.negated(), Status::Pass);
+        assert_eq!(Status::Error.negated(), Status::Error);
+    }
+
+    #[test]
+    fn unknown_status_text_is_ignored_when_consolidating() {
+        let outputs = vec![json!({"status": "skipped"}), json!({"status": "fail"})];
+        assert_eq!(consolidate_result(outputs, &json!({}))["status"], "fail");
+    }
 
     #[test]
     fn error_status_wins_over_fail_when_consolidating() {
@@ -200,20 +263,26 @@ mod tests {
     }
 
     #[test]
-    fn validation_stats_count_each_status() {
-        let stats = extract_validation_stats(vec![
+    fn validation_summary_counts_each_status() {
+        let summary = summarize_validations(vec![
             json!({"status": "pass"}),
             json!({"status": "fail", "name": "x"}),
         ]);
-        assert_eq!(stats["validationStatus"], "fail");
-        assert_eq!(stats["passCount"], 1);
-        assert_eq!(stats["failures"], json!([{"status": "fail", "name": "x"}]));
+        assert_eq!(summary.status, Status::Fail);
+        assert_eq!(summary.report["validationStatus"], "fail");
+        assert_eq!(summary.report["passCount"], 1);
+        assert_eq!(
+            summary.report["failures"],
+            json!([{"status": "fail", "name": "x"}])
+        );
     }
 
     #[test]
-    fn validation_stats_keep_the_javascript_key_order() {
-        let stats = extract_validation_stats(vec![json!({"status": "error"})]);
-        let keys: Vec<&String> = stats
+    fn validation_report_keeps_its_documented_key_order() {
+        let summary = summarize_validations(vec![json!({"status": "error"})]);
+        assert_eq!(summary.status, Status::Error);
+        let keys: Vec<&String> = summary
+            .report
             .as_object()
             .map(|fields| fields.keys().collect())
             .unwrap_or_default();

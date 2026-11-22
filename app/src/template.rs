@@ -1,6 +1,6 @@
 use crate::annotations;
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use chrono::{
     DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
 };
@@ -29,12 +29,12 @@ const MERGEABLE_HELPERS: [&str; 6] = [
 const MONTH_ABBREVIATIONS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
-const MAXIMUM_JS_DATE_MILLISECONDS: i64 = 8_640_000_000_000_000;
+const MAXIMUM_DATE_MILLISECONDS: i64 = 8_640_000_000_000_000;
 
-pub fn render(template: &str, data: &Value) -> JsResult<String> {
+pub fn render(template: &str, data: &Value) -> Result<String> {
     let mut program = parse(template)?;
     WhitespaceControl::default().visit_program(&mut program);
-    let root = Js::Borrowed(data);
+    let root = TemplateValue::Borrowed(data);
     let scope = Scope {
         context: root.clone(),
         depths: Rc::new(DepthNode {
@@ -50,12 +50,12 @@ pub fn render(template: &str, data: &Value) -> JsResult<String> {
     render_program(&program, &scope)
 }
 
-pub fn compile_and_render(template: &Value, data: &Value) -> JsResult<String> {
+pub fn compile_and_render(template: &Value, data: &Value) -> Result<String> {
     match template {
         Value::String(text) => render(text, data),
-        other => Err(JsError::error(format!(
+        other => Err(Error::general(format!(
             "You must pass a string or Handlebars AST to Handlebars.compile. You passed {}",
-            js::to_js_string(Some(other))
+            json_value::to_display_string(Some(other))
         ))),
     }
 }
@@ -64,9 +64,9 @@ pub fn compile_and_render(template: &Value, data: &Value) -> JsResult<String> {
 pub fn template_data(payload: Option<&Value>, validation_result: &Value) -> Value {
     let mut data = Value::Object(Map::new());
     if let Some(payload_value) = payload {
-        js::deep_merge_into(&mut data, payload_value);
+        json_value::deep_merge_into(&mut data, payload_value);
     }
-    js::deep_merge_into(&mut data, validation_result);
+    json_value::deep_merge_into(&mut data, validation_result);
     data
 }
 
@@ -75,7 +75,7 @@ pub fn populate_template(
     validation_result: &Value,
     payload: Option<&Value>,
     event: &crate::event_aware::EventAttributes<'_>,
-) -> JsResult<String> {
+) -> Result<String> {
     let data = template_data(payload, validation_result);
     populate_template_with_data(template, &data, payload, event)
 }
@@ -85,13 +85,15 @@ pub fn populate_template_with_data(
     data: &Value,
     payload: Option<&Value>,
     event: &crate::event_aware::EventAttributes<'_>,
-) -> JsResult<String> {
+) -> Result<String> {
     let template_text = match template {
         Value::String(text) => text,
-        Value::Null => return Err(JsError::reading_property_of_undefined("replace")),
+        Value::Null => return Err(Error::missing_property("replace")),
         _ => {
-            js::read(js::read(payload, "user")?, "login")?;
-            return Err(JsError::type_error("newTemplate.replace is not a function"));
+            json_value::read(json_value::read(payload, "user")?, "login")?;
+            return Err(Error::type_mismatch(
+                "newTemplate.replace is not a function",
+            ));
         }
     };
     let annotated =
@@ -99,7 +101,7 @@ pub fn populate_template_with_data(
     render(&annotated, data)
 }
 
-fn is_js_whitespace(character: char) -> bool {
+fn is_trimmable_whitespace(character: char) -> bool {
     matches!(
         character,
         '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
@@ -114,22 +116,22 @@ fn is_js_whitespace(character: char) -> bool {
 }
 
 fn is_identifier_character(character: char) -> bool {
-    !(is_js_whitespace(character)
+    !(is_trimmable_whitespace(character)
         || matches!(character, '!' | '"' | '#' | '%'..=',' | '.' | '/' | ';'..='>' | '@' | '['..='^' | '\x60' | '{'..='~'))
 }
 
 fn is_identifier_lookahead(character: Option<char>) -> bool {
     character.is_some_and(|next| {
-        matches!(next, '=' | '~' | '}' | '/' | '.' | ')' | '|') || is_js_whitespace(next)
+        matches!(next, '=' | '~' | '}' | '/' | '.' | ')' | '|') || is_trimmable_whitespace(next)
     })
 }
 
 fn is_literal_lookahead(character: Option<char>) -> bool {
-    character.is_some_and(|next| matches!(next, '~' | '}' | ')') || is_js_whitespace(next))
+    character.is_some_and(|next| matches!(next, '~' | '}' | ')') || is_trimmable_whitespace(next))
 }
 
 fn leading_whitespace_length(text: &str) -> usize {
-    text.len() - text.trim_start_matches(is_js_whitespace).len()
+    text.len() - text.trim_start_matches(is_trimmable_whitespace).len()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -154,7 +156,7 @@ enum TokenKind {
     StringLiteral,
     NumberLiteral,
     BooleanLiteral,
-    UndefinedLiteral,
+    MissingValueLiteral,
     NullLiteral,
     OpenBlockParams,
     CloseBlockParams,
@@ -259,7 +261,7 @@ impl<'source> Lexer<'source> {
         self.states.pop();
     }
 
-    fn tokenize(mut self) -> JsResult<Vec<Token<'source>>> {
+    fn tokenize(mut self) -> Result<Vec<Token<'source>>> {
         loop {
             let state = self.states.last().copied().unwrap_or(LexerState::Initial);
             let keep_going = match state {
@@ -305,7 +307,7 @@ impl<'source> Lexer<'source> {
         true
     }
 
-    fn lex_escaped_mustache(&mut self) -> JsResult<bool> {
+    fn lex_escaped_mustache(&mut self) -> Result<bool> {
         let source = self.source;
         let start = self.position;
         let rest = &source[start..];
@@ -330,7 +332,7 @@ impl<'source> Lexer<'source> {
         Ok(true)
     }
 
-    fn lex_long_comment(&mut self) -> JsResult<bool> {
+    fn lex_long_comment(&mut self) -> Result<bool> {
         let source = self.source;
         let start = self.position;
         let rest = &source[start..];
@@ -355,14 +357,14 @@ impl<'source> Lexer<'source> {
         Err(self.lexical_error(start))
     }
 
-    fn lexical_error(&mut self, position: usize) -> JsError {
+    fn lexical_error(&mut self, position: usize) -> Error {
         let (line, _) = self.location(position);
-        JsError::error(format!("Lexical error on line {line}. Unrecognized text."))
+        Error::general(format!("Lexical error on line {line}. Unrecognized text."))
     }
 
     #[expect(
         clippy::too_many_lines,
-        reason = "one match over all Handlebars mustache token forms, kept together like the original lexer"
+        reason = "one match over all mustache token forms keeps the lexer readable as a single table"
     )]
     fn lex_mustache(&mut self) -> bool {
         let source = self.source;
@@ -430,7 +432,7 @@ impl<'source> Lexer<'source> {
         for (keyword, kind) in [
             ("true", TokenKind::BooleanLiteral),
             ("false", TokenKind::BooleanLiteral),
-            ("undefined", TokenKind::UndefinedLiteral),
+            ("undefined", TokenKind::MissingValueLiteral),
             ("null", TokenKind::NullLiteral),
         ] {
             if rest.starts_with(keyword)
@@ -679,7 +681,7 @@ struct PathExpression {
     data: bool,
     depth: usize,
     parts: Vec<String>,
-    original: String,
+    source_text: String,
 }
 
 #[derive(Debug, Clone)]
@@ -689,7 +691,7 @@ enum Expression {
     StringLiteral(String),
     NumberLiteral(f64),
     BooleanLiteral(bool),
-    UndefinedLiteral,
+    MissingValueLiteral,
     NullLiteral,
 }
 
@@ -704,16 +706,22 @@ struct Call {
 
 #[derive(Debug, Clone)]
 struct ContentNode {
-    original: String,
+    source_text: String,
     value: String,
     right_stripped: bool,
     left_stripped: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum OutputEscaping {
+    Html,
+    Raw,
+}
+
 #[derive(Debug, Clone)]
 struct Mustache {
     call: Call,
-    escaped: bool,
+    escaping: OutputEscaping,
     strip: Strip,
 }
 
@@ -754,25 +762,31 @@ struct InverseAndProgram {
     chain: bool,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BlockOpening {
+    Regular,
+    Inverted,
+}
+
 enum BlockClose {
-    Path { original: String, strip: Strip },
+    Path { source_text: String, strip: Strip },
     Inverse(Strip),
     Missing,
 }
 
-fn literal_original(expression: &Expression) -> String {
+fn literal_source_text(expression: &Expression) -> String {
     match expression {
-        Expression::Path(path) => path.original.clone(),
+        Expression::Path(path) => path.source_text.clone(),
         Expression::Invocation(_) => String::new(),
         Expression::StringLiteral(text) => text.clone(),
-        Expression::NumberLiteral(number) => js::float_to_string(*number),
+        Expression::NumberLiteral(number) => json_value::float_to_string(*number),
         Expression::BooleanLiteral(flag) => flag.to_string(),
-        Expression::UndefinedLiteral => "undefined".to_string(),
+        Expression::MissingValueLiteral => "undefined".to_string(),
         Expression::NullLiteral => "null".to_string(),
     }
 }
 
-fn parse(template: &str) -> JsResult<Program> {
+fn parse(template: &str) -> Result<Program> {
     let tokens = Lexer::new(template).tokenize()?;
     let mut parser = Parser { tokens, index: 0 };
     let program = parser.parse_program()?;
@@ -823,14 +837,14 @@ impl<'source> Parser<'source> {
         token
     }
 
-    fn error(&self) -> JsError {
+    fn error(&self) -> Error {
         let token = self.tokens.get(self.index);
         let line = token.map_or(1, |token| token.line);
         let found = token.map_or(TokenKind::EndOfInput, |token| token.kind);
-        JsError::error(format!("Parse error on line {line}: unexpected {found:?}"))
+        Error::general(format!("Parse error on line {line}: unexpected {found:?}"))
     }
 
-    fn expect(&mut self, kind: TokenKind) -> JsResult<Token<'source>> {
+    fn expect(&mut self, kind: TokenKind) -> Result<Token<'source>> {
         if self.peek() == kind {
             Ok(self.advance())
         } else {
@@ -838,14 +852,14 @@ impl<'source> Parser<'source> {
         }
     }
 
-    fn parse_program(&mut self) -> JsResult<Program> {
+    fn parse_program(&mut self) -> Result<Program> {
         let mut body = Vec::new();
         loop {
             match self.peek() {
                 TokenKind::Content => {
                     let text = self.advance().text.into_owned();
                     body.push(Statement::Content(ContentNode {
-                        original: text.clone(),
+                        source_text: text.clone(),
                         value: text,
                         right_stripped: false,
                         left_stripped: false,
@@ -872,7 +886,7 @@ impl<'source> Parser<'source> {
         })
     }
 
-    fn parse_mustache(&mut self) -> JsResult<Mustache> {
+    fn parse_mustache(&mut self) -> Result<Mustache> {
         let open = self.advance();
         let call = self.parse_call()?;
         let close = if open.kind == TokenKind::OpenUnescaped {
@@ -887,12 +901,16 @@ impl<'source> Parser<'source> {
             .or_else(|| open.text.chars().nth(2));
         Ok(Mustache {
             call,
-            escaped: !matches!(escape_flag, Some('{' | '&')),
+            escaping: if matches!(escape_flag, Some('{' | '&')) {
+                OutputEscaping::Raw
+            } else {
+                OutputEscaping::Html
+            },
             strip: strip_flags(&open.text, &close.text),
         })
     }
 
-    fn parse_call(&mut self) -> JsResult<Call> {
+    fn parse_call(&mut self) -> Result<Call> {
         let (line, column) = self.current_location();
         let path = self.parse_helper_name()?;
         let mut params = Vec::new();
@@ -916,7 +934,7 @@ impl<'source> Parser<'source> {
         })
     }
 
-    fn parse_param(&mut self) -> JsResult<Expression> {
+    fn parse_param(&mut self) -> Result<Expression> {
         if self.peek() == TokenKind::OpenSubExpression {
             self.advance();
             let call = self.parse_call()?;
@@ -926,7 +944,7 @@ impl<'source> Parser<'source> {
         self.parse_helper_name()
     }
 
-    fn parse_helper_name(&mut self) -> JsResult<Expression> {
+    fn parse_helper_name(&mut self) -> Result<Expression> {
         match self.peek() {
             TokenKind::Identifier => Ok(Expression::Path(self.parse_path(false)?)),
             TokenKind::Data => {
@@ -945,9 +963,9 @@ impl<'source> Parser<'source> {
             TokenKind::BooleanLiteral => {
                 Ok(Expression::BooleanLiteral(self.advance().text == "true"))
             }
-            TokenKind::UndefinedLiteral => {
+            TokenKind::MissingValueLiteral => {
                 self.advance();
-                Ok(Expression::UndefinedLiteral)
+                Ok(Expression::MissingValueLiteral)
             }
             TokenKind::NullLiteral => {
                 self.advance();
@@ -957,7 +975,7 @@ impl<'source> Parser<'source> {
         }
     }
 
-    fn parse_path(&mut self, data: bool) -> JsResult<PathExpression> {
+    fn parse_path(&mut self, data: bool) -> Result<PathExpression> {
         let (line, column) = self.current_location();
         let first = self.expect(TokenKind::Identifier)?;
         let mut segments = vec![(
@@ -974,17 +992,17 @@ impl<'source> Parser<'source> {
                 separator.text,
             ));
         }
-        let mut original = if data { "@".to_string() } else { String::new() };
+        let mut source_text = if data { "@".to_string() } else { String::new() };
         let mut parts = Vec::new();
         let mut depth = 0;
         for (part, token_text, separator) in segments {
             let is_literal = token_text.as_ref() != part.as_str();
-            original.push_str(&separator);
-            original.push_str(&part);
+            source_text.push_str(&separator);
+            source_text.push_str(&part);
             if !is_literal && (part == ".." || part == "." || part == "this") {
                 if !parts.is_empty() {
-                    return Err(JsError::error(format!(
-                        "Invalid path: {original} - {line}:{column}"
+                    return Err(Error::general(format!(
+                        "Invalid path: {source_text} - {line}:{column}"
                     )));
                 }
                 if part == ".." {
@@ -998,11 +1016,11 @@ impl<'source> Parser<'source> {
             data,
             depth,
             parts,
-            original,
+            source_text,
         })
     }
 
-    fn parse_open_block(&mut self, open: &Token<'source>) -> JsResult<OpenBlock> {
+    fn parse_open_block(&mut self, open: &Token<'source>) -> Result<OpenBlock> {
         let call = self.parse_call()?;
         let block_params = if self.peek() == TokenKind::OpenBlockParams {
             self.advance();
@@ -1026,31 +1044,37 @@ impl<'source> Parser<'source> {
         })
     }
 
-    fn parse_block(&mut self) -> JsResult<Block> {
+    fn parse_block(&mut self) -> Result<Block> {
         let open_token = self.advance();
-        let inverted = open_token.kind == TokenKind::OpenInverse;
+        let opening = if open_token.kind == TokenKind::OpenInverse {
+            BlockOpening::Inverted
+        } else {
+            BlockOpening::Regular
+        };
         let open = self.parse_open_block(&open_token)?;
         let program = self.parse_program()?;
         let inverse_and_program = match self.peek() {
-            TokenKind::OpenInverseChain if !inverted => Some(self.parse_inverse_chain()?),
+            TokenKind::OpenInverseChain if opening == BlockOpening::Regular => {
+                Some(self.parse_inverse_chain()?)
+            }
             TokenKind::Inverse => Some(self.parse_inverse_and_program()?),
             _ => None,
         };
         let close = self.parse_close_block()?;
-        prepare_block(open, program, inverse_and_program, &close, inverted)
+        prepare_block(open, program, inverse_and_program, &close, opening)
     }
 
-    fn parse_close_block(&mut self) -> JsResult<BlockClose> {
+    fn parse_close_block(&mut self) -> Result<BlockClose> {
         let open = self.expect(TokenKind::OpenEndBlock)?;
         let path = self.parse_helper_name()?;
         let close = self.expect(TokenKind::Close)?;
         Ok(BlockClose::Path {
-            original: literal_original(&path),
+            source_text: literal_source_text(&path),
             strip: strip_flags(&open.text, &close.text),
         })
     }
 
-    fn parse_inverse_and_program(&mut self) -> JsResult<InverseAndProgram> {
+    fn parse_inverse_and_program(&mut self) -> Result<InverseAndProgram> {
         let token = self.advance();
         let program = self.parse_program()?;
         Ok(InverseAndProgram {
@@ -1060,7 +1084,7 @@ impl<'source> Parser<'source> {
         })
     }
 
-    fn parse_inverse_chain(&mut self) -> JsResult<InverseAndProgram> {
+    fn parse_inverse_chain(&mut self) -> Result<InverseAndProgram> {
         let open_token = self.advance();
         let open = self.parse_open_block(&open_token)?;
         let program = self.parse_program()?;
@@ -1074,7 +1098,7 @@ impl<'source> Parser<'source> {
             None => BlockClose::Missing,
         };
         let strip = open.strip;
-        let block = prepare_block(open, program, nested, &close, false)?;
+        let block = prepare_block(open, program, nested, &close, BlockOpening::Regular)?;
         Ok(InverseAndProgram {
             strip,
             program: Program {
@@ -1095,7 +1119,7 @@ fn is_param_start(kind: TokenKind) -> bool {
             | TokenKind::StringLiteral
             | TokenKind::NumberLiteral
             | TokenKind::BooleanLiteral
-            | TokenKind::UndefinedLiteral
+            | TokenKind::MissingValueLiteral
             | TokenKind::NullLiteral
             | TokenKind::OpenSubExpression
     )
@@ -1106,13 +1130,13 @@ fn prepare_block(
     program: Program,
     inverse_and_program: Option<InverseAndProgram>,
     close: &BlockClose,
-    inverted: bool,
-) -> JsResult<Block> {
-    if let BlockClose::Path { original, .. } = close {
-        let open_original = literal_original(&open.call.path);
-        if &open_original != original {
-            return Err(JsError::error(format!(
-                "{open_original} doesn't match {original} - {}:{}",
+    opening: BlockOpening,
+) -> Result<Block> {
+    if let BlockClose::Path { source_text, .. } = close {
+        let open_source_text = literal_source_text(&open.call.path);
+        if &open_source_text != source_text {
+            return Err(Error::general(format!(
+                "{open_source_text} doesn't match {source_text} - {}:{}",
                 open.call.line, open.call.column
             )));
         }
@@ -1134,10 +1158,9 @@ fn prepare_block(
         inverse_strip = Some(inverse_part.strip);
         inverse = Some(inverse_part.program);
     }
-    let (program, inverse) = if inverted {
-        (inverse, Some(program))
-    } else {
-        (Some(program), inverse)
+    let (program, inverse) = match opening {
+        BlockOpening::Inverted => (inverse, Some(program)),
+        BlockOpening::Regular => (Some(program), inverse),
     };
     Ok(Block {
         call: open.call,
@@ -1152,7 +1175,7 @@ fn prepare_block(
 #[derive(Default)]
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "mirrors the independent strip and standalone flags of the Handlebars whitespace control visitor"
+    reason = "the whitespace control pass tracks independent strip and standalone flags"
 )]
 struct StandaloneStrip {
     open: bool,
@@ -1168,12 +1191,12 @@ struct WhitespaceControl {
 }
 
 fn trailing_whitespace_has_newline(text: &str, whole_whitespace_counts: bool) -> bool {
-    let trimmed = text.trim_end_matches(is_js_whitespace);
+    let trimmed = text.trim_end_matches(is_trimmable_whitespace);
     text[trimmed.len()..].contains('\n') || (whole_whitespace_counts && trimmed.is_empty())
 }
 
 fn leading_whitespace_has_newline(text: &str, whole_whitespace_counts: bool) -> bool {
-    let trimmed = text.trim_start_matches(is_js_whitespace);
+    let trimmed = text.trim_start_matches(is_trimmable_whitespace);
     text[..text.len() - trimmed.len()].contains('\n')
         || (whole_whitespace_counts && trimmed.is_empty())
 }
@@ -1186,7 +1209,7 @@ fn is_previous_whitespace(body: &[Statement], index: Option<usize>, is_root: boo
     let has_sibling = index >= 2;
     match previous {
         Statement::Content(content) => {
-            trailing_whitespace_has_newline(&content.original, !has_sibling && is_root)
+            trailing_whitespace_has_newline(&content.source_text, !has_sibling && is_root)
         }
         _ => false,
     }
@@ -1200,7 +1223,7 @@ fn is_next_whitespace(body: &[Statement], index: Option<usize>, is_root: bool) -
     let has_sibling = body.get(next_index + 1).is_some();
     match next {
         Statement::Content(content) => {
-            leading_whitespace_has_newline(&content.original, !has_sibling && is_root)
+            leading_whitespace_has_newline(&content.source_text, !has_sibling && is_root)
         }
         _ => false,
     }
@@ -1217,25 +1240,33 @@ fn strip_line_start(text: &str) -> &str {
         .unwrap_or(without_carriage_return)
 }
 
-fn omit_right(body: &mut [Statement], index: Option<usize>, multiple: bool) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WhitespaceExtent {
+    CurrentLine,
+    All,
+}
+
+fn omit_right(body: &mut [Statement], index: Option<usize>, extent: WhitespaceExtent) {
     let position = index.map_or(0, |value| value + 1);
     let Some(Statement::Content(current)) = body.get_mut(position) else {
         return;
     };
-    if !multiple && current.right_stripped {
+    if extent == WhitespaceExtent::CurrentLine && current.right_stripped {
         return;
     }
-    let kept_length = if multiple {
-        current.value.trim_start_matches(is_js_whitespace).len()
-    } else {
-        strip_line_start(&current.value).len()
+    let kept_length = match extent {
+        WhitespaceExtent::All => current
+            .value
+            .trim_start_matches(is_trimmable_whitespace)
+            .len(),
+        WhitespaceExtent::CurrentLine => strip_line_start(&current.value).len(),
     };
     let removed_length = current.value.len() - kept_length;
     current.right_stripped = removed_length > 0;
     current.value.drain(..removed_length);
 }
 
-fn omit_left(body: &mut [Statement], index: Option<usize>, multiple: bool) -> bool {
+fn omit_left(body: &mut [Statement], index: Option<usize>, extent: WhitespaceExtent) -> bool {
     let position = match index {
         None => body.len().checked_sub(1),
         Some(value) => value.checked_sub(1),
@@ -1243,13 +1274,15 @@ fn omit_left(body: &mut [Statement], index: Option<usize>, multiple: bool) -> bo
     let Some(Statement::Content(current)) = position.and_then(|value| body.get_mut(value)) else {
         return false;
     };
-    if !multiple && current.left_stripped {
+    if extent == WhitespaceExtent::CurrentLine && current.left_stripped {
         return false;
     }
-    let kept_length = if multiple {
-        current.value.trim_end_matches(is_js_whitespace).len()
-    } else {
-        current.value.trim_end_matches([' ', '\t']).len()
+    let kept_length = match extent {
+        WhitespaceExtent::All => current
+            .value
+            .trim_end_matches(is_trimmable_whitespace)
+            .len(),
+        WhitespaceExtent::CurrentLine => current.value.trim_end_matches([' ', '\t']).len(),
     };
     current.left_stripped = kept_length != current.value.len();
     current.value.truncate(kept_length);
@@ -1295,15 +1328,24 @@ fn last_inverse(block: &mut Block) -> Option<&mut Program> {
     Some(current)
 }
 
-fn with_body<T>(
-    program: Option<&mut Program>,
-    action: impl FnOnce(&mut Vec<Statement>) -> T,
-    fallback: T,
-) -> T {
-    match program {
-        Some(program) => action(&mut program.body),
-        None => fallback,
+fn omit_right_of_body(program: Option<&mut Program>, extent: WhitespaceExtent) {
+    if let Some(program) = program {
+        omit_right(&mut program.body, None, extent);
     }
+}
+
+fn omit_left_of_body(program: Option<&mut Program>, extent: WhitespaceExtent) {
+    if let Some(program) = program {
+        omit_left(&mut program.body, None, extent);
+    }
+}
+
+fn body_starts_on_new_line(program: Option<&mut Program>) -> bool {
+    program.is_some_and(|program| is_next_whitespace(&program.body, None, false))
+}
+
+fn body_ends_on_new_line(program: Option<&mut Program>) -> bool {
+    program.is_some_and(|program| is_previous_whitespace(&program.body, None, false))
 }
 
 impl WhitespaceControl {
@@ -1334,33 +1376,25 @@ impl WhitespaceControl {
             let inline_standalone =
                 strip.inline_standalone && previous_whitespace && next_whitespace;
             if strip.close {
-                omit_right(body, Some(index), true);
+                omit_right(body, Some(index), WhitespaceExtent::All);
             }
             if strip.open {
-                omit_left(body, Some(index), true);
+                omit_left(body, Some(index), WhitespaceExtent::All);
             }
             if inline_standalone {
-                omit_right(body, Some(index), false);
-                omit_left(body, Some(index), false);
+                omit_right(body, Some(index), WhitespaceExtent::CurrentLine);
+                omit_left(body, Some(index), WhitespaceExtent::CurrentLine);
             }
             if open_standalone {
                 if let Statement::Block(block) = &mut body[index] {
-                    with_body(
-                        main_program(block),
-                        |inner| omit_right(inner, None, false),
-                        (),
-                    );
+                    omit_right_of_body(main_program(block), WhitespaceExtent::CurrentLine);
                 }
-                omit_left(body, Some(index), false);
+                omit_left(body, Some(index), WhitespaceExtent::CurrentLine);
             }
             if close_standalone {
-                omit_right(body, Some(index), false);
+                omit_right(body, Some(index), WhitespaceExtent::CurrentLine);
                 if let Statement::Block(block) = &mut body[index] {
-                    with_body(
-                        closing_program(block),
-                        |inner| omit_left(inner, None, false),
-                        false,
-                    );
+                    omit_left_of_body(closing_program(block), WhitespaceExtent::CurrentLine);
                 }
             }
         }
@@ -1377,23 +1411,11 @@ impl WhitespaceControl {
         let open_strip = block.open_strip;
         let close_strip = block.close_strip.unwrap_or_default();
         let inverse_strip = block.inverse_strip.unwrap_or_default();
-        let open_standalone = with_body(
-            main_program(block),
-            |body| is_next_whitespace(body, None, false),
-            false,
-        );
+        let open_standalone = body_starts_on_new_line(main_program(block));
         let close_standalone = if has_inverse {
-            with_body(
-                first_inverse(block),
-                |body| is_previous_whitespace(body, None, false),
-                false,
-            )
+            body_ends_on_new_line(first_inverse(block))
         } else {
-            with_body(
-                main_program(block),
-                |body| is_previous_whitespace(body, None, false),
-                false,
-            )
+            body_ends_on_new_line(main_program(block))
         };
         let strip = StandaloneStrip {
             open: open_strip.open,
@@ -1403,126 +1425,97 @@ impl WhitespaceControl {
             inline_standalone: false,
         };
         if open_strip.close {
-            with_body(main_program(block), |body| omit_right(body, None, true), ());
+            omit_right_of_body(main_program(block), WhitespaceExtent::All);
         }
         if has_inverse {
             if inverse_strip.open {
-                with_body(
-                    main_program(block),
-                    |body| omit_left(body, None, true),
-                    false,
-                );
+                omit_left_of_body(main_program(block), WhitespaceExtent::All);
             }
             if inverse_strip.close {
-                with_body(
-                    first_inverse(block),
-                    |body| omit_right(body, None, true),
-                    (),
-                );
+                omit_right_of_body(first_inverse(block), WhitespaceExtent::All);
             }
             if close_strip.open {
-                with_body(
-                    last_inverse(block),
-                    |body| omit_left(body, None, true),
-                    false,
-                );
+                omit_left_of_body(last_inverse(block), WhitespaceExtent::All);
             }
-            let program_ends_with_newline = with_body(
-                main_program(block),
-                |body| is_previous_whitespace(body, None, false),
-                false,
-            );
-            let inverse_starts_with_newline = with_body(
-                first_inverse(block),
-                |body| is_next_whitespace(body, None, false),
-                false,
-            );
+            let program_ends_with_newline = body_ends_on_new_line(main_program(block));
+            let inverse_starts_with_newline = body_starts_on_new_line(first_inverse(block));
             if program_ends_with_newline && inverse_starts_with_newline {
-                with_body(
-                    main_program(block),
-                    |body| omit_left(body, None, false),
-                    false,
-                );
-                with_body(
-                    first_inverse(block),
-                    |body| omit_right(body, None, false),
-                    (),
-                );
+                omit_left_of_body(main_program(block), WhitespaceExtent::CurrentLine);
+                omit_right_of_body(first_inverse(block), WhitespaceExtent::CurrentLine);
             }
         } else if close_strip.open {
-            with_body(
-                main_program(block),
-                |body| omit_left(body, None, true),
-                false,
-            );
+            omit_left_of_body(main_program(block), WhitespaceExtent::All);
         }
         strip
     }
 }
 
 #[derive(Clone)]
-enum Js<'data> {
-    Undefined,
+enum TemplateValue<'data> {
+    Missing,
     Borrowed(&'data Value),
     Owned(Rc<Value>),
     Safe(Rc<str>),
     NullContext,
 }
 
-impl<'data> Js<'data> {
+impl<'data> TemplateValue<'data> {
     fn owned(value: Value) -> Self {
-        Js::Owned(Rc::new(value))
+        TemplateValue::Owned(Rc::new(value))
     }
 
     fn text(text: impl Into<String>) -> Self {
-        Js::owned(Value::String(text.into()))
+        TemplateValue::owned(Value::String(text.into()))
     }
 
     fn value(&self) -> Option<&Value> {
         match self {
-            Js::Borrowed(value) => Some(value),
-            Js::Owned(value) => Some(value.as_ref()),
+            TemplateValue::Borrowed(value) => Some(value),
+            TemplateValue::Owned(value) => Some(value.as_ref()),
             _ => None,
         }
     }
 
     fn is_nullish(&self) -> bool {
-        matches!(self, Js::Undefined) || matches!(self.value(), Some(Value::Null))
+        matches!(self, TemplateValue::Missing) || matches!(self.value(), Some(Value::Null))
     }
 
     fn is_truthy(&self) -> bool {
         match self {
-            Js::Undefined => false,
-            Js::Safe(_) | Js::NullContext => true,
-            _ => js::truthy(self.value()),
+            TemplateValue::Missing => false,
+            TemplateValue::Safe(_) | TemplateValue::NullContext => true,
+            _ => json_value::truthy(self.value()),
         }
     }
 
-    fn child(&self, select: impl FnOnce(&Value) -> Option<&Value>) -> Js<'data> {
+    fn child(&self, select: impl FnOnce(&Value) -> Option<&Value>) -> TemplateValue<'data> {
         match self {
-            Js::Borrowed(value) => select(value).map_or(Js::Undefined, Js::Borrowed),
-            Js::Owned(value) => {
-                select(value).map_or(Js::Undefined, |selected| Js::owned(selected.clone()))
+            TemplateValue::Borrowed(value) => {
+                select(value).map_or(TemplateValue::Missing, TemplateValue::Borrowed)
             }
-            _ => Js::Undefined,
+            TemplateValue::Owned(value) => select(value)
+                .map_or(TemplateValue::Missing, |selected| {
+                    TemplateValue::owned(selected.clone())
+                }),
+            _ => TemplateValue::Missing,
         }
     }
 }
 
-fn js_text<'value>(value: &'value Js) -> Cow<'value, str> {
+fn display_text<'value>(value: &'value TemplateValue) -> Cow<'value, str> {
     match value {
-        Js::Undefined => Cow::Borrowed("undefined"),
-        Js::Safe(text) => Cow::Borrowed(text),
-        Js::NullContext => Cow::Borrowed("[object Object]"),
+        TemplateValue::Missing => Cow::Borrowed("undefined"),
+        TemplateValue::Safe(text) => Cow::Borrowed(text),
+        TemplateValue::NullContext => Cow::Borrowed("[object Object]"),
         _ => match value.value() {
             Some(Value::String(text)) => Cow::Borrowed(text),
-            other => Cow::Owned(js::to_js_string(other)),
+            other => Cow::Owned(json_value::to_display_string(other)),
         },
     }
 }
 
-fn js_to_string(value: &Js) -> String {
-    js_text(value).into_owned()
+fn to_display_string(value: &TemplateValue) -> String {
+    display_text(value).into_owned()
 }
 
 fn push_escaped_html(output: &mut String, text: &str) {
@@ -1540,17 +1533,17 @@ fn push_escaped_html(output: &mut String, text: &str) {
     }
 }
 
-fn push_escaped_expression(output: &mut String, value: &Js) {
+fn push_escaped_expression(output: &mut String, value: &TemplateValue) {
     match value {
-        Js::Safe(text) => output.push_str(text),
+        TemplateValue::Safe(text) => output.push_str(text),
         _ if value.is_nullish() => {}
-        _ => push_escaped_html(output, &js_text(value)),
+        _ => push_escaped_html(output, &display_text(value)),
     }
 }
 
-fn push_appended_string(output: &mut String, value: &Js) {
+fn push_appended_string(output: &mut String, value: &TemplateValue) {
     if !value.is_nullish() {
-        output.push_str(&js_text(value));
+        output.push_str(&display_text(value));
     }
 }
 
@@ -1562,7 +1555,7 @@ fn array_index(name: &str) -> Option<usize> {
     usize::try_from(index).ok()
 }
 
-fn js_ordered_keys(map: &Map<String, Value>) -> Vec<&String> {
+fn keys_in_property_order(map: &Map<String, Value>) -> Vec<&String> {
     let mut index_keys: Vec<(usize, &String)> = map
         .keys()
         .filter_map(|key| array_index(key).map(|index| (index, key)))
@@ -1575,38 +1568,38 @@ fn js_ordered_keys(map: &Map<String, Value>) -> Vec<&String> {
         .collect()
 }
 
-fn lookup_property<'data>(parent: &Js<'data>, name: &str) -> Js<'data> {
+fn lookup_property<'data>(parent: &TemplateValue<'data>, name: &str) -> TemplateValue<'data> {
     match parent.value() {
         Some(Value::Object(_)) => parent.child(|value| value.get(name)),
         Some(Value::Array(items)) => {
             if name == "length" {
-                Js::owned(Value::from(items.len()))
+                TemplateValue::owned(Value::from(items.len()))
             } else if let Some(index) = array_index(name) {
                 parent.child(|value| value.as_array().and_then(|items| items.get(index)))
             } else {
-                Js::Undefined
+                TemplateValue::Missing
             }
         }
         Some(Value::String(text)) => {
             if name == "length" {
-                Js::owned(Value::from(text.encode_utf16().count()))
+                TemplateValue::owned(Value::from(text.encode_utf16().count()))
             } else if let Some(unit) =
                 array_index(name).and_then(|index| text.encode_utf16().nth(index))
             {
-                Js::text(String::from_utf16_lossy(&[unit]))
+                TemplateValue::text(String::from_utf16_lossy(&[unit]))
             } else {
-                Js::Undefined
+                TemplateValue::Missing
             }
         }
-        _ => Js::Undefined,
+        _ => TemplateValue::Missing,
     }
 }
 
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "integral JavaScript numbers below 2^53 convert to i64 exactly"
+    reason = "integral numbers below 2^53 convert to i64 exactly"
 )]
-fn javascript_number_value(number: f64) -> Value {
+fn number_literal_value(number: f64) -> Value {
     if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 {
         Value::from(number as i64)
     } else {
@@ -1615,7 +1608,7 @@ fn javascript_number_value(number: f64) -> Value {
 }
 
 fn string_to_number(text: &str) -> f64 {
-    let trimmed = text.trim_matches(is_js_whitespace);
+    let trimmed = text.trim_matches(is_trimmable_whitespace);
     if trimmed.is_empty() {
         0.0
     } else {
@@ -1643,33 +1636,35 @@ fn is_reference_value(value: &Value) -> bool {
     matches!(value, Value::Array(_) | Value::Object(_))
 }
 
-fn same_reference(left: &Js, right: &Js) -> bool {
+fn same_reference(left: &TemplateValue, right: &TemplateValue) -> bool {
     match (left, right) {
-        (Js::Borrowed(first), Js::Borrowed(second)) => std::ptr::eq(*first, *second),
-        (Js::Owned(first), Js::Owned(second)) => Rc::ptr_eq(first, second),
+        (TemplateValue::Borrowed(first), TemplateValue::Borrowed(second)) => {
+            std::ptr::eq(*first, *second)
+        }
+        (TemplateValue::Owned(first), TemplateValue::Owned(second)) => Rc::ptr_eq(first, second),
         _ => false,
     }
 }
 
-fn loosely_equal(left: &Js, right: &Js) -> bool {
+fn loosely_equal(left: &TemplateValue, right: &TemplateValue) -> bool {
     if left.is_nullish() || right.is_nullish() {
         return left.is_nullish() && right.is_nullish();
     }
     match (left, right) {
-        (Js::NullContext, Js::NullContext) => true,
-        (Js::Safe(first), Js::Safe(second)) => Rc::ptr_eq(first, second),
+        (TemplateValue::NullContext, TemplateValue::NullContext) => true,
+        (TemplateValue::Safe(first), TemplateValue::Safe(second)) => Rc::ptr_eq(first, second),
         _ => match (left.value(), right.value()) {
             (Some(first), Some(second)) => {
                 match (is_reference_value(first), is_reference_value(second)) {
                     (true, true) => same_reference(left, right),
                     (false, false) => loosely_equal_primitives(first, second),
                     (true, false) => loosely_equal_primitives(
-                        &Value::String(js::to_js_string(Some(first))),
+                        &Value::String(json_value::to_display_string(Some(first))),
                         second,
                     ),
                     (false, true) => loosely_equal_primitives(
                         first,
-                        &Value::String(js::to_js_string(Some(second))),
+                        &Value::String(json_value::to_display_string(Some(second))),
                     ),
                 }
             }
@@ -1678,23 +1673,24 @@ fn loosely_equal(left: &Js, right: &Js) -> bool {
     }
 }
 
-fn strictly_equal(left: &Js, right: &Js) -> bool {
+fn strictly_equal(left: &TemplateValue, right: &TemplateValue) -> bool {
     match (left, right) {
-        (Js::Undefined, Js::Undefined) | (Js::NullContext, Js::NullContext) => true,
-        (Js::Safe(first), Js::Safe(second)) => Rc::ptr_eq(first, second),
+        (TemplateValue::Missing, TemplateValue::Missing)
+        | (TemplateValue::NullContext, TemplateValue::NullContext) => true,
+        (TemplateValue::Safe(first), TemplateValue::Safe(second)) => Rc::ptr_eq(first, second),
         _ => match (left.value(), right.value()) {
             (Some(first), Some(second))
                 if is_reference_value(first) && is_reference_value(second) =>
             {
                 same_reference(left, right)
             }
-            (Some(first), Some(second)) => js::strict_equals(first, second),
+            (Some(first), Some(second)) => json_value::strict_equals(first, second),
             _ => false,
         },
     }
 }
 
-fn is_empty(value: &Js) -> bool {
+fn is_empty(value: &TemplateValue) -> bool {
     let is_zero =
         matches!(value.value(), Some(Value::Number(number)) if number.as_f64() == Some(0.0));
     if !value.is_truthy() && !is_zero {
@@ -1717,7 +1713,7 @@ fn push_json(output: &mut String, value: &Value) {
     match value {
         Value::Null => output.push_str("null"),
         Value::Bool(flag) => output.push_str(if *flag { "true" } else { "false" }),
-        Value::Number(number) => output.push_str(&js::number_to_string(number)),
+        Value::Number(number) => output.push_str(&json_value::number_to_string(number)),
         Value::String(text) => push_json_string(output, text),
         Value::Array(items) => {
             output.push('[');
@@ -1731,7 +1727,7 @@ fn push_json(output: &mut String, value: &Value) {
         }
         Value::Object(map) => {
             output.push('{');
-            for (index, key) in js_ordered_keys(map).into_iter().enumerate() {
+            for (index, key) in keys_in_property_order(map).into_iter().enumerate() {
                 if index > 0 {
                     output.push(',');
                 }
@@ -1747,21 +1743,21 @@ fn push_json(output: &mut String, value: &Value) {
 }
 
 struct DataFrame<'data> {
-    entries: Vec<(String, Js<'data>)>,
+    entries: Vec<(String, TemplateValue<'data>)>,
     parent: Option<Rc<DataFrame<'data>>>,
 }
 
 impl<'data> DataFrame<'data> {
-    fn get(&self, name: &str) -> Js<'data> {
+    fn get(&self, name: &str) -> TemplateValue<'data> {
         self.entries
             .iter()
             .find(|(key, _)| key == name)
-            .map_or(Js::Undefined, |(_, value)| value.clone())
+            .map_or(TemplateValue::Missing, |(_, value)| value.clone())
     }
 
     fn child_frame(
         parent: &Rc<DataFrame<'data>>,
-        updates: [(&str, Js<'data>); 4],
+        updates: [(&str, TemplateValue<'data>); 4],
     ) -> Rc<DataFrame<'data>> {
         let mut entries = parent.entries.clone();
         for (name, value) in updates {
@@ -1778,19 +1774,19 @@ impl<'data> DataFrame<'data> {
 }
 
 struct DepthNode<'data> {
-    value: Js<'data>,
+    value: TemplateValue<'data>,
     parent: Option<Rc<DepthNode<'data>>>,
 }
 
 struct BlockParamFrame<'tree, 'data> {
     names: &'tree [String],
-    values: Vec<Js<'data>>,
+    values: Vec<TemplateValue<'data>>,
     parent: Option<Rc<BlockParamFrame<'tree, 'data>>>,
 }
 
 #[derive(Clone)]
 struct Scope<'tree, 'data> {
-    context: Js<'data>,
+    context: TemplateValue<'data>,
     depths: Rc<DepthNode<'data>>,
     data: Rc<DataFrame<'data>>,
     block_params: Option<Rc<BlockParamFrame<'tree, 'data>>>,
@@ -1806,19 +1802,19 @@ struct ProgramHandle<'tree, 'data> {
 
 struct HelperOptions<'tree, 'data> {
     name: String,
-    hash: Vec<(String, Js<'data>)>,
+    hash: Vec<(String, TemplateValue<'data>)>,
     function: ProgramHandle<'tree, 'data>,
     inverse: ProgramHandle<'tree, 'data>,
     data: Rc<DataFrame<'data>>,
-    this: Js<'data>,
+    this: TemplateValue<'data>,
 }
 
 impl<'data> HelperOptions<'_, 'data> {
-    fn hash_value(&self, name: &str) -> Js<'data> {
+    fn hash_value(&self, name: &str) -> TemplateValue<'data> {
         self.hash
             .iter()
             .find(|(key, _)| key == name)
-            .map_or(Js::Undefined, |(_, value)| value.clone())
+            .map_or(TemplateValue::Missing, |(_, value)| value.clone())
     }
 }
 
@@ -1830,12 +1826,15 @@ enum CallSite<'tree> {
 }
 
 enum Argument<'call, 'data> {
-    Value(&'call Js<'data>),
+    Value(&'call TemplateValue<'data>),
     Options,
     Missing,
 }
 
-fn argument<'call, 'data>(params: &'call [Js<'data>], index: usize) -> Argument<'call, 'data> {
+fn argument<'call, 'data>(
+    params: &'call [TemplateValue<'data>],
+    index: usize,
+) -> Argument<'call, 'data> {
     match index.cmp(&params.len()) {
         std::cmp::Ordering::Less => Argument::Value(&params[index]),
         std::cmp::Ordering::Equal => Argument::Options,
@@ -1857,15 +1856,15 @@ fn program_handle<'tree, 'data>(
 
 fn invoke<'tree, 'data>(
     handle: &ProgramHandle<'tree, 'data>,
-    context: Js<'data>,
+    context: TemplateValue<'data>,
     data: Option<Rc<DataFrame<'data>>>,
-    block_param_values: Vec<Js<'data>>,
-) -> JsResult<String> {
+    block_param_values: Vec<TemplateValue<'data>>,
+) -> Result<String> {
     let Some(program) = handle.program else {
         return Ok(String::new());
     };
     let keeps_depths = loosely_equal(&context, &handle.depths.value)
-        || (matches!(context, Js::NullContext)
+        || (matches!(context, TemplateValue::NullContext)
             && matches!(handle.depths.value.value(), Some(Value::Null)));
     let depths = if keeps_depths {
         handle.depths.clone()
@@ -1889,7 +1888,7 @@ fn invoke<'tree, 'data>(
     render_program(program, &scope)
 }
 
-fn render_program<'tree>(program: &'tree Program, scope: &Scope<'tree, '_>) -> JsResult<String> {
+fn render_program<'tree>(program: &'tree Program, scope: &Scope<'tree, '_>) -> Result<String> {
     let mut output = String::new();
     for statement in &program.body {
         match statement {
@@ -1897,10 +1896,9 @@ fn render_program<'tree>(program: &'tree Program, scope: &Scope<'tree, '_>) -> J
             Statement::Comment(_) => {}
             Statement::Mustache(mustache) => {
                 let value = evaluate_call(&mustache.call, scope, CallSite::Mustache)?;
-                if mustache.escaped {
-                    push_escaped_expression(&mut output, &value);
-                } else {
-                    push_appended_string(&mut output, &value);
+                match mustache.escaping {
+                    OutputEscaping::Html => push_escaped_expression(&mut output, &value),
+                    OutputEscaping::Raw => push_appended_string(&mut output, &value),
                 }
             }
             Statement::Block(block) => {
@@ -1913,11 +1911,11 @@ fn render_program<'tree>(program: &'tree Program, scope: &Scope<'tree, '_>) -> J
 }
 
 fn is_scoped(path: &PathExpression) -> bool {
-    if path.original.starts_with('.') {
+    if path.source_text.starts_with('.') {
         return true;
     }
-    path.original.match_indices("this").any(|(position, _)| {
-        !path.original[position + 4..]
+    path.source_text.match_indices("this").any(|(position, _)| {
+        !path.source_text[position + 4..]
             .chars()
             .next()
             .is_some_and(|next| next.is_ascii_alphanumeric() || next == '_')
@@ -1932,18 +1930,18 @@ fn call_path(call: &Call) -> Cow<'_, PathExpression> {
     match &call.path {
         Expression::Path(path) => Cow::Borrowed(path),
         literal => {
-            let original = literal_original(literal);
+            let source_text = literal_source_text(literal);
             Cow::Owned(PathExpression {
                 data: false,
                 depth: 0,
-                parts: vec![original.clone()],
-                original,
+                parts: vec![source_text.clone()],
+                source_text,
             })
         }
     }
 }
 
-fn context_at_depth<'data>(scope: &Scope<'_, 'data>, depth: usize) -> Js<'data> {
+fn context_at_depth<'data>(scope: &Scope<'_, 'data>, depth: usize) -> TemplateValue<'data> {
     if depth == 0 {
         return scope.context.clone();
     }
@@ -1951,7 +1949,7 @@ fn context_at_depth<'data>(scope: &Scope<'_, 'data>, depth: usize) -> Js<'data> 
     for _ in 0..depth {
         node = node.and_then(|current| current.parent.as_ref());
     }
-    node.map_or(Js::Undefined, |current| current.value.clone())
+    node.map_or(TemplateValue::Missing, |current| current.value.clone())
 }
 
 fn data_at_depth<'data>(scope: &Scope<'_, 'data>, depth: usize) -> Option<Rc<DataFrame<'data>>> {
@@ -1962,7 +1960,7 @@ fn data_at_depth<'data>(scope: &Scope<'_, 'data>, depth: usize) -> Option<Rc<Dat
     frame
 }
 
-fn find_block_param<'data>(scope: &Scope<'_, 'data>, name: &str) -> Option<Js<'data>> {
+fn find_block_param<'data>(scope: &Scope<'_, 'data>, name: &str) -> Option<TemplateValue<'data>> {
     let mut frame = scope.block_params.as_ref();
     while let Some(current) = frame {
         if let Some(position) = current.names.iter().position(|declared| declared == name) {
@@ -1971,7 +1969,7 @@ fn find_block_param<'data>(scope: &Scope<'_, 'data>, name: &str) -> Option<Js<'d
                     .values
                     .get(position)
                     .cloned()
-                    .unwrap_or(Js::Undefined),
+                    .unwrap_or(TemplateValue::Missing),
             );
         }
         frame = current.parent.as_ref();
@@ -1979,13 +1977,22 @@ fn find_block_param<'data>(scope: &Scope<'_, 'data>, name: &str) -> Option<Js<'d
     None
 }
 
-fn resolve_parts<'data>(start: Js<'data>, parts: &[String], stop_on_falsy: bool) -> Js<'data> {
+#[derive(Clone, Copy)]
+enum LookupStop {
+    AtFalsy,
+    AtNullish,
+}
+
+fn resolve_parts<'data>(
+    start: TemplateValue<'data>,
+    parts: &[String],
+    stop: LookupStop,
+) -> TemplateValue<'data> {
     let mut current = start;
     for part in parts {
-        let stops = if stop_on_falsy {
-            !current.is_truthy()
-        } else {
-            current.is_nullish()
+        let stops = match stop {
+            LookupStop::AtFalsy => !current.is_truthy(),
+            LookupStop::AtNullish => current.is_nullish(),
         };
         if stops {
             return current;
@@ -1995,44 +2002,52 @@ fn resolve_parts<'data>(start: Js<'data>, parts: &[String], stop_on_falsy: bool)
     current
 }
 
-fn lookup_path<'data>(path: &PathExpression, scope: &Scope<'_, 'data>) -> Js<'data> {
+fn lookup_path<'data>(path: &PathExpression, scope: &Scope<'_, 'data>) -> TemplateValue<'data> {
     if path.depth == 0
         && !is_scoped(path)
         && let Some(first) = path.parts.first()
         && let Some(value) = find_block_param(scope, first)
     {
-        return resolve_parts(value, &path.parts[1..], false);
+        return resolve_parts(value, &path.parts[1..], LookupStop::AtNullish);
     }
     if path.parts.is_empty() {
         return context_at_depth(scope, path.depth);
     }
     if path.data {
         return match data_at_depth(scope, path.depth) {
-            Some(frame) => resolve_parts(frame.get(&path.parts[0]), &path.parts[1..], true),
-            None => Js::Undefined,
+            Some(frame) => resolve_parts(
+                frame.get(&path.parts[0]),
+                &path.parts[1..],
+                LookupStop::AtFalsy,
+            ),
+            None => TemplateValue::Missing,
         };
     }
-    resolve_parts(context_at_depth(scope, path.depth), &path.parts, false)
+    resolve_parts(
+        context_at_depth(scope, path.depth),
+        &path.parts,
+        LookupStop::AtNullish,
+    )
 }
 
 fn evaluate_expression<'tree, 'data>(
     expression: &'tree Expression,
     scope: &Scope<'tree, 'data>,
-) -> JsResult<Js<'data>> {
+) -> Result<TemplateValue<'data>> {
     Ok(match expression {
         Expression::Path(path) => lookup_path(path, scope),
         Expression::Invocation(call) => evaluate_call(call, scope, CallSite::SubExpression)?,
-        Expression::StringLiteral(text) => Js::text(text.clone()),
-        Expression::NumberLiteral(number) => Js::owned(javascript_number_value(*number)),
-        Expression::BooleanLiteral(flag) => Js::owned(Value::Bool(*flag)),
-        Expression::UndefinedLiteral => Js::Undefined,
-        Expression::NullLiteral => Js::owned(Value::Null),
+        Expression::StringLiteral(text) => TemplateValue::text(text.clone()),
+        Expression::NumberLiteral(number) => TemplateValue::owned(number_literal_value(*number)),
+        Expression::BooleanLiteral(flag) => TemplateValue::owned(Value::Bool(*flag)),
+        Expression::MissingValueLiteral => TemplateValue::Missing,
+        Expression::NullLiteral => TemplateValue::owned(Value::Null),
     })
 }
 
-fn helper_this<'data>(scope: &Scope<'_, 'data>) -> Js<'data> {
+fn helper_this<'data>(scope: &Scope<'_, 'data>) -> TemplateValue<'data> {
     if scope.context.is_nullish() {
-        Js::NullContext
+        TemplateValue::NullContext
     } else {
         scope.context.clone()
     }
@@ -2046,7 +2061,7 @@ fn evaluate_call<'tree, 'data>(
     call: &'tree Call,
     scope: &Scope<'tree, 'data>,
     site: CallSite<'tree>,
-) -> JsResult<Js<'data>> {
+) -> Result<TemplateValue<'data>> {
     let path = call_path(call);
     let is_simple = is_simple_identifier(&path);
     let first_part = path.parts.first().map(String::as_str).unwrap_or_default();
@@ -2079,7 +2094,7 @@ fn evaluate_call<'tree, 'data>(
             .params
             .iter()
             .map(|param| evaluate_expression(param, scope))
-            .collect::<JsResult<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?;
         if let Some(pairs) = &call.hash {
             for (key, expression) in pairs {
                 options
@@ -2091,23 +2106,23 @@ fn evaluate_call<'tree, 'data>(
             options.name = if KNOWN_HELPERS.contains(&first_part) {
                 first_part.to_string()
             } else {
-                path.original.clone()
+                path.source_text.clone()
             };
             return call_helper(first_part, &params, &options);
         }
         let value = lookup_path(&path, scope);
         if value.is_truthy() {
-            return Err(JsError::type_error(format!(
+            return Err(Error::type_mismatch(format!(
                 "{} is not a function",
-                path.original
+                path.source_text
             )));
         }
         if params.is_empty() {
-            return Ok(Js::Undefined);
+            return Ok(TemplateValue::Missing);
         }
-        return Err(JsError::error(format!(
+        return Err(Error::general(format!(
             "Missing helper: \"{}\"",
-            path.original
+            path.source_text
         )));
     }
     if is_eligible {
@@ -2117,7 +2132,7 @@ fn evaluate_call<'tree, 'data>(
         }
         let value = lookup_path(&path, scope);
         let current = if value.is_nullish() {
-            Js::Undefined
+            TemplateValue::Missing
         } else {
             value
         };
@@ -2137,19 +2152,23 @@ fn evaluate_call<'tree, 'data>(
 
 fn call_helper<'data>(
     name: &str,
-    params: &[Js<'data>],
+    params: &[TemplateValue<'data>],
     options: &HelperOptions<'_, 'data>,
-) -> JsResult<Js<'data>> {
+) -> Result<TemplateValue<'data>> {
     match name {
-        "if" => conditional_helper(params, options, false),
-        "unless" => conditional_helper(params, options, true),
+        "if" => conditional_helper(params, options, Conditional::If),
+        "unless" => conditional_helper(params, options, Conditional::Unless),
         "each" => each_helper(params, options),
         "with" => with_helper(params, options),
         "lookup" => Ok(lookup_helper(params)),
-        "log" => Ok(Js::Undefined),
-        "blockHelperMissing" => {
-            block_helper_missing(params.first().cloned().unwrap_or(Js::NullContext), options)
-        }
+        "log" => Ok(TemplateValue::Missing),
+        "blockHelperMissing" => block_helper_missing(
+            params
+                .first()
+                .cloned()
+                .unwrap_or(TemplateValue::NullContext),
+            options,
+        ),
         "breaklines" => Ok(breaklines_helper(params)),
         "toUpperCase" => to_upper_case_helper(params),
         "formatDate" => Ok(format_date_helper(params)),
@@ -2158,9 +2177,9 @@ fn call_helper<'data>(
         "statusIcon" => Ok(status_icon_helper(params)),
         _ => {
             if params.is_empty() {
-                Ok(Js::Undefined)
+                Ok(TemplateValue::Missing)
             } else {
-                Err(JsError::error(format!(
+                Err(Error::general(format!(
                     "Missing helper: \"{}\"",
                     options.name
                 )))
@@ -2169,31 +2188,45 @@ fn call_helper<'data>(
     }
 }
 
+#[derive(Clone, Copy)]
+enum Conditional {
+    If,
+    Unless,
+}
+
+impl Conditional {
+    fn helper_name(self) -> &'static str {
+        match self {
+            Conditional::If => "if",
+            Conditional::Unless => "unless",
+        }
+    }
+}
+
 fn conditional_helper<'data>(
-    params: &[Js<'data>],
+    params: &[TemplateValue<'data>],
     options: &HelperOptions<'_, 'data>,
-    negated: bool,
-) -> JsResult<Js<'data>> {
+    conditional_kind: Conditional,
+) -> Result<TemplateValue<'data>> {
     if params.len() != 1 {
-        let helper_name = if negated { "unless" } else { "if" };
-        return Err(JsError::error(format!(
+        let helper_name = conditional_kind.helper_name();
+        return Err(Error::general(format!(
             "#{helper_name} requires exactly one argument"
         )));
     }
     let conditional = &params[0];
     let include_zero = options.hash_value("includeZero").is_truthy();
     let is_falsy = (!include_zero && !conditional.is_truthy()) || is_empty(conditional);
-    let (truthy_program, falsy_program) = if negated {
-        (&options.inverse, &options.function)
-    } else {
-        (&options.function, &options.inverse)
+    let (truthy_program, falsy_program) = match conditional_kind {
+        Conditional::If => (&options.function, &options.inverse),
+        Conditional::Unless => (&options.inverse, &options.function),
     };
     let chosen = if is_falsy {
         falsy_program
     } else {
         truthy_program
     };
-    Ok(Js::text(invoke(
+    Ok(TemplateValue::text(invoke(
         chosen,
         options.this.clone(),
         None,
@@ -2202,11 +2235,11 @@ fn conditional_helper<'data>(
 }
 
 fn with_helper<'data>(
-    params: &[Js<'data>],
+    params: &[TemplateValue<'data>],
     options: &HelperOptions<'_, 'data>,
-) -> JsResult<Js<'data>> {
+) -> Result<TemplateValue<'data>> {
     if params.len() != 1 {
-        return Err(JsError::error("#with requires exactly one argument"));
+        return Err(Error::general("#with requires exactly one argument"));
     }
     let context = params[0].clone();
     let output = if is_empty(&context) {
@@ -2219,18 +2252,18 @@ fn with_helper<'data>(
             vec![context],
         )?
     };
-    Ok(Js::text(output))
+    Ok(TemplateValue::text(output))
 }
 
 fn each_helper<'data>(
-    params: &[Js<'data>],
+    params: &[TemplateValue<'data>],
     options: &HelperOptions<'_, 'data>,
-) -> JsResult<Js<'data>> {
+) -> Result<TemplateValue<'data>> {
     let Some(context) = params.first() else {
-        return Err(JsError::error("Must pass iterator to #each"));
+        return Err(Error::general("Must pass iterator to #each"));
     };
     if params.len() > 1 {
-        return Err(JsError::type_error("fn is not a function"));
+        return Err(Error::type_mismatch("fn is not a function"));
     }
     let mut output = String::new();
     let mut iterations = 0;
@@ -2240,14 +2273,17 @@ fn each_helper<'data>(
             for index in 0..length {
                 let item =
                     context.child(|value| value.as_array().and_then(|items| items.get(index)));
-                let position = Js::owned(Value::from(index));
+                let position = TemplateValue::owned(Value::from(index));
                 let frame = DataFrame::child_frame(
                     &options.data,
                     [
                         ("key", position.clone()),
                         ("index", position.clone()),
-                        ("first", Js::owned(Value::Bool(index == 0))),
-                        ("last", Js::owned(Value::Bool(index + 1 == length))),
+                        ("first", TemplateValue::owned(Value::Bool(index == 0))),
+                        (
+                            "last",
+                            TemplateValue::owned(Value::Bool(index + 1 == length)),
+                        ),
                     ],
                 );
                 output.push_str(&invoke(
@@ -2260,18 +2296,21 @@ fn each_helper<'data>(
             }
         }
         Some(Value::Object(map)) => {
-            let keys = js_ordered_keys(map);
+            let keys = keys_in_property_order(map);
             let length = keys.len();
             for (index, key) in keys.into_iter().enumerate() {
                 let item = context.child(|value| value.get(key.as_str()));
-                let key_value = Js::text(key.clone());
+                let key_value = TemplateValue::text(key.clone());
                 let frame = DataFrame::child_frame(
                     &options.data,
                     [
                         ("key", key_value.clone()),
-                        ("index", Js::owned(Value::from(index))),
-                        ("first", Js::owned(Value::Bool(index == 0))),
-                        ("last", Js::owned(Value::Bool(index + 1 == length))),
+                        ("index", TemplateValue::owned(Value::from(index))),
+                        ("first", TemplateValue::owned(Value::Bool(index == 0))),
+                        (
+                            "last",
+                            TemplateValue::owned(Value::Bool(index + 1 == length)),
+                        ),
                     ],
                 );
                 output.push_str(&invoke(
@@ -2288,26 +2327,26 @@ fn each_helper<'data>(
     if iterations == 0 {
         output = invoke(&options.inverse, options.this.clone(), None, Vec::new())?;
     }
-    Ok(Js::text(output))
+    Ok(TemplateValue::text(output))
 }
 
-fn lookup_helper<'data>(params: &[Js<'data>]) -> Js<'data> {
+fn lookup_helper<'data>(params: &[TemplateValue<'data>]) -> TemplateValue<'data> {
     let Some(object) = params.first() else {
-        return Js::Undefined;
+        return TemplateValue::Missing;
     };
     if !object.is_truthy() {
         return object.clone();
     }
     let field = params
         .get(1)
-        .map_or(Cow::Borrowed("[object Object]"), js_text);
+        .map_or(Cow::Borrowed("[object Object]"), display_text);
     lookup_property(object, &field)
 }
 
 fn block_helper_missing<'data>(
-    context: Js<'data>,
+    context: TemplateValue<'data>,
     options: &HelperOptions<'_, 'data>,
-) -> JsResult<Js<'data>> {
+) -> Result<TemplateValue<'data>> {
     let output = match context.value() {
         Some(Value::Bool(true)) => {
             invoke(&options.function, options.this.clone(), None, Vec::new())?
@@ -2315,7 +2354,7 @@ fn block_helper_missing<'data>(
         Some(Value::Bool(false) | Value::Null) => {
             invoke(&options.inverse, options.this.clone(), None, Vec::new())?
         }
-        None if matches!(context, Js::Undefined) => {
+        None if matches!(context, TemplateValue::Missing) => {
             invoke(&options.inverse, options.this.clone(), None, Vec::new())?
         }
         Some(Value::Array(items)) if items.is_empty() => {
@@ -2324,10 +2363,10 @@ fn block_helper_missing<'data>(
         Some(Value::Array(_)) => return each_helper(&[context], options),
         _ => invoke(&options.function, context, None, Vec::new())?,
     };
-    Ok(Js::text(output))
+    Ok(TemplateValue::text(output))
 }
 
-fn breaklines_helper<'data>(params: &[Js<'data>]) -> Js<'data> {
+fn breaklines_helper<'data>(params: &[TemplateValue<'data>]) -> TemplateValue<'data> {
     let mut escaped = String::new();
     match argument(params, 0) {
         Argument::Value(value) => push_escaped_expression(&mut escaped, value),
@@ -2348,47 +2387,47 @@ fn breaklines_helper<'data>(params: &[Js<'data>]) -> Js<'data> {
             other => with_breaks.push(other),
         }
     }
-    Js::Safe(Rc::from(with_breaks.as_str()))
+    TemplateValue::Safe(Rc::from(with_breaks.as_str()))
 }
 
-fn to_upper_case_helper<'data>(params: &[Js<'data>]) -> JsResult<Js<'data>> {
+fn to_upper_case_helper<'data>(params: &[TemplateValue<'data>]) -> Result<TemplateValue<'data>> {
     match argument(params, 0) {
-        Argument::Value(Js::Undefined) | Argument::Missing => {
-            Err(JsError::reading_property_of_undefined("toUpperCase"))
+        Argument::Value(TemplateValue::Missing) | Argument::Missing => {
+            Err(Error::missing_property("toUpperCase"))
         }
-        Argument::Value(value) if value.is_nullish() => Err(JsError::type_error(
+        Argument::Value(value) if value.is_nullish() => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'toUpperCase')",
         )),
         Argument::Value(value) => match value.value() {
-            Some(Value::String(text)) => Ok(Js::text(text.to_uppercase())),
-            _ => Err(JsError::type_error("str.toUpperCase is not a function")),
+            Some(Value::String(text)) => Ok(TemplateValue::text(text.to_uppercase())),
+            _ => Err(Error::type_mismatch("str.toUpperCase is not a function")),
         },
-        Argument::Options => Err(JsError::type_error("str.toUpperCase is not a function")),
+        Argument::Options => Err(Error::type_mismatch("str.toUpperCase is not a function")),
     }
 }
 
-fn format_date_helper<'data>(params: &[Js<'data>]) -> Js<'data> {
+fn format_date_helper<'data>(params: &[TemplateValue<'data>]) -> TemplateValue<'data> {
     match argument(params, 0) {
-        Argument::Value(Js::Undefined) | Argument::Missing => Js::Undefined,
+        Argument::Value(TemplateValue::Missing) | Argument::Missing => TemplateValue::Missing,
         Argument::Value(value) => match value.value() {
-            Some(Value::String(text)) => Js::text(format_date(text)),
-            _ => Js::text(format_instant(Utc::now())),
+            Some(Value::String(text)) => TemplateValue::text(format_date(text)),
+            _ => TemplateValue::text(format_instant(Utc::now())),
         },
-        Argument::Options => Js::text(format_instant(Utc::now())),
+        Argument::Options => TemplateValue::text(format_instant(Utc::now())),
     }
 }
 
 fn display_settings_helper<'data>(
-    params: &[Js<'data>],
+    params: &[TemplateValue<'data>],
     options: &HelperOptions<'_, 'data>,
-) -> Js<'data> {
+) -> TemplateValue<'data> {
     let serialized = match argument(params, 0) {
-        Argument::Value(Js::Undefined) | Argument::Missing => "undefined".to_string(),
-        Argument::Value(Js::Safe(text)) => format!(
+        Argument::Value(TemplateValue::Missing) | Argument::Missing => "undefined".to_string(),
+        Argument::Value(TemplateValue::Safe(text)) => format!(
             "{{\"string\":{}}}",
             serde_json::to_string(text.as_ref()).unwrap_or_default()
         ),
-        Argument::Value(Js::NullContext) => "{}".to_string(),
+        Argument::Value(TemplateValue::NullContext) => "{}".to_string(),
         Argument::Value(value) => value.value().map(json_stringify).unwrap_or_default(),
         Argument::Options => format!(
             "{{\"name\":{},\"hash\":{{}},\"data\":{{\"root\":{}}}}}",
@@ -2401,19 +2440,19 @@ fn display_settings_helper<'data>(
                 .unwrap_or_default()
         ),
     };
-    Js::text(format!("\x60\x60\x60{serialized}\x60\x60\x60"))
+    TemplateValue::text(format!("\x60\x60\x60{serialized}\x60\x60\x60"))
 }
 
 fn if_equals_helper<'data>(
-    params: &[Js<'data>],
+    params: &[TemplateValue<'data>],
     options: &HelperOptions<'_, 'data>,
-) -> JsResult<Js<'data>> {
+) -> Result<TemplateValue<'data>> {
     let left = argument(params, 0);
     let right = argument(params, 1);
     let equal = match (&left, &right) {
         (Argument::Value(first), Argument::Value(second)) => strictly_equal(first, second),
-        (Argument::Value(Js::Undefined), Argument::Missing)
-        | (Argument::Missing, Argument::Value(Js::Undefined)) => true,
+        (Argument::Value(TemplateValue::Missing), Argument::Missing)
+        | (Argument::Missing, Argument::Value(TemplateValue::Missing)) => true,
         _ => false,
     };
     let member = if equal { "fn" } else { "inverse" };
@@ -2424,43 +2463,48 @@ fn if_equals_helper<'data>(
             } else {
                 &options.inverse
             };
-            Ok(Js::text(invoke(
+            Ok(TemplateValue::text(invoke(
                 chosen,
                 options.this.clone(),
                 None,
                 Vec::new(),
             )?))
         }
-        Argument::Missing | Argument::Value(Js::Undefined) => {
-            Err(JsError::reading_property_of_undefined(member))
+        Argument::Missing | Argument::Value(TemplateValue::Missing) => {
+            Err(Error::missing_property(member))
         }
-        Argument::Value(value) if value.is_nullish() => Err(JsError::type_error(format!(
+        Argument::Value(value) if value.is_nullish() => Err(Error::type_mismatch(format!(
             "Cannot read properties of null (reading '{member}')"
         ))),
-        Argument::Value(_) => Err(JsError::type_error(format!(
+        Argument::Value(_) => Err(Error::type_mismatch(format!(
             "options.{member} is not a function"
         ))),
     }
 }
 
-fn status_icon_helper<'data>(params: &[Js<'data>]) -> Js<'data> {
+fn status_icon_helper<'data>(params: &[TemplateValue<'data>]) -> TemplateValue<'data> {
     let status = match argument(params, 0) {
         Argument::Value(value) => value,
-        Argument::Options => return Js::text("Unknown Status given: [object Object]"),
-        Argument::Missing => return Js::text("Unknown Status given: undefined"),
+        Argument::Options => return TemplateValue::text("Unknown Status given: [object Object]"),
+        Argument::Missing => return TemplateValue::text("Unknown Status given: undefined"),
     };
     let icon = match status.value() {
         Some(Value::String(text)) if text == "pass" => ":heavy_check_mark:",
         Some(Value::String(text)) if text == "fail" => ":x:",
         Some(Value::String(text)) if text == "error" => ":heavy_exclamation_mark:",
         Some(Value::String(text)) if text == "info" => ":information_source:",
-        _ => return Js::text(format!("Unknown Status given: {}", js_to_string(status))),
+        _ => {
+            return TemplateValue::text(format!(
+                "Unknown Status given: {}",
+                to_display_string(status)
+            ));
+        }
     };
-    Js::text(icon)
+    TemplateValue::text(icon)
 }
 
 fn format_date(text: &str) -> String {
-    match parse_javascript_date(text) {
+    match parse_date_text(text) {
         Some(instant) => format_instant(instant),
         None => "Invalid Date".to_string(),
     }
@@ -2487,13 +2531,13 @@ fn format_instant(instant: DateTime<Utc>) -> String {
     )
 }
 
-fn parse_javascript_date(text: &str) -> Option<DateTime<Utc>> {
+fn parse_date_text(text: &str) -> Option<DateTime<Utc>> {
     let instant = parse_iso_date(text).or_else(|| {
         DateTime::parse_from_rfc2822(text)
             .ok()
             .map(|parsed| parsed.with_timezone(&Utc))
     })?;
-    (instant.timestamp_millis().abs() <= MAXIMUM_JS_DATE_MILLISECONDS).then_some(instant)
+    (instant.timestamp_millis().abs() <= MAXIMUM_DATE_MILLISECONDS).then_some(instant)
 }
 
 struct DigitReader<'text> {
@@ -2630,11 +2674,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const HANDLEBARS_JS_CORPUS: &str = include_str!("../tests/fixtures/templates.json");
+    const TEMPLATE_CORPUS: &str = include_str!("../tests/fixtures/templates.json");
 
     #[test]
-    fn every_corpus_template_renders_like_handlebars_js() {
-        let corpus: Vec<Value> = serde_json::from_str(HANDLEBARS_JS_CORPUS).unwrap();
+    fn every_corpus_template_renders_as_recorded() {
+        let corpus: Vec<Value> = serde_json::from_str(TEMPLATE_CORPUS).unwrap();
         let mut mismatches = Vec::new();
         for entry in &corpus {
             let name = entry["name"].as_str().unwrap_or_default();
@@ -2722,7 +2766,7 @@ mod tests {
     }
 
     #[test]
-    fn compiling_a_non_string_template_fails_like_handlebars_compile() {
+    fn compiling_a_non_string_template_fails() {
         let error = compile_and_render(&json!(5), &json!({})).unwrap_err();
         assert_eq!(
             error.to_string(),

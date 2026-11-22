@@ -1,10 +1,9 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, ErrorKind, Result};
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
-use crate::lodash;
-use crate::minimatch;
+use crate::glob;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use crate::validators::Validator;
@@ -16,7 +15,6 @@ use std::sync::LazyLock;
 const ERROR_MESSAGE: &str = "Failed to validate because the 'lines' or 'max / total', 'additions' or 'deletions' option is missing. Please check the documentation.";
 const ERROR_MAX_TOTAL: &str = "Options max and total cannot be used together. Please choose one";
 const VALIDATOR_NAME: &str = "Size";
-const EXTENSIONS_WITH_IGNORABLE_COMMENTS: [&str; 2] = [".js", ".py"];
 
 static ADD_OR_DELETE_LINE: LazyLock<Option<Regex>> = LazyLock::new(|| Regex::new(r"^(\+|-)").ok());
 static FILE_MODIFIER_LINE: LazyLock<Option<Regex>> =
@@ -39,16 +37,73 @@ fn regex_test(pattern: &LazyLock<Option<Regex>>, text: &str) -> bool {
         .is_some_and(|compiled| compiled.is_match(text))
 }
 
-fn is_single_line_comment(extension: &str, line_content: &str) -> bool {
-    match extension {
-        ".js" => line_content.starts_with("//"),
-        ".py" => line_content.starts_with('#'),
-        _ => true,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommentSyntax {
+    SlashesWithBlocks,
+    Hash,
+}
+
+impl CommentSyntax {
+    fn for_extension(extension: &str) -> Option<Self> {
+        match extension {
+            ".js" => Some(CommentSyntax::SlashesWithBlocks),
+            ".py" => Some(CommentSyntax::Hash),
+            _ => None,
+        }
+    }
+
+    fn is_line_comment(self, line_content: &str) -> bool {
+        match self {
+            CommentSyntax::SlashesWithBlocks => line_content.starts_with("//"),
+            CommentSyntax::Hash => line_content.starts_with('#'),
+        }
+    }
+
+    fn has_block_comments(self) -> bool {
+        self == CommentSyntax::SlashesWithBlocks
     }
 }
 
-fn has_block_comments(extension: &str) -> bool {
-    extension == ".js"
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SizeLimit {
+    Additions,
+    Deletions,
+    Total,
+    Max,
+}
+
+impl SizeLimit {
+    const ALL: [SizeLimit; 4] = [
+        SizeLimit::Additions,
+        SizeLimit::Deletions,
+        SizeLimit::Total,
+        SizeLimit::Max,
+    ];
+
+    fn key(self) -> &'static str {
+        match self {
+            SizeLimit::Additions => "additions",
+            SizeLimit::Deletions => "deletions",
+            SizeLimit::Total => "total",
+            SizeLimit::Max => "max",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            SizeLimit::Total => "total additions + deletions",
+            other => other.key(),
+        }
+    }
+
+    fn current_count(self, changes: &SizeChanges) -> f64 {
+        match self {
+            SizeLimit::Additions => changes.additions,
+            SizeLimit::Deletions => changes.deletions,
+            SizeLimit::Total => changes.total,
+            SizeLimit::Max => f64::NAN,
+        }
+    }
 }
 
 fn utf16_units(text: &str) -> Vec<u16> {
@@ -71,11 +126,11 @@ fn clamp_to_utf16_length(index: i64, length: usize) -> usize {
     usize::try_from(index).map_or(0, |non_negative_index| non_negative_index.min(length))
 }
 
-fn javascript_index(index: usize) -> i64 {
+fn signed_index(index: usize) -> i64 {
     i64::try_from(index).unwrap_or(i64::MAX)
 }
 
-fn javascript_substring(units: &[u16], start: i64, end: i64) -> String {
+fn utf16_substring(units: &[u16], start: i64, end: i64) -> String {
     let clamped_start = clamp_to_utf16_length(start, units.len());
     let clamped_end = clamp_to_utf16_length(end, units.len());
     let (from, to) = if clamped_start > clamped_end {
@@ -89,10 +144,10 @@ fn javascript_substring(units: &[u16], start: i64, end: i64) -> String {
 pub fn extract_file_name(file_diff: &str) -> String {
     let units = utf16_units(file_diff);
     let found_start = utf16_index_of(&units, &utf16_units("+++ b/"), 0);
-    let start_index = found_start.map_or(-1, javascript_index);
+    let start_index = found_start.map_or(-1, signed_index);
     let end_index = utf16_index_of(&units, &[u16::from(b'\n')], found_start.unwrap_or(0))
-        .map_or(-1, javascript_index);
-    javascript_substring(&units, start_index + 6, end_index)
+        .map_or(-1, signed_index);
+    utf16_substring(&units, start_index + 6, end_index)
 }
 
 pub fn extract_file_extension(filename: &str) -> Option<String> {
@@ -111,8 +166,7 @@ pub fn changes_without_comments(diffs: &str) -> Vec<ChangedFile> {
         if file_diff.contains("deleted") {
             continue;
         }
-        let extension_text = extension.as_deref().unwrap_or_default();
-        let ignores_comments = EXTENSIONS_WITH_IGNORABLE_COMMENTS.contains(&extension_text);
+        let comment_syntax = extension.as_deref().and_then(CommentSyntax::for_extension);
         let mut additions = 0u64;
         let mut deletions = 0u64;
         let mut is_block_comment_active = false;
@@ -120,12 +174,14 @@ pub fn changes_without_comments(diffs: &str) -> Vec<ChangedFile> {
             if !regex_test(&ADD_OR_DELETE_LINE, line) || regex_test(&FILE_MODIFIER_LINE, line) {
                 continue;
             }
-            if ignores_comments {
-                let line_content = lodash::js_trim(line.get(1..).unwrap_or_default());
-                if is_single_line_comment(extension_text, line_content) {
+            if let Some(syntax) = comment_syntax {
+                let line_content = json_value::trim_whitespace_and_byte_order_mark(
+                    line.get(1..).unwrap_or_default(),
+                );
+                if syntax.is_line_comment(line_content) {
                     continue;
                 }
-                if has_block_comments(extension_text) {
+                if syntax.has_block_comments() {
                     let starts_block = line_content.contains("/*");
                     let ends_block = line_content.contains("*/");
                     if is_block_comment_active {
@@ -157,12 +213,12 @@ pub fn changes_without_comments(diffs: &str) -> Vec<ChangedFile> {
     processed_files
 }
 
-fn matches_patterns(file_name: &Value, patterns: &Value) -> JsResult<bool> {
+fn matches_patterns(file_name: &Value, patterns: &Value) -> Result<bool> {
     let Value::Array(patterns) = patterns else {
-        return Err(JsError::type_error("patterns.some is not a function"));
+        return Err(Error::type_mismatch("patterns.some is not a function"));
     };
     for pattern in patterns {
-        if minimatch::minimatch(file_name, pattern, true)? {
+        if glob::matches_value(file_name, pattern, glob::DotEntries::Included)? {
             return Ok(true);
         }
     }
@@ -173,16 +229,16 @@ pub fn select_listed_files(
     files: Vec<Value>,
     patterns_to_include: &Value,
     patterns_to_ignore: &Value,
-) -> JsResult<Vec<ChangedFile>> {
+) -> Result<Vec<ChangedFile>> {
     let mut selected = Vec::new();
     for mut file in files {
-        let file_name = js::read(Some(&file), "filename")?.unwrap_or(&js::NULL);
+        let file_name = json_value::read(Some(&file), "filename")?.unwrap_or(&json_value::NULL);
         if !matches_patterns(file_name, patterns_to_include)?
             || matches_patterns(file_name, patterns_to_ignore)?
         {
             continue;
         }
-        let status = js::as_str(file.get("status"));
+        let status = json_value::as_str(file.get("status"));
         if status != Some("modified") && status != Some("added") {
             continue;
         }
@@ -197,8 +253,8 @@ pub fn select_listed_files(
     Ok(selected)
 }
 
-fn javascript_add(total: f64, addition: Option<&Value>) -> f64 {
-    total + lodash::to_number(addition)
+fn add_count(total: f64, addition: Option<&Value>) -> f64 {
+    total + json_value::to_number(addition)
 }
 
 pub struct SizeChanges {
@@ -215,9 +271,9 @@ pub fn sum_changes(files: &[ChangedFile]) -> SizeChanges {
         total: 0.0,
     };
     for file in files {
-        changes.additions = javascript_add(changes.additions, file.additions.as_ref());
-        changes.deletions = javascript_add(changes.deletions, file.deletions.as_ref());
-        changes.total = javascript_add(changes.total, file.changes.as_ref());
+        changes.additions = add_count(changes.additions, file.additions.as_ref());
+        changes.deletions = add_count(changes.deletions, file.deletions.as_ref());
+        changes.total = add_count(changes.total, file.changes.as_ref());
     }
     changes
 }
@@ -228,14 +284,14 @@ pub fn input_message(changes: &SizeChanges, files: &[ChangedFile]) -> String {
         .iter()
         .map(|file| match &file.filename {
             Value::Null => String::new(),
-            other => js::to_js_string(Some(other)),
+            other => json_value::to_display_string(Some(other)),
         })
         .collect();
     format!(
         "{} total, {} additions, {} deletions\n    Files: {}",
-        js::float_to_string(changes.total),
-        js::float_to_string(changes.additions),
-        js::float_to_string(changes.deletions),
+        json_value::float_to_string(changes.total),
+        json_value::float_to_string(changes.additions),
+        json_value::float_to_string(changes.deletions),
         file_names.join(",")
     )
 }
@@ -251,57 +307,49 @@ fn error_result(input: Value, settings: &Value, message: &str) -> Value {
     results::consolidate_result(vec![output], &json!({"name": VALIDATOR_NAME}))
 }
 
-fn change_count(changes: &SizeChanges, key: &str) -> Option<f64> {
-    match key {
-        "additions" => Some(changes.additions),
-        "deletions" => Some(changes.deletions),
-        "total" => Some(changes.total),
-        _ => None,
-    }
-}
-
-pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) -> JsResult<Value> {
+pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) -> Result<Value> {
     let input = Value::String(input_message(changes, files));
-    let Some(lines) = settings.get("lines").filter(|value| js::is_truthy(value)) else {
+    let Some(lines) = settings
+        .get("lines")
+        .filter(|value| json_value::is_truthy(value))
+    else {
         return Ok(error_result(input, settings, ERROR_MESSAGE));
     };
 
-    let mut size_limits: Vec<(&str, &Value)> = ["additions", "deletions", "total", "max"]
+    let mut size_limits: Vec<(SizeLimit, &Value)> = SizeLimit::ALL
         .into_iter()
-        .filter_map(|key| Some((key, js::get(lines, key)?)))
+        .filter_map(|limit| Some((limit, json_value::get(lines, limit.key())?)))
         .collect();
-    let has_limit =
-        |limits: &[(&str, &Value)], wanted: &str| limits.iter().any(|(key, _)| *key == wanted);
-    if has_limit(&size_limits, "max") && has_limit(&size_limits, "total") {
+    let has_limit = |limits: &[(SizeLimit, &Value)], wanted: SizeLimit| {
+        limits.iter().any(|(limit, _)| *limit == wanted)
+    };
+    if has_limit(&size_limits, SizeLimit::Max) && has_limit(&size_limits, SizeLimit::Total) {
         return Ok(error_result(input, settings, ERROR_MAX_TOTAL));
     }
     if let Some(max_position) = size_limits
         .iter()
-        .position(|(key, limit)| *key == "max" && js::is_truthy(limit))
+        .position(|(limit, setting)| *limit == SizeLimit::Max && json_value::is_truthy(setting))
     {
         let (_, max) = size_limits.remove(max_position);
-        size_limits.push(("total", max));
+        size_limits.push((SizeLimit::Total, max));
     }
 
     let validator_context = json!({"name": VALIDATOR_NAME});
     let mut output = Vec::new();
-    for (key, limit) in size_limits {
-        let count = js::read(Some(limit), "count")?;
-        let current = change_count(changes, key).unwrap_or(f64::NAN);
-        let is_mergeable = current <= lodash::to_number(count);
-        let label = if key == "total" {
-            "total additions + deletions"
-        } else {
-            key
-        };
+    for (size_limit, limit) in size_limits {
+        let count = json_value::read(Some(limit), "count")?;
+        let is_mergeable = size_limit.current_count(changes) <= json_value::to_number(count);
+        let label = size_limit.label();
         let description = if is_mergeable {
             Value::String(format!("PR size for {label} is OK!"))
         } else {
-            match js::read(Some(limit), "message")?.filter(|message| js::is_truthy(message)) {
+            match json_value::read(Some(limit), "message")?
+                .filter(|message| json_value::is_truthy(message))
+            {
                 Some(message) => message.clone(),
                 None => Value::String(format!(
                     "PR is too large. Should be under {} {label}",
-                    js::to_js_string(count)
+                    json_value::to_display_string(count)
                 )),
             }
         };
@@ -321,14 +369,14 @@ pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) 
     Ok(results::consolidate_result(output, &validator_context))
 }
 
-async fn fetch_diff(url: &Value) -> JsResult<String> {
-    let response = reqwest::get(js::to_js_string(Some(url)))
+async fn fetch_diff(url: &Value) -> Result<String> {
+    let response = reqwest::get(json_value::to_display_string(Some(url)))
         .await
-        .map_err(|error| JsError::named("FetchError", error.to_string()))?;
+        .map_err(|error| Error::new(ErrorKind::Fetch, error.to_string()))?;
     response
         .text()
         .await
-        .map_err(|error| JsError::named("FetchError", error.to_string()))
+        .map_err(|error| Error::new(ErrorKind::Fetch, error.to_string()))
 }
 
 #[async_trait]
@@ -341,8 +389,8 @@ impl Validator for Size {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "match": "array",
             "ignore": "array",
             "lines": {
@@ -352,7 +400,7 @@ impl Validator for Size {
                 "deletions": {"count": "number", "message": "string"},
                 "ignore_comments": "boolean",
             },
-        }))
+        })
     }
 
     async fn validate(
@@ -360,19 +408,19 @@ impl Validator for Size {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let default_patterns_to_include = json!(["**"]);
         let default_patterns_to_ignore = json!([]);
         let patterns_to_include = settings
             .get("match")
-            .filter(|value| js::is_truthy(value))
+            .filter(|value| json_value::is_truthy(value))
             .unwrap_or(&default_patterns_to_include);
         let patterns_to_ignore = settings
             .get("ignore")
-            .filter(|value| js::is_truthy(value))
+            .filter(|value| json_value::is_truthy(value))
             .unwrap_or(&default_patterns_to_ignore);
         let payload = event_aware::get_payload(context);
-        let pull_number = js::read(payload, "number")?.unwrap_or(&Value::Null);
+        let pull_number = json_value::read(payload, "number")?.unwrap_or(&Value::Null);
         let listed_files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -381,11 +429,11 @@ impl Validator for Size {
 
         let ignore_comments = settings
             .get("lines")
-            .filter(|value| js::is_truthy(value))
-            .is_some_and(|lines| js::truthy(js::get(lines, "ignore_comments")));
+            .filter(|value| json_value::is_truthy(value))
+            .is_some_and(|lines| json_value::truthy(json_value::get(lines, "ignore_comments")));
         let modified_files = if ignore_comments {
-            let diff_url =
-                js::read(event_aware::get_payload(context), "diff_url")?.unwrap_or(&Value::Null);
+            let diff_url = json_value::read(event_aware::get_payload(context), "diff_url")?
+                .unwrap_or(&Value::Null);
             changes_without_comments(&fetch_diff(diff_url).await?)
         } else {
             select_listed_files(listed_files, patterns_to_include, patterns_to_ignore)?
@@ -401,9 +449,9 @@ mod tests {
 
     fn pull_request_files() -> Vec<Value> {
         vec![
-            json!({"filename": "thing.js", "status": "modified", "additions": 10, "deletions": 5, "changes": 15}),
-            json!({"filename": "another.js", "status": "added", "additions": 3, "deletions": 2, "changes": 5}),
-            json!({"filename": "removed_file_should_be_ignored.js", "status": "removed", "additions": 0, "deletions": 500, "changes": 500}),
+            json!({"filename": "thing.rs", "status": "modified", "additions": 10, "deletions": 5, "changes": 15}),
+            json!({"filename": "another.rs", "status": "added", "additions": 3, "deletions": 2, "changes": 5}),
+            json!({"filename": "removed_file_should_be_ignored.rs", "status": "removed", "additions": 0, "deletions": 500, "changes": 500}),
         ]
     }
 
@@ -439,8 +487,8 @@ mod tests {
                     .iter()
                     .map(|validation| {
                         (
-                            js::to_js_string(validation.get("status")),
-                            js::to_js_string(validation.get("description")),
+                            json_value::to_display_string(validation.get("status")),
+                            json_value::to_display_string(validation.get("description")),
                         )
                     })
                     .collect()
@@ -526,7 +574,7 @@ mod tests {
 
     #[test]
     fn ignored_files_are_not_counted() {
-        let settings = json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["another.js"]});
+        let settings = json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["another.rs"]});
         assert_eq!(
             validate_listed(&pull_request_files(), &settings)["status"],
             "pass"
@@ -536,7 +584,7 @@ mod tests {
     #[test]
     fn hidden_files_are_matched_by_the_default_pattern() {
         let files = vec![
-            json!({"filename": ".test/thing.js", "status": "modified", "additions": 20, "deletions": 5, "changes": 15}),
+            json!({"filename": ".test/thing.rs", "status": "modified", "additions": 20, "deletions": 5, "changes": 15}),
         ];
         let settings =
             json!({"do": "size", "lines": {"additions": {"count": 10, "message": "Too big!"}}});
@@ -546,18 +594,18 @@ mod tests {
     #[test]
     fn ignore_and_match_accept_glob_patterns() {
         let files = vec![
-            json!({"filename": "not_too_big.js", "status": "modified", "additions": 10, "deletions": 0, "changes": 10}),
-            json!({"filename": "nested/one/big_file_1.js", "status": "added", "additions": 30, "deletions": 0, "changes": 30}),
-            json!({"filename": "nested/one/big_file_2.js", "status": "added", "additions": 30, "deletions": 0, "changes": 30}),
-            json!({"filename": "nested/two/three/big_file_3.js", "status": "modified", "additions": 30, "deletions": 0, "changes": 30}),
+            json!({"filename": "not_too_big.rs", "status": "modified", "additions": 10, "deletions": 0, "changes": 10}),
+            json!({"filename": "nested/one/big_file_1.rs", "status": "added", "additions": 30, "deletions": 0, "changes": 30}),
+            json!({"filename": "nested/one/big_file_2.rs", "status": "added", "additions": 30, "deletions": 0, "changes": 30}),
+            json!({"filename": "nested/two/three/big_file_3.rs", "status": "modified", "additions": 30, "deletions": 0, "changes": 30}),
         ];
         let by_directory = json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["nested/one/*", "nested/two/**"]});
         assert_eq!(validate_listed(&files, &by_directory)["status"], "pass");
         let by_name =
-            json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["**/big_file_*.js"]});
+            json!({"do": "size", "lines": limits(10, 5, 15), "ignore": ["**/big_file_*.rs"]});
         assert_eq!(validate_listed(&files, &by_name)["status"], "pass");
         let by_match =
-            json!({"do": "size", "lines": limits(10, 5, 15), "match": ["not_*.js"], "ignore": []});
+            json!({"do": "size", "lines": limits(10, 5, 15), "match": ["not_*.rs"], "ignore": []});
         assert_eq!(validate_listed(&files, &by_match)["status"], "pass");
     }
 
@@ -567,7 +615,7 @@ mod tests {
             select_listed_files(pull_request_files(), &json!(["**"]), &json!([])).unwrap();
         assert_eq!(
             input_message(&sum_changes(&selected), &selected),
-            "20 total, 13 additions, 7 deletions\n    Files: thing.js,another.js"
+            "20 total, 13 additions, 7 deletions\n    Files: thing.rs,another.rs"
         );
     }
 
@@ -575,10 +623,7 @@ mod tests {
     fn single_line_and_block_comments_are_not_counted() {
         let settings = json!({"do": "size", "lines": {"total": {"count": 1, "message": "Too big!"}, "ignore_comments": true}});
         let with_code = "diff --git a/commentTestFiles.js b/commentTestFiles.js\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.js\n@@ -0,0 +1,5 @@\n+// this is a comment\n+ // second comment\n+ non comment\n+\n+/*\n+    Comment block\n+ */\n";
-        assert_eq!(
-            validate_diff(with_code, &settings.clone())["status"],
-            "fail"
-        );
+        assert_eq!(validate_diff(with_code, &settings)["status"], "fail");
         let comments_only = "diff --git a/commentTestFiles.js b/commentTestFiles.js\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.js\n@@ -0,0 +1,5 @@\n+// this is a comment\n+/*\n+    Comment block\n+ */\n";
         let result = validate_diff(comments_only, &settings);
         assert_eq!(result["status"], "pass");
@@ -598,9 +643,9 @@ mod tests {
     #[test]
     fn python_hash_comments_are_not_counted() {
         let settings = json!({"do": "size", "lines": {"total": {"count": 0, "message": "Too big!"}, "ignore_comments": true}});
-        let javascript_named = "diff --git a/commentTestFiles.py b/commentTestFiles.py\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.js\n@@ -0,0 +1,5 @@\n+# this is a comment\n+ # second comment\n+ non comment\n";
+        let python_diff_with_script_header = "diff --git a/commentTestFiles.py b/commentTestFiles.py\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.js\n@@ -0,0 +1,5 @@\n+# this is a comment\n+ # second comment\n+ non comment\n";
         assert_eq!(
-            validate_diff(javascript_named, &settings.clone())["status"],
+            validate_diff(python_diff_with_script_header, &settings)["status"],
             "fail"
         );
         let python = "diff --git a/commentTestFiles.py b/commentTestFiles.py\nnew file mode 100644\nindex 0000000..983b141\n--- /dev/null\n+++ b/commentTestFiles.py\n@@ -0,0 +1,5 @@\n+# this is a comment\n+ # second comment\n";
@@ -610,10 +655,10 @@ mod tests {
     #[test]
     fn file_name_is_read_from_the_new_file_header() {
         assert_eq!(
-            extract_file_name(" a/x.js b/x.js\n--- a/x.js\n+++ b/src/x.js\n@@"),
-            "src/x.js"
+            extract_file_name(" a/x.rs b/x.rs\n--- a/x.rs\n+++ b/src/x.rs\n@@"),
+            "src/x.rs"
         );
-        assert_eq!(extract_file_extension("src/x.JS"), Some(".JS".to_string()));
+        assert_eq!(extract_file_extension("src/x.RS"), Some(".RS".to_string()));
         assert_eq!(extract_file_extension("Makefile"), None);
     }
 }

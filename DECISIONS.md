@@ -1,73 +1,98 @@
-# Decisions
+# Architecture decisions
 
-## ADR-001: Port as a standalone HTTP server
-Status: accepted (2026-11-21)
-Context: mergeable is a Probot GitHub App (webhook receiver + optional /github-ratelimit/:installationId and /metrics routes); rust-anything analyze called it a library because it has no main.
-Decision: One Rust binary `mergeable` (crate rust/app) built on axum + tokio that serves the webhook endpoint and the optional routes.
-Consequences: No napi bridge, no shadows; the Node app stays only as reference.
+## ADR-001: One standalone HTTP server binary
+Status: accepted
+Context: mergeable receives GitHub webhooks and optionally serves /github-ratelimit/:installationId and /metrics.
+Decision: One binary `mergeable` (crate rust/app) built on axum and tokio serves the webhook endpoint and the
+optional routes. The library target exposes the engine so tests and the binary share it.
+Consequences: Deployment is a single executable in a distroless image or a buildpack image.
 
-## ADR-002: Thin GitHub REST client and own webhook/auth instead of Probot
-Status: accepted (2026-11-21)
-Context: Probot provides webhook HMAC verification, App JWT, installation tokens, an Octokit client and context.config() (with _extends and .github-repo fallback). Mergeable reads raw JSON shapes of ~30 REST endpoints.
-Decision: reqwest (rustls) GitHub client returning serde_json::Value, jsonwebtoken (RS256) for the App JWT, hmac+sha2 for X-Hub-Signature-256, own port of probot config loading. octocrab was considered (Q2) but its typed models drop fields mergeable templates read; a Value client mirrors Octokit 1:1.
-Consequences: All GitHub calls go through one client (auth, Link-header pagination, Octokit-style error text 'HttpError: <message>').
+## ADR-002: Thin GitHub REST client, own webhook verification and App authentication
+Status: accepted
+Context: The app needs webhook HMAC verification, the App JWT, installation tokens, ~30 REST endpoints and
+repository config loading with `_extends` and the organisation `.github` repository fallback. Templates read
+arbitrary fields of GitHub responses.
+Decision: A reqwest (rustls) client returning `serde_json::Value`; jsonwebtoken (RS256, `rust_crypto` backend) for the App JWT;
+hmac + sha2 for `X-Hub-Signature-256`; config loading in `repository_config`. octocrab was rejected because its
+typed models drop fields that templates read.
+Consequences: All GitHub calls go through one client (authentication, Link-header pagination, error text
+`HttpError: <message>` as it appears in check output).
 
-## ADR-003: Scope: every feature, including the v1 config format
-Status: accepted (2026-11-21), amended (2026-11-22)
-Context: v1 config (version-less mergeable.yml) is deprecated since 2.0 but still accepted by Node.
-Decision: Port everything: v1 and v2 config, settings file, all validators/filters/actions/options, Jira option, scheduler, memory+Redis cache, Prometheus metrics, rate-limit endpoint. A config without `version` is transformed to v2 exactly like Node's v1Config transformer (configuration/v1_config.rs).
-Consequences: Existing v1 configs keep working; the earlier "version 1 is no longer supported" error is gone.
+## ADR-003: Full feature scope, including version-less configurations
+Status: accepted
+Context: Configurations without `version` (version-1 format) are deprecated but still in use.
+Decision: Support version-1 and version-2 configurations, the settings file, all validators, filters, actions and
+options, the Jira option, the scheduler, memory and Redis caches, Prometheus metrics and the rate-limit endpoint.
+A configuration without `version` is converted to version 2 by `configuration::v1_config`.
+Consequences: Existing configurations keep working without edits.
 
-## ADR-004: Config, settings and env vars stay compatible
-Status: accepted (2026-11-21)
-Context: Existing installations must switch without changes.
-Decision: Same .github/mergeable.yml and .github/mergeable.settings.yml semantics and defaults; same env var names (APP_ID, PRIVATE_KEY, PRIVATE_KEY_PATH, WEBHOOK_SECRET, WEBHOOK_PATH, PORT, HOST, GHE_HOST, GHE_PROTOCOL, APP_NAME, NODE_ENV, LOG_LEVEL, LOG_CONFIG, CONFIG_PATH, SETTINGS_PATH, USE_CONFIG_*, USE_ORG_AS_DEFAULT_CONFIG, USE_SETTINGS_CACHE, CACHE_*, JIRA_*, MERGEABLE_SCHEDULER*, IGNORED_ACCOUNTS, DISABLE_DELAY, ENABLE_GITHUB_RATELIMIT_ENDPOINT, ENABLE_METRICS_ENDPOINT).
-Consequences: Drop-in for the Docker image / Helm chart.
+## ADR-004: Stable configuration files and environment interface
+Status: accepted
+Context: Installations are configured through repository files and environment variables; both are part of the
+deployment contract (Docker image, Helm chart).
+Decision: `.github/mergeable.yml` and `.github/mergeable.settings.yml` keep their semantics and defaults; the
+environment variables listed in README.md (including `NODE_ENV`) keep their names and meaning; the routes
+`/ping`, `/probot`, `/` and the webhook path keep their responses.
+Consequences: Changing any of these is a breaking change and needs a new recorded case.
 
-## ADR-005: Equivalence bar: same GitHub API calls
-Status: accepted (2026-11-21)
-Context: The observable behaviour is the GitHub API traffic produced for a webhook.
-Decision: A case = webhook in + stubbed GitHub responses. It passes when the Rust app makes the same calls (method, path, query, JSON body; key order ignored) in the same order and answers the webhook with the same status. Comment/check text matches byte for byte. ISO timestamps are normalised. Logs are not compared.
-Consequences: Texts that embed JS-runtime internals (TypeError text, stack traces, 'Cannot find module' paths) are normalised per case and listed as known diffs.
+## ADR-005: Recorded webhook scenarios are the contract
+Status: accepted
+Context: The observable behaviour of the app is the GitHub API traffic it produces for a webhook and the HTTP
+response it gives.
+Decision: A case is a webhook plus stubbed GitHub responses plus the expected calls and status
+(rust/app-cases). The `replay` crate runs the binary behind a mock GitHub API and passes a case when the app
+makes the same calls (method, path, query, JSON body) in the same order and answers with the same status.
+Comment and check texts match byte for byte; ISO timestamps and the mock origin are normalised; logs are not
+compared. Expectations are written only by `replay record --reference-command <command>`, which records from
+any reference implementation, never by hand.
+Consequences: Internals can be refactored freely; a change to the contract shows up as a failing case and is
+either fixed or re-recorded deliberately. The quiet window of a case (`quiet_ms`) covers the retry schedule.
 
-## ADR-006: Dynamic JSON value model, faithful first
-Status: accepted (2026-11-21)
-Context: Validators/filters/actions pass loosely typed JS objects (settings, payloads, results) into handlebars templates.
-Decision: Settings, payloads and results are serde_json::Value (preserve_order). JS semantics (truthiness, String(x), typeof) live in module `js`. Registries map the `do:` name to a trait object (replaces the computed require()).
-Consequences: Typed structs only in a later reshape pass.
+## ADR-006: Dynamic JSON values at the template boundary
+Status: accepted
+Context: Settings, webhook payloads and validation results flow into user-written templates that may reference
+any field.
+Decision: Payloads, settings and results are `serde_json::Value` with `preserve_order`, so request bodies keep
+the configured key order. Truthiness, string conversion and type tests over values live in `json_value`.
+The registry maps each `do:` name to a trait object (`registry::Registry`).
+Consequences: Typed structs are introduced where a shape is fixed; free-form data stays `Value`.
 
-## ADR-007: Crates
-Status: accepted (2026-11-21)
-Context: Dependency research in rust/research/.
-Decision: tokio, axum, reqwest(rustls), serde_json(preserve_order), an own YAML loader (js-yaml 3.14 / 4.1 behaviour, see ADR-012), handlebars (helpers ported), regex + fancy-regex (lookbehind), globset (minimatch), chrono + chrono-tz, moka (memory cache), redis (Redis cache), prometheus-client, jsonwebtoken, hmac, sha2, tracing.
-Consequences: rustls/jsonwebtoken pull ring (asm/C crypto): no equally mature pure-Rust alternative, accepted.
+## ADR-007: Request throttling, retries and the 9 s webhook timeout
+Status: accepted
+Context: GitHub enforces secondary rate limits on bursts of writes.
+Decision: The client spaces write requests 1 s apart process-wide, 2 s for /search and 3 s for
+notification-triggering writes on github.com, allows at most 10 concurrent requests, and retries any status
+>= 400 except 400/401/403/404/422/451 three times after 1 s, 4 s and 9 s. A webhook still running after 9 s is
+answered 202 and completes in the background. `GITHUB_THROTTLE=false` disables the throttle and
+`GITHUB_RETRY_BASE_MS` changes the retry base delay.
+Consequences: Throughput under write-heavy load is bounded by GitHub's pacing; the benchmark reports throttled
+and unthrottled numbers separately.
 
-## ADR-008: No per-wave stops; one final report with benchmark
-Status: accepted (2026-11-21)
-Context: User instruction.
-Decision: Port all waves in one go; the only checkpoint is the final report: replay results, gate (fmt, clippy -D warnings, tests), benchmark Node vs Rust.
-Consequences: HANDOFF.md is written at the end.
+## ADR-008: Crates
+Status: accepted
+Decision: tokio, axum, reqwest (rustls), async-trait, serde_json (`preserve_order`), an own YAML loader (`yaml`) whose
+parse errors are part of the check output, an own template interpreter (`template`), regex + fancy-regex
+(lookbehind in user patterns), an own glob matcher (`glob`), chrono + chrono-tz, moka (memory cache and
+compiled pattern cache), redis, prometheus-client, jsonwebtoken, hmac, sha1, sha2, tracing + tracing-subscriber.
+Consequences: the rustls stack pulls in aws-lc-rs and ring (assembly/C crypto) for TLS; no equally mature
+pure-Rust TLS provider exists, so this is accepted.
 
-## ADR-009: Whole engine ported directly, not through the front-door proxy
-Status: accepted (2026-11-21)
-Context: All units are classes with async GitHub calls (analyze: 0 bridgeable exports) and the app has one webhook route, so route-level fallback cannot move units one at a time.
-Decision: Build rust/app as the full engine; prove it with app-level replay of recorded webhook cases (rust/app-cases, harness rust/replay) plus unit tests ported from the JS suite.
-Consequences: Per-unit bridge/record/diff are not used; replay is the gate.
+## ADR-009: Golden corpora for the template, glob and YAML engines
+Status: accepted
+Context: The template language, glob matching and YAML parsing have many edge cases whose output is visible in
+check texts.
+Decision: rust/app/tests/fixtures holds fixed golden data (templates.json, globs.json, yaml.json) asserted by
+the test suite.
+Consequences: A behaviour change in these engines fails a test before it reaches a recorded case.
 
-## ADR-010: Reference runtime Node 22 via devenv
-Status: accepted (2026-11-21)
-Context: nixpkgs removed Node 20 (EOL); devenv is the project environment (user instruction).
-Decision: Record the original on Node 22 inside devenv (devenv.nix: nodejs_22, rust, cargo-edit, redis). JS suite: 643/643 pass on Node 22.
-Consequences: Recorded cases reflect Node 22 behaviour.
+## ADR-010: Release profile
+Status: accepted
+Decision: `lto = true`, `codegen-units = 1`, `panic = "unwind"`; no `target-cpu=native` (see BENCHMARK.md).
+Consequences: A panic fails one webhook instead of aborting the server; the binary runs on any CPU of the
+target architecture.
 
-## ADR-011: Keep Probot request throttling, retries and the 9 s webhook timeout
-Status: accepted (2026-11-21)
-Context: Probot's octokit spaces all write requests 1 s apart process-wide (plugin-throttling, id 'no-id'), 2 s for /search, 3 s for notification-triggering writes on github.com, max 10 concurrent requests, and retries any status >= 400 except 400/401/403/404/422/451 three times after 1 s, 4 s, 9 s. The webhook answers 202 'still processing' after 9 s. These protect installations from GitHub secondary rate limits.
-Decision: The Rust client reproduces the throttle lanes, the retry schedule and the 202 timeout by default. GITHUB_THROTTLE=false disables the throttle and GITHUB_RETRY_BASE_MS changes the retry base delay (new, optional env vars).
-Consequences: Node and Rust have the same GitHub-facing pacing, so throughput under write-heavy load is bounded by GitHub's rules in both; the benchmark therefore reports throttled and unthrottled numbers separately.
-
-## ADR-012: Known differences and how replay compares runtime texts
-Status: accepted (2026-11-21)
-Context: Some recorded texts embed details of the Node runtime: V8 stack frames ("    at ..."), Node's "Require stack:" list of absolute paths, and js-yaml's parser messages. Some cases depend on retry timing around the quiet window.
-Decision: replay ignores JS stack frames and Require-stack lists when comparing (the error message before them is still compared exactly). A case may set "quiet_ms" when Probot's retry schedule (1 s, 4 s, 9 s) straddles the default 4 s quiet window. No case carries a "known_diff" any more: YAML is parsed by an own loader that reproduces js-yaml 3.14.1 (configuration, settings) and 4.1.0 (Probot context.config) including error texts, proven by a 3,019-entry corpus (rust/tools/generate-yaml-corpus.js), and version-1 configs are transformed (ADR-003).
-Consequences: Every other recorded text, including TypeError messages, must match byte for byte.
+## ADR-011: Lints
+Status: accepted
+Decision: `clippy::pedantic` at warn workspace-wide (`missing_errors_doc`, `missing_panics_doc` allowed);
+deliberate exceptions use scoped `#[expect(lint, reason = "...")]`, never `#[allow]`.
+Consequences: New warnings are fixed or justified at the site.

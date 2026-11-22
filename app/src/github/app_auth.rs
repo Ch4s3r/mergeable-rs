@@ -1,61 +1,63 @@
-use crate::error::{JsError, JsResult};
-use crate::github::client::encode_uri_component;
-use crate::js;
+use crate::error::{Error, Result};
+use crate::github::client::{
+    DEFAULT_ACCEPT, api_error_message, encode_uri_component, next_page_url,
+};
+use crate::json_value;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use reqwest::header::{ACCEPT, AUTHORIZATION, LINK};
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const DEFAULT_ACCEPT: &str = "application/vnd.github.v3+json";
 const JWT_BACKDATE_SECONDS: u64 = 30;
 const JWT_LIFETIME_SECONDS: u64 = 600;
+const USER_AGENT: &str = concat!("mergeable-rust/", env!("CARGO_PKG_VERSION"));
+
+pub(crate) fn build_http_client() -> Result<reqwest::Client> {
+    reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()
+        .map_err(|error| Error::general(format!("cannot build the HTTP client: {error}")))
+}
+
+pub(crate) struct AppSigner {
+    issuer: Value,
+    signing_key: EncodingKey,
+}
+
+impl AppSigner {
+    pub(crate) fn new(issuer: Value, private_key_pem: &str) -> Result<Self> {
+        let signing_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
+            .map_err(|error| Error::general(format!("invalid PRIVATE_KEY: {error}")))?;
+        Ok(AppSigner {
+            issuer,
+            signing_key,
+        })
+    }
+
+    fn sign(&self) -> Result<String> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or_default();
+        let issued_at = now.saturating_sub(JWT_BACKDATE_SECONDS);
+        let claims = json!({
+            "iat": issued_at,
+            "exp": issued_at + JWT_LIFETIME_SECONDS,
+            "iss": self.issuer,
+        });
+        jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &self.signing_key)
+            .map_err(|error| Error::general(format!("could not sign app JWT: {error}")))
+    }
+
+    pub(crate) fn bearer_authorization(&self) -> Result<String> {
+        Ok(format!("bearer {}", self.sign()?))
+    }
+}
 
 pub struct AppJwtClient {
     http: reqwest::Client,
     base_url: String,
-    app_id: String,
-    signing_key: EncodingKey,
-}
-
-pub fn octokit_error_message(data: &Value) -> String {
-    match data {
-        Value::String(text) => text.clone(),
-        Value::Object(map) => {
-            let documentation_suffix = map
-                .get("documentation_url")
-                .map(|url| format!(" - {}", js::to_js_string(Some(url))))
-                .unwrap_or_default();
-            match map.get("message") {
-                Some(message) => match map.get("errors") {
-                    Some(Value::Array(errors)) => format!(
-                        "{}: {}{documentation_suffix}",
-                        js::to_js_string(Some(message)),
-                        errors
-                            .iter()
-                            .map(js::stringify)
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ),
-                    _ => format!("{}{documentation_suffix}", js::to_js_string(Some(message))),
-                },
-                None => format!("Unknown error: {}", js::stringify(data)),
-            }
-        }
-        other => format!("Unknown error: {}", js::stringify(other)),
-    }
-}
-
-#[must_use]
-pub fn next_page_url(link_header: &str) -> Option<String> {
-    link_header.split(',').find_map(|part| {
-        let (target, relation) = part.split_once(';')?;
-        relation.contains("rel=\"next\"").then(|| {
-            target
-                .trim()
-                .trim_start_matches('<')
-                .trim_end_matches('>')
-                .to_string()
-        })
-    })
+    signer: AppSigner,
 }
 
 #[must_use]
@@ -84,67 +86,41 @@ struct PageResponse {
 }
 
 impl AppJwtClient {
-    pub fn new(base_url: &str, app_id: &str, private_key_pem: &str) -> JsResult<Self> {
-        let signing_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-            .map_err(|error| JsError::error(format!("invalid PRIVATE_KEY: {error}")))?;
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("mergeable-rust/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|error| JsError::error(error.to_string()))?;
+    pub fn new(base_url: &str, app_id: &str, private_key_pem: &str) -> Result<Self> {
         Ok(AppJwtClient {
-            http,
+            http: build_http_client()?,
             base_url: base_url.trim_end_matches('/').to_string(),
-            app_id: app_id.to_string(),
-            signing_key,
+            signer: AppSigner::new(Value::String(app_id.to_string()), private_key_pem)?,
         })
     }
 
-    fn app_jwt(&self) -> JsResult<String> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_secs())
-            .unwrap_or_default();
-        let issued_at = now.saturating_sub(JWT_BACKDATE_SECONDS);
-        let claims = json!({
-            "iat": issued_at,
-            "exp": issued_at + JWT_LIFETIME_SECONDS,
-            "iss": self.app_id,
-        });
-        jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &self.signing_key)
-            .map_err(|error| JsError::error(format!("could not sign app JWT: {error}")))
-    }
-
-    async fn send(&self, request: reqwest::RequestBuilder) -> JsResult<PageResponse> {
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<PageResponse> {
         let response = request
-            .header("accept", DEFAULT_ACCEPT)
+            .header(ACCEPT, DEFAULT_ACCEPT)
             .send()
             .await
-            .map_err(|error| JsError::http(500, error.to_string(), None))?;
+            .map_err(|error| Error::http(500, error.to_string()))?;
         let status = response.status().as_u16();
         let next_url = response
             .headers()
-            .get("link")
+            .get(LINK)
             .and_then(|link| link.to_str().ok())
             .and_then(next_page_url);
         let data: Value = response.json().await.unwrap_or(Value::Null);
         if status >= 400 {
-            return Err(JsError::http(
-                status,
-                octokit_error_message(&data),
-                Some(data),
-            ));
+            return Err(Error::http(status, api_error_message(&data)));
         }
         Ok(PageResponse { data, next_url })
     }
 
-    pub async fn paginate_as_app(&self, path_and_query: &str) -> JsResult<Vec<Value>> {
+    pub async fn paginate_as_app(&self, path_and_query: &str) -> Result<Vec<Value>> {
         let mut collected = Vec::new();
         let mut url = format!("{}{path_and_query}", self.base_url);
         loop {
             let request = self
                 .http
                 .get(&url)
-                .header("authorization", format!("bearer {}", self.app_jwt()?));
+                .header(AUTHORIZATION, self.signer.bearer_authorization()?);
             let page = self.send(request).await?;
             collected.extend(items_of_page(page.data));
             match page.next_url {
@@ -154,7 +130,7 @@ impl AppJwtClient {
         }
     }
 
-    pub async fn installation_token(&self, installation_id: &str) -> JsResult<String> {
+    pub async fn installation_token(&self, installation_id: &str) -> Result<String> {
         let url = format!(
             "{}/app/installations/{}/access_tokens",
             self.base_url,
@@ -163,17 +139,17 @@ impl AppJwtClient {
         let request = self
             .http
             .post(&url)
-            .header("authorization", format!("bearer {}", self.app_jwt()?));
+            .header(AUTHORIZATION, self.signer.bearer_authorization()?);
         let page = self.send(request).await?;
-        Ok(js::to_js_string(page.data.get("token")))
+        Ok(json_value::to_display_string(page.data.get("token")))
     }
 
-    pub async fn rate_limit_as_installation(&self, installation_id: &str) -> JsResult<Value> {
+    pub async fn rate_limit_as_installation(&self, installation_id: &str) -> Result<Value> {
         let token = self.installation_token(installation_id).await?;
         let request = self
             .http
             .get(format!("{}/rate_limit", self.base_url))
-            .header("authorization", format!("token {token}"));
+            .header(AUTHORIZATION, format!("token {token}"));
         Ok(self.send(request).await?.data)
     }
 }
@@ -189,25 +165,14 @@ mod tests {
             next_page_url(link).as_deref(),
             Some("https://api.github.com/app/installations?page=2&per_page=1")
         );
-        assert_eq!(next_page_url("<https://x/?page=1>; rel=\"prev\""), None);
     }
 
     #[test]
-    fn pages_are_flattened_like_octokit_paginate() {
+    fn pages_are_flattened_into_one_list() {
         let page =
             json!({"total_count": 1, "repository_selection": "all", "repositories": [{"id": 2}]});
         assert_eq!(items_of_page(page), vec![json!({"id": 2})]);
         assert_eq!(items_of_page(json!([{"id": 1}])), vec![json!({"id": 1})]);
         assert_eq!(items_of_page(json!({"id": 1})), vec![json!({"id": 1})]);
-    }
-
-    #[test]
-    fn octokit_error_message_appends_the_documentation_url() {
-        let data =
-            json!({"message": "Not Found", "documentation_url": "https://docs.github.com/rest"});
-        assert_eq!(
-            octokit_error_message(&data),
-            "Not Found - https://docs.github.com/rest"
-        );
     }
 }

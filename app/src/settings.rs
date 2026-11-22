@@ -1,8 +1,8 @@
 use crate::cache::ConfigCache;
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, ErrorKind, Result};
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::yaml;
 use serde_json::{Value, json};
 use std::sync::LazyLock;
@@ -30,7 +30,7 @@ pub fn default_config_path() -> String {
     std::env::var("CONFIG_PATH").unwrap_or_default()
 }
 
-fn apply_v1_defaults(settings: &mut Value) {
+fn apply_version_one_defaults(settings: &mut Value) {
     let Some(Value::Object(mergeable)) = settings.get_mut("mergeable") else {
         return;
     };
@@ -53,13 +53,13 @@ fn apply_v1_defaults(settings: &mut Value) {
     }
 }
 
-async fn fetch_settings_file(context: &Context) -> JsResult<Value> {
+async fn fetch_settings_file(context: &Context) -> Result<Value> {
     let (owner, repo) = context.repo()?;
     let settings_path = settings_path();
     let cache_key = format!("{owner}/{repo}/settings");
     if use_settings_cache()
         && let Some(cached) = SETTINGS_CACHE.get(&cache_key).await
-        && js::is_truthy(&cached)
+        && json_value::is_truthy(&cached)
     {
         return Ok(cached);
     }
@@ -78,24 +78,26 @@ async fn fetch_settings_file(context: &Context) -> JsResult<Value> {
     }
     let parsed = match settings_file_content {
         Some(text) => {
-            yaml::parse(&text).map_err(|error| JsError::named("YAMLException", error.message))?
+            yaml::parse(&text).map_err(|error| Error::new(ErrorKind::Yaml, error.message))?
         }
         None => None,
     };
     let mut settings = match parsed {
-        Some(value) if js::truthy(value.get("mergeable")) => value,
+        Some(value) if json_value::truthy(value.get("mergeable")) => value,
         _ => json!({"version": 1, "mergeable": {}}),
     };
     let version = match settings.get("version") {
-        Some(version) if js::is_truthy(version) => js::to_js_string(Some(version)),
+        Some(version) if json_value::is_truthy(version) => {
+            json_value::to_display_string(Some(version))
+        }
         _ => "1".to_string(),
     };
     if version != "1" {
-        return Err(JsError::error(format!(
-            "Cannot find module './transformers/v{version}Settings'"
+        return Err(Error::general(format!(
+            "unsupported settings version {version}"
         )));
     }
-    apply_v1_defaults(&mut settings);
+    apply_version_one_defaults(&mut settings);
     if use_settings_cache() {
         SETTINGS_CACHE.set(&cache_key, settings.clone()).await;
     }
@@ -103,7 +105,8 @@ async fn fetch_settings_file(context: &Context) -> JsResult<Value> {
 }
 
 fn settings_from_file(mut settings: Value) -> Value {
-    if js::truthy(settings.get("version")) && !settings.get("version").is_some_and(Value::is_number)
+    if json_value::truthy(settings.get("version"))
+        && !settings.get("version").is_some_and(Value::is_number)
     {
         return json!({});
     }
@@ -113,10 +116,13 @@ fn settings_from_file(mut settings: Value) -> Value {
     }
 }
 
-pub async fn instance_with_context(context: &Context) -> Value {
+pub async fn load(context: &Context) -> Value {
     match fetch_settings_file(context).await {
         Ok(settings) => settings_from_file(settings),
-        Err(_) => json!({}),
+        Err(error) => {
+            tracing::warn!(event_id = %context.event_id, %error, "settings.load.failed");
+            json!({})
+        }
     }
 }
 
@@ -127,7 +133,7 @@ mod tests {
     #[test]
     fn version_one_defaults_fill_only_missing_keys() {
         let mut settings = json!({"mergeable": {"config_path": "custom.yml"}});
-        apply_v1_defaults(&mut settings);
+        apply_version_one_defaults(&mut settings);
         assert_eq!(settings["mergeable"]["config_path"], "custom.yml");
         assert_eq!(settings["mergeable"]["use_config_from_pull_request"], true);
     }

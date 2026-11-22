@@ -1,55 +1,57 @@
 use crate::actions::{self, Action};
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::filters::{self, Filter};
-use crate::js;
+use crate::json_value;
+use crate::results::Status;
 use crate::validators::{self, Validator};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, PoisonError, RwLock};
+
+type Modules<Module> = RwLock<HashMap<String, Arc<Module>>>;
 
 #[derive(Default)]
 pub struct Registry {
-    filters: Mutex<HashMap<String, Arc<dyn Filter>>>,
-    validators: Mutex<HashMap<String, Arc<dyn Validator>>>,
-    actions: Mutex<HashMap<String, Arc<dyn Action>>>,
+    filters: Modules<dyn Filter>,
+    validators: Modules<dyn Validator>,
+    actions: Modules<dyn Action>,
 }
 
-fn module_not_found(kind: &str, key: &str) -> JsError {
-    JsError::error(format!("Cannot find module './{kind}/{key}'"))
+fn module_not_found(kind: &str, key: &str) -> Error {
+    Error::general(format!("Cannot find module './{kind}/{key}'"))
 }
 
-fn for_each_entry<'list>(
-    list: Option<&'list Value>,
-    list_description: &str,
-) -> JsResult<&'list [Value]> {
+fn rule_list<'list>(list: Option<&'list Value>, list_description: &str) -> Result<&'list [Value]> {
     match list {
         Some(Value::Array(items)) => Ok(items),
-        None => Err(JsError::reading_property_of_undefined("forEach")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("forEach")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'forEach')",
         )),
-        Some(_) => Err(JsError::type_error(format!(
+        Some(_) => Err(Error::type_mismatch(format!(
             "{list_description}.forEach is not a function"
         ))),
     }
 }
 
-fn entry_key(entry: &Value) -> JsResult<String> {
-    Ok(js::to_js_string(js::read(Some(entry), "do")?))
+fn lookup<Module: ?Sized>(registered: &Modules<Module>, key: &str) -> Option<Arc<Module>> {
+    registered
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(key)
+        .cloned()
 }
 
 fn register_entries<'entry, Module: ?Sized>(
-    registered: &Mutex<HashMap<String, Arc<Module>>>,
+    registered: &Modules<Module>,
     entries: impl IntoIterator<Item = &'entry Value>,
     kind: &str,
     create: impl Fn(&str) -> Option<Arc<Module>>,
-) -> JsResult<()> {
+) -> Result<()> {
+    let mut registered = registered.write().unwrap_or_else(PoisonError::into_inner);
     for entry in entries {
-        let key = entry_key(entry)?;
-        let mut registered = registered
-            .lock()
-            .map_err(|_| JsError::error("registry poisoned"))?;
+        let key = json_value::to_display_string(json_value::read(Some(entry), "do")?);
         if let Entry::Vacant(slot) = registered.entry(key) {
             let module = create(slot.key()).ok_or_else(|| module_not_found(kind, slot.key()))?;
             slot.insert(module);
@@ -60,58 +62,98 @@ fn register_entries<'entry, Module: ?Sized>(
 
 impl Registry {
     pub fn filter(&self, key: &str) -> Option<Arc<dyn Filter>> {
-        self.filters.lock().ok()?.get(key).cloned()
+        lookup(&self.filters, key)
     }
 
     pub fn validator(&self, key: &str) -> Option<Arc<dyn Validator>> {
-        self.validators.lock().ok()?.get(key).cloned()
+        lookup(&self.validators, key)
     }
 
     pub fn action(&self, key: &str) -> Option<Arc<dyn Action>> {
-        self.actions.lock().ok()?.get(key).cloned()
+        lookup(&self.actions, key)
     }
 
-    pub fn register_filters(&self, rule: &Value) -> JsResult<()> {
-        if !js::truthy(rule.get("filter")) {
+    pub fn register_filters(&self, rule: &Value) -> Result<()> {
+        if !json_value::truthy(rule.get("filter")) {
             return Ok(());
         }
         register_entries(
             &self.filters,
-            for_each_entry(rule.get("filter"), "rule.filter")?,
+            rule_list(rule.get("filter"), "rule.filter")?,
             "filters",
             filters::create,
         )
     }
 
-    pub fn register_validators(&self, rule: &Value) -> JsResult<()> {
+    pub fn register_validators(&self, rule: &Value) -> Result<()> {
         register_entries(
             &self.validators,
-            for_each_entry(rule.get("validate"), "rule.validate")?,
+            rule_list(rule.get("validate"), "rule.validate")?,
             "validators",
             validators::create,
         )
     }
 
-    pub fn register_actions(&self, rule: &Value) -> JsResult<()> {
-        let possible_actions = ["pass", "fail", "error"]
+    pub fn register_actions(&self, rule: &Value) -> Result<()> {
+        let outcome_actions = Status::ALL
             .into_iter()
-            .filter_map(|outcome| rule.get(outcome).filter(|actions| js::is_truthy(actions)))
+            .filter_map(|outcome| {
+                rule.get(outcome.as_str())
+                    .filter(|actions| json_value::is_truthy(actions))
+            })
             .flat_map(|actions| match actions {
                 Value::Array(items) => items.as_slice(),
                 single => std::slice::from_ref(single),
             });
-        register_entries(&self.actions, possible_actions, "actions", actions::create)
+        register_entries(&self.actions, outcome_actions, "actions", actions::create)
     }
 
-    pub fn register_all(&self, settings: &Value) -> JsResult<()> {
-        for rule in for_each_entry(Some(settings), "settings")? {
+    pub fn register_all(&self, settings: &Value) -> Result<()> {
+        for rule in rule_list(Some(settings), "settings")? {
             self.register_filters(rule)
-                .map_err(|error| JsError::error(format!("Filters have thrown {error}")))?;
+                .map_err(|error| Error::general(format!("Filters have thrown {error}")))?;
             self.register_validators(rule)
-                .map_err(|error| JsError::error(format!("Validators have thrown {error}")))?;
+                .map_err(|error| Error::general(format!("Validators have thrown {error}")))?;
             self.register_actions(rule)
-                .map_err(|error| JsError::error(format!("Actions have thrown {error}")))?;
+                .map_err(|error| Error::general(format!("Actions have thrown {error}")))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn registering_a_rule_makes_its_modules_available() -> Result<()> {
+        let registry = Registry::default();
+        registry.register_all(&json!([{
+            "filter": [{"do": "author"}],
+            "validate": [{"do": "title"}],
+            "pass": [{"do": "comment"}],
+            "fail": {"do": "labels"}
+        }]))?;
+        assert!(registry.filter("author").is_some());
+        assert!(registry.validator("title").is_some());
+        assert!(registry.action("comment").is_some());
+        assert!(registry.action("labels").is_some());
+        assert!(registry.action("merge").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_module_names_the_kind_that_failed() {
+        let failure = Registry::default()
+            .register_all(&json!([{"validate": [{"do": "nonexistent"}]}]))
+            .err()
+            .map(|error| error.to_string());
+        assert_eq!(
+            failure.as_deref(),
+            Some(
+                "Error: Validators have thrown Error: Cannot find module './validators/nonexistent'"
+            )
+        );
     }
 }

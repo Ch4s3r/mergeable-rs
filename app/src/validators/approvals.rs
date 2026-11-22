@@ -1,13 +1,13 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, ErrorKind, Result};
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
-use crate::lodash;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use crate::validators::options_processor::{assignees, owners, requested_reviewers, teams};
 use crate::validators::{self, DEFAULT_SUPPORTED_OPTIONS, Validator};
+use crate::value_lists;
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 
@@ -27,14 +27,14 @@ fn validator_context() -> Value {
     json!({"name": "approvals"})
 }
 
-fn lower_case_state(review: &Value) -> JsResult<String> {
-    match js::read(Some(review), "state")? {
+fn lower_case_state(review: &Value) -> Result<String> {
+    match json_value::read(Some(review), "state")? {
         Some(Value::String(state)) => Ok(state.to_lowercase()),
-        None => Err(JsError::reading_property_of_undefined("toLowerCase")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("toLowerCase")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'toLowerCase')",
         )),
-        Some(_) => Err(JsError::type_error(
+        Some(_) => Err(Error::type_mismatch(
             "element.state.toLowerCase is not a function",
         )),
     }
@@ -48,23 +48,27 @@ fn review_decision_fields(mut review: Value) -> Value {
     Value::Object(decision_fields)
 }
 
-pub fn latest_review_per_user(reviews: Vec<Value>) -> JsResult<Vec<Value>> {
+pub fn latest_review_per_user(reviews: Vec<Value>) -> Result<Vec<Value>> {
     let mut relevant_reviews = Vec::new();
     for review in reviews {
         if lower_case_state(&review)? != "commented" {
             relevant_reviews.push(review_decision_fields(review));
         }
     }
-    let ordered = lodash::order_by_path(relevant_reviews, &["submitted_at"], true);
-    Ok(lodash::uniq_by_path(ordered, &["user", "login"]))
+    let ordered = value_lists::order_by_path(
+        relevant_reviews,
+        &["submitted_at"],
+        value_lists::SortOrder::Descending,
+    );
+    Ok(value_lists::unique_by_path(ordered, &["user", "login"]))
 }
 
-pub fn find_reviewers_by_state(latest_reviews: &[Value], state: &str) -> JsResult<Vec<Value>> {
+pub fn find_reviewers_by_state(latest_reviews: &[Value], state: &str) -> Result<Vec<Value>> {
     let mut reviewers = Vec::new();
     for review in latest_reviews {
         if lower_case_state(review)? == state {
             let reviewer = match review.get("user") {
-                Some(user) if js::is_truthy(user) => {
+                Some(user) if json_value::is_truthy(user) => {
                     user.get("login").cloned().unwrap_or(Value::Null)
                 }
                 Some(falsy_user) => falsy_user.clone(),
@@ -76,10 +80,10 @@ pub fn find_reviewers_by_state(latest_reviews: &[Value], state: &str) -> JsResul
     Ok(reviewers)
 }
 
-pub fn process_block_option(block_option: &Value, latest_reviews: &[Value]) -> JsResult<Value> {
+pub fn process_block_option(block_option: &Value, latest_reviews: &[Value]) -> Result<Value> {
     let description = match block_option
         .get("message")
-        .filter(|message| js::is_truthy(message))
+        .filter(|message| json_value::is_truthy(message))
     {
         Some(message) => message.clone(),
         None => Value::String(DEFAULT_BLOCK_MESSAGE.to_string()),
@@ -104,7 +108,7 @@ fn take_truthy_option(settings: &mut Value, key: &str) -> Option<Value> {
     let Value::Object(map) = settings else {
         return None;
     };
-    if !map.get(key).is_some_and(js::is_truthy) {
+    if !map.get(key).is_some_and(json_value::is_truthy) {
         return None;
     }
     map.shift_remove(key)
@@ -113,8 +117,8 @@ fn take_truthy_option(settings: &mut Value, key: &str) -> Option<Value> {
 fn required_option(settings: &Value, key: &str) -> bool {
     settings
         .get("required")
-        .filter(|value| js::is_truthy(value))
-        .is_some_and(|required| js::truthy(js::get(required, key)))
+        .filter(|value| json_value::is_truthy(value))
+        .is_some_and(|required| json_value::truthy(json_value::get(required, key)))
 }
 
 fn append_unique(mut required_reviewers: Vec<Value>, additions: &[Value]) -> Vec<Value> {
@@ -122,7 +126,7 @@ fn append_unique(mut required_reviewers: Vec<Value>, additions: &[Value]) -> Vec
         return required_reviewers;
     }
     required_reviewers.extend_from_slice(additions);
-    lodash::uniq_owned(required_reviewers)
+    value_lists::unique_owned(required_reviewers)
 }
 
 #[must_use]
@@ -132,7 +136,7 @@ pub fn remove_pull_request_creator(
 ) -> Vec<Value> {
     if let Some(position) = required_reviewers
         .iter()
-        .position(|reviewer| js::strict_equals(reviewer, creator))
+        .position(|reviewer| json_value::strict_equals(reviewer, creator))
     {
         required_reviewers.remove(position);
     }
@@ -142,23 +146,24 @@ pub fn remove_pull_request_creator(
 async fn required_reviewer_list(
     context: &Context,
     settings: &Value,
-) -> JsResult<RequiredReviewerList> {
+) -> Result<RequiredReviewerList> {
     let payload = event_aware::get_payload(context);
-    let creator = js::read(js::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
+    let creator =
+        json_value::read(json_value::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
     let mut required_reviewers = settings
         .get("required")
-        .filter(|value| js::is_truthy(value))
-        .and_then(|required| js::get(required, "reviewers"))
-        .filter(|value| js::is_truthy(value))
-        .map(|reviewers| js::as_array_or_wrap(reviewers).to_vec())
+        .filter(|value| json_value::is_truthy(value))
+        .and_then(|required| json_value::get(required, "reviewers"))
+        .filter(|value| json_value::is_truthy(value))
+        .map(|reviewers| json_value::as_array_or_wrap(reviewers).to_vec())
         .unwrap_or_default();
 
     let mut owner_list = Vec::new();
     if required_option(settings, "owners") {
         owner_list = match owners::process(payload.unwrap_or(&Value::Null), context).await {
             Ok(list) => list,
-            Err(error) if error.is_named("TeamNotFoundError") => {
-                return Err(JsError::reading_property_of_undefined("length"));
+            Err(error) if error.kind() == ErrorKind::TeamNotFound => {
+                return Err(Error::missing_property("length"));
             }
             Err(error) => return Err(error),
         };
@@ -215,11 +220,11 @@ pub fn exclude_users(
     exclude_option: Option<&Value>,
 ) -> Vec<Value> {
     if let Some(users) = exclude_option
-        .and_then(|exclude| js::get(exclude, "users"))
-        .filter(|users| js::is_truthy(users))
+        .and_then(|exclude| json_value::get(exclude, "users"))
+        .filter(|users| json_value::is_truthy(users))
     {
-        let excluded_users = js::as_array_or_wrap(users);
-        approved_reviewers.retain(|reviewer| !lodash::contains(excluded_users, reviewer));
+        let excluded_users = json_value::as_array_or_wrap(users);
+        approved_reviewers.retain(|reviewer| !value_lists::contains(excluded_users, reviewer));
     }
     approved_reviewers
 }
@@ -228,25 +233,29 @@ async fn limit_to_allowed_sources(
     context: &Context,
     limit_option: &Value,
     approved_reviewers: Vec<Value>,
-) -> JsResult<(Vec<Value>, Value)> {
+) -> Result<(Vec<Value>, Value)> {
     let payload = event_aware::get_payload(context);
     let mut owner_members = Vec::new();
-    let team_names = js::get(limit_option, "teams")
-        .filter(|value| js::is_truthy(value))
-        .map_or(&[][..], js::as_array_or_wrap);
-    if js::truthy(js::get(limit_option, "owners")) {
+    let team_names = json_value::get(limit_option, "teams")
+        .filter(|value| json_value::is_truthy(value))
+        .map_or(&[][..], json_value::as_array_or_wrap);
+    if json_value::truthy(json_value::get(limit_option, "owners")) {
         owner_members = owners::process(payload.unwrap_or(&Value::Null), context).await?;
     }
     let team_members =
         teams::extract_team_memberships(context, team_names, &approved_reviewers).await?;
-    let mut allowed_members = lodash::union(&team_members, &owner_members);
-    if let Some(limit_users) = js::get(limit_option, "users").filter(|value| js::is_truthy(value)) {
-        allowed_members = lodash::union(allowed_members, lodash::array_like(Some(limit_users)));
+    let mut allowed_members = value_lists::union(&team_members, &owner_members);
+    if let Some(limit_users) =
+        json_value::get(limit_option, "users").filter(|value| json_value::is_truthy(value))
+    {
+        allowed_members =
+            value_lists::union(allowed_members, value_lists::array_items(Some(limit_users)));
     }
-    let counted_reviewers: Vec<Value> = lodash::intersection(&approved_reviewers, &allowed_members)
-        .into_iter()
-        .cloned()
-        .collect();
+    let counted_reviewers: Vec<Value> =
+        value_lists::intersection(&approved_reviewers, &allowed_members)
+            .into_iter()
+            .cloned()
+            .collect();
     let info = results::construct_output(
         &validator_context(),
         Value::Array(counted_reviewers.clone()),
@@ -261,15 +270,8 @@ async fn limit_to_allowed_sources(
 async fn process_options_raw(
     settings: &Value,
     approved_reviewers: Vec<Value>,
-) -> JsResult<Vec<Value>> {
-    let supported: Vec<Value> = DEFAULT_SUPPORTED_OPTIONS
-        .iter()
-        .map(|option| Value::String((*option).to_string()))
-        .collect();
-    let options_context = json!({
-        "name": settings.get("do").unwrap_or(&Value::Null),
-        "supportedOptions": supported,
-    });
+) -> Result<Vec<Value>> {
+    let options_context = validators::options_context(settings, &DEFAULT_SUPPORTED_OPTIONS);
     let raw_output = validators::options::process(
         &options_context,
         &Value::Array(approved_reviewers),
@@ -277,7 +279,7 @@ async fn process_options_raw(
         true,
     )
     .await?;
-    Ok(js::into_array_or_wrap(raw_output))
+    Ok(json_value::into_array_or_wrap(raw_output))
 }
 
 #[async_trait]
@@ -290,8 +292,8 @@ impl Validator for Approvals {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "min": {"count": "number", "message": "string"},
             "max": {"count": "number", "message": "string"},
             "required": {
@@ -304,7 +306,7 @@ impl Validator for Approvals {
             "block": {"changes_requested": "boolean", "message": "string"},
             "limit": {"teams": "array", "users": "array", "owners": "boolean"},
             "exclude": {"users": "array"},
-        }))
+        })
     }
 
     async fn validate(
@@ -312,14 +314,14 @@ impl Validator for Approvals {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let mut remaining_settings = settings.clone();
         let block_option = take_truthy_option(&mut remaining_settings, "block");
         let limit_option = take_truthy_option(&mut remaining_settings, "limit");
         let exclude_option = take_truthy_option(&mut remaining_settings, "exclude");
 
         let pull_number =
-            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let reviews = api::list_reviews(context, pull_number).await?;
 
         let required_list = required_reviewer_list(context, &remaining_settings).await?;
@@ -340,7 +342,7 @@ impl Validator for Approvals {
 
         if let Some(block) = block_option
             .as_ref()
-            .filter(|block| js::truthy(js::get(block, "changes_requested")))
+            .filter(|block| json_value::truthy(json_value::get(block, "changes_requested")))
         {
             output.push(process_block_option(block, &latest_reviews)?);
         }
@@ -357,7 +359,7 @@ mod tests {
         json!({"user": {"login": login}, "state": state, "submitted_at": submitted_at, "body": "review text"})
     }
 
-    fn reviewers_with_state(reviews: &[Value], state: &str) -> JsResult<Vec<Value>> {
+    fn reviewers_with_state(reviews: &[Value], state: &str) -> Result<Vec<Value>> {
         find_reviewers_by_state(&latest_review_per_user(reviews.to_vec())?, state)
     }
 
@@ -445,7 +447,7 @@ mod tests {
         };
         let resolved = with_resolved_required_option(settings, list);
         assert_eq!(
-            js::stringify(&resolved),
+            json_value::stringify(&resolved),
             r#"{"do":"approvals","required":{"owners":[],"assignees":["carol"],"reviewers":["bob","carol"],"requested_reviewers":[]},"min":{"count":1}}"#
         );
     }
@@ -460,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn review_without_state_throws_like_node() {
+    fn review_without_state_fails_with_a_missing_property_error() {
         let error =
             reviewers_with_state(&[json!({"user": {"login": "bob"}})], "approved").unwrap_err();
         assert_eq!(

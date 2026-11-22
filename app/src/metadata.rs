@@ -1,4 +1,4 @@
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, ErrorKind, Result};
 use serde_json::Value;
 
 const DATA_START: &str = "<!-- #mergeable-data";
@@ -6,7 +6,10 @@ const DATA_END: &str = "#mergeable-data -->";
 
 #[must_use]
 pub fn serialize(data: &Value) -> String {
-    format!("{DATA_START} {} {DATA_END}", crate::js::stringify(data))
+    format!(
+        "{DATA_START} {} {DATA_END}",
+        crate::json_value::stringify(data)
+    )
 }
 
 #[must_use]
@@ -14,7 +17,7 @@ pub fn exists(text: Option<&str>) -> bool {
     text.is_some_and(|content| content.contains(DATA_START) && content.contains(DATA_END))
 }
 
-pub fn deserialize(text: &str) -> JsResult<Value> {
+pub fn deserialize(text: &str) -> Result<Value> {
     let begin = text
         .find(DATA_START)
         .map_or(DATA_START.len() - 1, |index| index + DATA_START.len());
@@ -25,7 +28,7 @@ pub fn deserialize(text: &str) -> JsResult<Value> {
         &text[end..begin]
     };
     serde_json::from_str(embedded.trim())
-        .map_err(|error| JsError::named("SyntaxError", error.to_string()))
+        .map_err(|error| Error::new(ErrorKind::InvalidSyntax, error.to_string()))
 }
 
 #[cfg(test)]

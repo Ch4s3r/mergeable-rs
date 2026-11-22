@@ -55,11 +55,6 @@ pub fn get_payload(context: &Context) -> Option<&Value> {
 }
 
 #[must_use]
-pub fn get_all_payload(context: &Context) -> &Value {
-    &context.payload
-}
-
-#[must_use]
 pub fn get_event_attributes(context: &Context) -> EventAttributes<'_> {
     if context.event_name == "schedule" {
         return EventAttributes::of_schedule();

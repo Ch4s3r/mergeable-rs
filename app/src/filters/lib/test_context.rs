@@ -1,6 +1,5 @@
 use crate::context::Context;
 use crate::github::client::{GithubApp, GithubAppSettings};
-use crate::github::throttle::RequestThrottle;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,7 +13,7 @@ pub fn context_for(event_name: &str, payload: Value) -> Context {
         app_id: "1".to_string(),
         private_key_pem: REPLAY_TEST_SIGNING_KEY.to_string(),
         retry_base_delay: Duration::from_millis(1),
-        throttle: RequestThrottle::like_probot(false),
+        throttle: None,
     };
     let app = Arc::new(
         GithubApp::new(settings, None).unwrap_or_else(|error| panic!("test app: {error}")),
@@ -92,7 +91,7 @@ mod filter_base_tests {
         )
         .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "filter/test: second is expected to be of type: number"
         );
         assert!(
@@ -115,7 +114,10 @@ mod filter_base_tests {
             &[],
         )
         .unwrap_err();
-        assert_eq!(error.message, "filter/test: second option is not supported");
+        assert_eq!(
+            error.message(),
+            "filter/test: second option is not supported"
+        );
     }
 
     #[test]
@@ -129,7 +131,7 @@ mod filter_base_tests {
         )
         .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "filter/test: second.test option is not supported"
         );
         assert!(

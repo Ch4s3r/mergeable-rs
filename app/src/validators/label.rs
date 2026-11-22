@@ -1,8 +1,8 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
@@ -25,8 +25,8 @@ impl Validator for Label {
         ]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "no_empty": {"enabled": "boolean", "message": "string"},
             "jira": {"regex": "string", "regex_flag": "string", "message": "string"},
             "must_include": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
@@ -35,7 +35,7 @@ impl Validator for Label {
             "ends_with": {"match": ["string", "array"], "message": "string"},
             "min": {"count": "number", "message": "string"},
             "max": {"count": "number", "message": "string"}
-        }))
+        })
     }
 
     async fn validate(
@@ -43,9 +43,9 @@ impl Validator for Label {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let issue_number =
-            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let labels = api::list_labels_on_issue(context, issue_number).await?;
         validators::process_options(settings, &Value::Array(labels), None).await
     }

@@ -1,24 +1,24 @@
 use crate::actions::Action;
 use crate::annotations;
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware::{self, EventAttributes};
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use async_trait::async_trait;
 use futures::future::join_all;
 use serde_json::Value;
 
 pub const SUPPORTED_EVENTS: [&str; 3] = ["pull_request.*", "issues.*", "issue_comment.*"];
 
-fn configured_assignees(settings: &Value) -> JsResult<&Vec<Value>> {
-    match js::read(Some(settings), "assignees")? {
+fn configured_assignees(settings: &Value) -> Result<&Vec<Value>> {
+    match json_value::read(Some(settings), "assignees")? {
         Some(Value::Array(assignees)) => Ok(assignees),
-        None => Err(JsError::reading_property_of_undefined("map")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("map")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'map')",
         )),
-        Some(_) => Err(JsError::type_error(
+        Some(_) => Err(Error::type_mismatch(
             "settings.assignees.map is not a function",
         )),
     }
@@ -28,17 +28,19 @@ fn replace_annotations(
     assignee: &Value,
     payload: Option<&Value>,
     event: &EventAttributes<'_>,
-) -> JsResult<String> {
+) -> Result<String> {
     match assignee {
         Value::String(text) => {
             annotations::search_and_replace_special_annotations(text, payload, event)
         }
-        Value::Null => Err(JsError::type_error(
+        Value::Null => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'replace')",
         )),
         _ => {
-            js::read(js::read(payload, "user")?, "login")?;
-            Err(JsError::type_error("newTemplate.replace is not a function"))
+            json_value::read(json_value::read(payload, "user")?, "login")?;
+            Err(Error::type_mismatch(
+                "newTemplate.replace is not a function",
+            ))
         }
     }
 }
@@ -47,7 +49,7 @@ pub fn resolve_assignees(
     settings: &Value,
     payload: Option<&Value>,
     event: &EventAttributes<'_>,
-) -> JsResult<Vec<String>> {
+) -> Result<Vec<String>> {
     configured_assignees(settings)?
         .iter()
         .map(|assignee| replace_annotations(assignee, payload, event))
@@ -67,31 +69,23 @@ impl Action for Assign {
         &SUPPORTED_EVENTS
     }
 
-    async fn before_validate(
-        &self,
-        _context: &Context,
-        _rule: &Value,
-        _rule_name: Option<&Value>,
-    ) -> JsResult<()> {
-        Ok(())
-    }
-
     async fn after_validate(
         &self,
         context: &Context,
         settings: &Value,
         _rule_name: Option<&Value>,
         _results: &Value,
-    ) -> JsResult<()> {
+    ) -> Result<()> {
         let event = event_aware::get_event_attributes(context);
         let payload = event_aware::get_payload(context);
-        let issue_number = js::read(payload, "number")?.unwrap_or(&Value::Null);
+        let issue_number = json_value::read(payload, "number")?.unwrap_or(&Value::Null);
         let assignees = resolve_assignees(settings, payload, &event)?;
         let mut checks = Vec::new();
         for assignee in assignees {
-            let author_login = js::read(js::read(payload, "user")?, "login")?;
+            let author_login = json_value::read(json_value::read(payload, "user")?, "login")?;
             let candidate = Value::String(assignee);
-            let is_author = author_login.is_some_and(|login| js::strict_equals(&candidate, login));
+            let is_author =
+                author_login.is_some_and(|login| json_value::strict_equals(&candidate, login));
             checks.push(async move {
                 if is_author {
                     Ok(Some(candidate))
@@ -172,7 +166,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_assignees_setting_fails_like_array_map_on_undefined() {
+    fn missing_assignees_setting_fails_with_a_missing_property_error() {
         let error = resolve_assignees(
             &json!({}),
             Some(&json!({"user": {"login": "creator"}})),

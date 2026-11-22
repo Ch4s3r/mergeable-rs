@@ -1,22 +1,22 @@
-use crate::error::{JsError, JsResult};
-use crate::js;
-use crate::validators::options::lib::{self, OptionResult};
+use crate::error::{Error, Result};
+use crate::json_value;
+use crate::validators::options::lib::{self, OptionResult, OptionStatus};
 use serde_json::Value;
 
 const ENABLED_NOT_FOUND_ERROR: &str = "Failed to run the test because 'enabled' is not provided for 'no_empty' option. Please check README for more information about configuration";
 const UNKNOWN_INPUT_TYPE_ERROR: &str = "Input type invalid, expected string or Array as input";
 
-pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResult<OptionResult> {
-    let filter = js::get(rule, "no_empty");
-    let enabled = js::read(filter, "enabled")?;
-    let message = js::read(filter, "message")?;
+pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result<OptionResult> {
+    let filter = json_value::get(rule, "no_empty");
+    let enabled = json_value::read(filter, "enabled")?;
+    let message = json_value::read(filter, "message")?;
     let explicitly_disabled = enabled == Some(&Value::Bool(false));
-    if !js::truthy(enabled) && !explicitly_disabled {
-        return Err(JsError::error(ENABLED_NOT_FOUND_ERROR));
+    if !json_value::truthy(enabled) && !explicitly_disabled {
+        return Err(Error::general(ENABLED_NOT_FOUND_ERROR));
     }
     if explicitly_disabled {
         return Ok(OptionResult {
-            status: "pass",
+            status: OptionStatus::Pass,
             description: Value::String(
                 "No_empty option is not enabled, as such this validator did not run".to_string(),
             ),
@@ -27,10 +27,10 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
     let failure_description =
         lib::message_or_default(message, format!("The {validator_name} can't be empty"));
     let is_mergeable = match input {
-        Value::String(text) => !lib::js_trim(text).is_empty(),
+        Value::String(text) => !lib::trim_whitespace(text).is_empty(),
         Value::Array(items) => !items.is_empty(),
         Value::Null => false,
-        _ => return Err(JsError::error(UNKNOWN_INPUT_TYPE_ERROR)),
+        _ => return Err(Error::general(UNKNOWN_INPUT_TYPE_ERROR)),
     };
     Ok(OptionResult::decided(
         is_mergeable,
@@ -44,7 +44,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn assert_status(enabled: bool, input: &Value, list_input: &Value, expected: &str) {
+    fn assert_status(enabled: bool, input: &Value, list_input: &Value, expected: OptionStatus) {
         let rule = json!({"no_empty": {"enabled": enabled}});
         assert_eq!(
             process(&json!({"name": "label"}), input, &rule)
@@ -62,16 +62,16 @@ mod tests {
 
     #[test]
     fn non_empty_input_passes_and_disabled_option_always_passes() {
-        assert_status(true, &json!("NOT EMPTY"), &json!([""]), "pass");
-        assert_status(false, &json!("NOT EMPTY"), &json!([""]), "pass");
-        assert_status(false, &json!(""), &json!([""]), "pass");
+        assert_status(true, &json!("NOT EMPTY"), &json!([""]), OptionStatus::Pass);
+        assert_status(false, &json!("NOT EMPTY"), &json!([""]), OptionStatus::Pass);
+        assert_status(false, &json!(""), &json!([""]), OptionStatus::Pass);
     }
 
     #[test]
     fn empty_or_missing_input_fails() {
-        assert_status(true, &json!(""), &json!([]), "fail");
-        assert_status(true, &Value::Null, &json!([]), "fail");
-        assert_status(true, &json!("  \n "), &json!([]), "fail");
+        assert_status(true, &json!(""), &json!([]), OptionStatus::Fail);
+        assert_status(true, &Value::Null, &json!([]), OptionStatus::Fail);
+        assert_status(true, &json!("  \n "), &json!([]), OptionStatus::Fail);
     }
 
     #[test]
@@ -82,7 +82,7 @@ mod tests {
             &json!({"no_empty": {"enabled": true}}),
         )
         .unwrap_err();
-        assert_eq!(error.message, UNKNOWN_INPUT_TYPE_ERROR);
+        assert_eq!(error.message(), UNKNOWN_INPUT_TYPE_ERROR);
     }
 
     #[test]
@@ -93,6 +93,6 @@ mod tests {
             &json!({"no_empty": {"regex": true}}),
         )
         .unwrap_err();
-        assert_eq!(error.message, ENABLED_NOT_FOUND_ERROR);
+        assert_eq!(error.message(), ENABLED_NOT_FOUND_ERROR);
     }
 }

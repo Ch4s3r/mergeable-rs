@@ -1,9 +1,10 @@
 use crate::cache::ConfigCache;
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::github::api;
-use crate::js;
-use crate::probot_config;
+use crate::json_value;
+use crate::repository_config;
+use crate::results::Status;
 use crate::yaml;
 use serde_json::{Map, Value, json};
 use std::sync::LazyLock;
@@ -12,35 +13,42 @@ mod v1_config;
 
 pub const FILE_NAME: &str = ".github/mergeable.yml";
 
-pub mod error_codes {
-    pub const BAD_YML: u16 = 10;
-    pub const MISSING_MERGEABLE_NODE: u16 = 20;
-    pub const UNKNOWN_VERSION: u16 = 30;
-    pub const GITHUB_API_ERROR: u16 = 50;
-    pub const NO_YML: u16 = 60;
-    pub const MISSING_RULE_SETS: u16 = 70;
-    pub const NON_ARRAY_MERGEABLE: u16 = 80;
-    pub const MISSING_WHEN_KEYWORD: u16 = 90;
-    pub const MISSING_VALIDATE_KEYWORD: u16 = 100;
-    pub const NON_ARRAY_VALIDATE: u16 = 110;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorCode {
+    BadYml,
+    MissingMergeableNode,
+    UnknownVersion,
+    GithubApiError,
+    NoYml,
+    MissingRuleSets,
+    NonArrayMergeable,
+    MissingWhenKeyword,
+    MissingValidateKeyword,
+    NonArrayValidate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigurationError {
+    pub code: ErrorCode,
+    pub message: String,
 }
 
 static CONFIG_CACHE: LazyLock<ConfigCache> = LazyLock::new(ConfigCache::from_env);
 
 #[derive(Debug, Clone, Default)]
 pub struct Configuration {
-    pub errors: Vec<(u16, String)>,
+    pub errors: Vec<ConfigurationError>,
     pub settings: Value,
 }
 
 enum FetchError {
     NotFound,
     Yaml(String),
-    Other(JsError),
+    Other(Error),
 }
 
-impl From<JsError> for FetchError {
-    fn from(error: JsError) -> Self {
+impl From<Error> for FetchError {
+    fn from(error: Error) -> Self {
         FetchError::Other(error)
     }
 }
@@ -52,22 +60,18 @@ impl Configuration {
     }
 
     #[must_use]
-    pub fn has_error(&self, code: u16) -> bool {
-        self.errors.iter().any(|(existing, _)| *existing == code)
+    pub fn has_error(&self, code: ErrorCode) -> bool {
+        self.errors.iter().any(|error| error.code == code)
     }
 
-    fn set_error(&mut self, code: u16, message: &str) {
-        match self
-            .errors
-            .iter_mut()
-            .find(|(existing, _)| *existing == code)
-        {
-            Some(entry) => entry.1 = message.to_string(),
-            None => self.errors.push((code, message.to_string())),
+    fn set_error(&mut self, code: ErrorCode, message: String) {
+        match self.errors.iter_mut().find(|error| error.code == code) {
+            Some(existing) => existing.message = message,
+            None => self.errors.push(ConfigurationError { code, message }),
         }
     }
 
-    pub fn from_settings(settings: Value) -> JsResult<Configuration> {
+    pub fn from_settings(settings: Value) -> Result<Configuration> {
         let mut configuration = Configuration {
             errors: Vec::new(),
             settings,
@@ -91,37 +95,38 @@ impl Configuration {
                     .map_or(Value::Null, Value::take);
                 Ok(configuration)
             }
-            other => Err(JsError::error(format!(
+            other => Err(Error::general(format!(
                 "Cannot find module './transformers/v{other}Config'"
             ))),
         }
     }
 
-    fn validate(&mut self) -> JsResult<()> {
+    fn validate(&mut self) -> Result<()> {
         for (code, message) in validation_errors(&self.settings)? {
-            self.set_error(code, message);
+            self.set_error(code, message.to_string());
         }
         Ok(())
     }
 }
 
-fn validation_errors(settings: &Value) -> JsResult<Vec<(u16, &'static str)>> {
+fn validation_errors(settings: &Value) -> Result<Vec<(ErrorCode, &'static str)>> {
     let mut errors = Vec::new();
-    if js::truthy(settings.get("version")) && !settings.get("version").is_some_and(Value::is_number)
+    if json_value::truthy(settings.get("version"))
+        && !settings.get("version").is_some_and(Value::is_number)
     {
-        errors.push((error_codes::UNKNOWN_VERSION, "Invalid `version` found."));
+        errors.push((ErrorCode::UnknownVersion, "Invalid `version` found."));
     }
     match settings.get("mergeable") {
         None => {
             errors.push((
-                error_codes::MISSING_MERGEABLE_NODE,
+                ErrorCode::MissingMergeableNode,
                 "The `mergeable` node is missing.",
             ));
             return Ok(errors);
         }
         Some(Value::Null) => {
             errors.push((
-                error_codes::MISSING_RULE_SETS,
+                ErrorCode::MissingRuleSets,
                 "`mergeable` node does not contain any rule sets",
             ));
             return Ok(errors);
@@ -131,29 +136,29 @@ fn validation_errors(settings: &Value) -> JsResult<Vec<(u16, &'static str)>> {
     if config_version(settings) == "2" {
         let Some(Value::Array(rule_sets)) = settings.get("mergeable") else {
             errors.push((
-                error_codes::NON_ARRAY_MERGEABLE,
+                ErrorCode::NonArrayMergeable,
                 "`mergeable` must be an array for version 2 config",
             ));
             return Ok(errors);
         };
         for rule_set in rule_sets {
-            if js::read(Some(rule_set), "when")?.is_none() {
+            if json_value::read(Some(rule_set), "when")?.is_none() {
                 errors.push((
-                    error_codes::MISSING_WHEN_KEYWORD,
+                    ErrorCode::MissingWhenKeyword,
                     "One or more rule set is missing `when` keyword",
                 ));
             }
-            match js::read(Some(rule_set), "validate")? {
+            match json_value::read(Some(rule_set), "validate")? {
                 None => {
                     errors.push((
-                        error_codes::MISSING_VALIDATE_KEYWORD,
+                        ErrorCode::MissingValidateKeyword,
                         "One or more rule set is missing `validate` keyword",
                     ));
                 }
                 Some(Value::Array(_)) => {}
                 Some(_) => {
                     errors.push((
-                        error_codes::NON_ARRAY_VALIDATE,
+                        ErrorCode::NonArrayValidate,
                         "`validate` must be an array of rules",
                     ));
                 }
@@ -165,29 +170,31 @@ fn validation_errors(settings: &Value) -> JsResult<Vec<(u16, &'static str)>> {
 
 fn config_version(settings: &Value) -> String {
     match settings.get("version") {
-        Some(version) if js::is_truthy(version) => js::to_js_string(Some(version)),
+        Some(version) if json_value::is_truthy(version) => {
+            json_value::to_display_string(Some(version))
+        }
         _ => "1".to_string(),
     }
 }
 
 static DEFAULT_PASS_ACTIONS: LazyLock<Value> =
-    LazyLock::new(|| default_pull_request_actions("pass"));
+    LazyLock::new(|| default_pull_request_actions(Status::Pass));
 static DEFAULT_FAIL_ACTIONS: LazyLock<Value> =
-    LazyLock::new(|| default_pull_request_actions("fail"));
+    LazyLock::new(|| default_pull_request_actions(Status::Fail));
 static DEFAULT_ERROR_ACTIONS: LazyLock<Value> =
-    LazyLock::new(|| default_pull_request_actions("error"));
+    LazyLock::new(|| default_pull_request_actions(Status::Error));
 
-fn default_actions_for(outcome: &str) -> &'static Value {
+fn default_actions_for(outcome: Status) -> &'static Value {
     match outcome {
-        "pass" => &DEFAULT_PASS_ACTIONS,
-        "fail" => &DEFAULT_FAIL_ACTIONS,
-        _ => &DEFAULT_ERROR_ACTIONS,
+        Status::Pass => &DEFAULT_PASS_ACTIONS,
+        Status::Fail => &DEFAULT_FAIL_ACTIONS,
+        Status::Error => &DEFAULT_ERROR_ACTIONS,
     }
 }
 
-fn default_pull_request_actions(outcome: &str) -> Value {
+fn default_pull_request_actions(outcome: Status) -> Value {
     match outcome {
-        "pass" => json!([{
+        Status::Pass => json!([{
             "do": "checks",
             "state": "completed",
             "status": "success",
@@ -196,7 +203,7 @@ fn default_pull_request_actions(outcome: &str) -> Value {
                 "summary": "All the validators have returned 'pass'! \n Here are some stats of the run: \n {{validationCount}} validations were run"
             }
         }]),
-        "fail" => json!([{
+        Status::Fail => json!([{
             "do": "checks",
             "state": "completed",
             "status": "failure",
@@ -206,7 +213,7 @@ fn default_pull_request_actions(outcome: &str) -> Value {
                 "text": "{{#each validationSuites}}\n#### {{{statusIcon status}}} Validator: {{toUpperCase name}}\n{{#each validations }} * {{{statusIcon status}}} ***{{{ description }}}***\n       Input : {{{details.input}}}\n       Settings : {{{displaySettings details.settings}}}\n       {{/each}}\n{{/each}}"
             }
         }]),
-        _ => json!([{
+        Status::Error => json!([{
             "do": "checks",
             "state": "completed",
             "status": "action_required",
@@ -219,19 +226,16 @@ fn default_pull_request_actions(outcome: &str) -> Value {
     }
 }
 
-fn check_and_set_default(
-    outcome_actions: Option<Value>,
-    default_actions: &Value,
-) -> JsResult<Value> {
+fn with_default_checks(outcome_actions: Option<Value>, default_actions: &Value) -> Result<Value> {
     let Some(actions) = outcome_actions else {
         return Ok(default_actions.clone());
     };
     let Value::Array(mut items) = actions else {
-        return Err(JsError::type_error("ruleSet.map is not a function"));
+        return Err(Error::type_mismatch("ruleSet.map is not a function"));
     };
     let default_rule = &default_actions[0];
     for rule in &mut items {
-        if js::get(rule, "do").and_then(Value::as_str) != Some("checks") {
+        if json_value::get(rule, "do").and_then(Value::as_str) != Some("checks") {
             continue;
         }
         let Value::Object(fields) = rule else {
@@ -261,16 +265,16 @@ fn has_checks_action(outcome: Option<&Value>) -> bool {
     match outcome {
         Some(Value::Array(items)) => items
             .iter()
-            .any(|item| js::get(item, "do").and_then(Value::as_str) == Some("checks")),
+            .any(|item| json_value::get(item, "do").and_then(Value::as_str) == Some("checks")),
         _ => false,
     }
 }
 
-fn when_includes(when: Option<&Value>, needle: &str) -> JsResult<bool> {
-    js::includes(when, &Value::String(needle.to_string()))
+fn when_includes(when: Option<&Value>, needle: &str) -> Result<bool> {
+    json_value::includes(when, &Value::String(needle.to_string()))
 }
 
-fn set_pull_request_defaults(config: &mut Value) -> JsResult<()> {
+fn set_pull_request_defaults(config: &mut Value) -> Result<()> {
     let Some(Value::Array(recipes)) = config.get_mut("mergeable") else {
         return Ok(());
     };
@@ -282,51 +286,53 @@ fn set_pull_request_defaults(config: &mut Value) -> JsResult<()> {
         let targets_pull_requests = when_includes(when, "pull_request")?
             || when_includes(when, "pull_request_review")?
             || when_includes(when, "issue_comment")?;
+        let has_no_outcomes = Status::ALL
+            .iter()
+            .all(|outcome| !fields.contains_key(outcome.as_str()));
         let should_apply_defaults = targets_pull_requests
-            && ((!fields.contains_key("pass")
-                && !fields.contains_key("fail")
-                && !fields.contains_key("error"))
-                || has_checks_action(fields.get("pass"))
-                || has_checks_action(fields.get("fail"))
-                || has_checks_action(fields.get("error")));
-        for outcome in ["pass", "fail", "error"] {
+            && (has_no_outcomes
+                || Status::ALL
+                    .iter()
+                    .any(|outcome| has_checks_action(fields.get(outcome.as_str()))));
+        for outcome in Status::ALL {
+            let key = outcome.as_str();
             if should_apply_defaults {
-                let defaulted = check_and_set_default(
-                    fields.get_mut(outcome).map(Value::take),
+                let defaulted = with_default_checks(
+                    fields.get_mut(key).map(Value::take),
                     default_actions_for(outcome),
                 )?;
-                fields.insert(outcome.to_string(), defaulted);
-            } else if !fields.contains_key(outcome) {
-                fields.insert(outcome.to_string(), Value::Array(Vec::new()));
+                fields.insert(key.to_string(), defaulted);
+            } else if !fields.contains_key(key) {
+                fields.insert(key.to_string(), Value::Array(Vec::new()));
             }
         }
     }
     Ok(())
 }
 
-fn config_path(context: &Context) -> JsResult<String> {
+fn config_path(context: &Context) -> Result<String> {
     let configured = context.global_setting("config_path")?;
-    Ok(if js::truthy(configured) {
-        js::to_js_string(configured)
+    Ok(if json_value::truthy(configured) {
+        json_value::to_display_string(configured)
     } else {
         "mergeable.yml".to_string()
     })
 }
 
-pub async fn reset_cache(context: &Context) -> JsResult<()> {
+pub async fn reset_cache(context: &Context) -> Result<()> {
     if context.event_name != "push" {
         return Ok(());
     }
     let Some(head_commit) = context
         .payload
         .get("head_commit")
-        .filter(|commit| js::is_truthy(commit))
+        .filter(|commit| json_value::is_truthy(commit))
     else {
         return Ok(());
     };
     let config_file = Value::String(format!(".github/{}", config_path(context)?));
-    let added = js::includes(head_commit.get("added"), &config_file)?;
-    if !added && !js::includes(head_commit.get("modified"), &config_file)? {
+    let added = json_value::includes(head_commit.get("added"), &config_file)?;
+    if !added && !json_value::includes(head_commit.get("modified"), &config_file)? {
         return Ok(());
     }
     let (owner, repo) = context.repo()?;
@@ -355,16 +361,16 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     if use_pull_request_config
         && ["pull_request", "pull_request_review"].contains(&context.event_name.as_str())
     {
-        let head_repository = js::to_js_string(js::read_path(
+        let head_repository = json_value::to_display_string(json_value::read_path(
             &context.payload,
             &["pull_request", "head", "repo", "full_name"],
         )?);
-        let base_repository = js::to_js_string(js::read_path(
+        let base_repository = json_value::to_display_string(json_value::read_path(
             &context.payload,
             &["pull_request", "base", "repo", "full_name"],
         )?);
         if head_repository == base_repository {
-            let pull_number = js::read_path(&context.payload, &["pull_request", "number"])?
+            let pull_number = json_value::read_path(&context.payload, &["pull_request", "number"])?
                 .cloned()
                 .unwrap_or(Value::Null);
             let files = api::list_files(
@@ -374,17 +380,19 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
             .await?;
             let mut config_file_changed = false;
             for changed_file in &files {
-                let status = js::to_js_string(js::read(Some(changed_file), "status")?);
+                let status =
+                    json_value::to_display_string(json_value::read(Some(changed_file), "status")?);
                 if (status == "modified" || status == "added")
-                    && js::to_js_string(changed_file.get("filename")) == FILE_NAME
+                    && json_value::to_display_string(changed_file.get("filename")) == FILE_NAME
                 {
                     config_file_changed = true;
                 }
             }
             if config_file_changed {
-                let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
-                    .cloned()
-                    .unwrap_or(Value::Null);
+                let head_sha =
+                    json_value::read_path(&context.payload, &["pull_request", "head", "sha"])?
+                        .cloned()
+                        .unwrap_or(Value::Null);
                 let changed_config_content = api::get_content(
                     context,
                     json!({"owner": owner, "repo": repo, "path": FILE_NAME, "ref": head_sha}),
@@ -400,10 +408,12 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     if use_cache {
         let reset_context = context.clone();
         tokio::spawn(async move {
-            let _ignored = reset_cache(&reset_context).await;
+            if let Err(error) = reset_cache(&reset_context).await {
+                tracing::warn!(event_id = %reset_context.event_id, %error, "configuration.cache_reset.failed");
+            }
         });
         if let Some(cached) = CONFIG_CACHE.get(&cache_key).await
-            && js::is_truthy(&cached)
+            && json_value::is_truthy(&cached)
         {
             return Ok(cached);
         }
@@ -417,7 +427,7 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
         .await?;
         org_config = parse_yaml(org_config_content.as_deref())?;
     }
-    let config = probot_config::load(context, &config_path, org_config).await?;
+    let config = repository_config::load(context, &config_path, org_config).await?;
     let config = match config {
         Some(found) if !found.is_null() => found,
         _ => return Err(FetchError::NotFound),
@@ -428,7 +438,7 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     Ok(config)
 }
 
-pub async fn instance_with_context(context: &Context) -> Configuration {
+pub async fn load(context: &Context) -> Configuration {
     let failure = match fetch_config_file(context).await {
         Ok(config) => match Configuration::from_settings(config) {
             Ok(configuration) => return configuration,
@@ -441,11 +451,11 @@ pub async fn instance_with_context(context: &Context) -> Configuration {
         settings: Value::Object(Map::new()),
     };
     match failure {
-        FetchError::NotFound => configuration.set_error(error_codes::NO_YML, "No Config File found"),
-        FetchError::Yaml(message) => configuration.set_error(error_codes::BAD_YML, &format!("Invalid YML format > {message}")),
+        FetchError::NotFound => configuration.set_error(ErrorCode::NoYml, "No Config File found".to_string()),
+        FetchError::Yaml(message) => configuration.set_error(ErrorCode::BadYml, format!("Invalid YML format > {message}")),
         FetchError::Other(error) => configuration.set_error(
-            error_codes::GITHUB_API_ERROR,
-            &format!("Github API Error occurred while fetching the config file at {FILE_NAME} \n Error from api: {error}"),
+            ErrorCode::GithubApiError,
+            format!("Github API Error occurred while fetching the config file at {FILE_NAME} \n Error from api: {error}"),
         ),
     }
     configuration
@@ -530,12 +540,16 @@ mod tests {
     fn missing_when_and_validate_are_both_reported() {
         let configuration =
             Configuration::from_settings(json!({"version": 2, "mergeable": [{}]})).unwrap();
-        let codes: Vec<u16> = configuration.errors.iter().map(|(code, _)| *code).collect();
+        let codes: Vec<ErrorCode> = configuration
+            .errors
+            .iter()
+            .map(|error| error.code)
+            .collect();
         assert_eq!(
             codes,
             vec![
-                error_codes::MISSING_WHEN_KEYWORD,
-                error_codes::MISSING_VALIDATE_KEYWORD
+                ErrorCode::MissingWhenKeyword,
+                ErrorCode::MissingValidateKeyword
             ]
         );
     }

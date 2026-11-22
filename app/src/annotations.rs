@@ -1,9 +1,53 @@
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware::EventAttributes;
-use crate::js;
+use crate::json_value;
 use serde_json::Value;
 
-const ANNOTATIONS: [&str; 5] = ["@author", "@action", "@bot", "@repository", "@sender"];
+#[derive(Debug, Clone, Copy)]
+enum Annotation {
+    Author,
+    Action,
+    Bot,
+    Repository,
+    Sender,
+}
+
+impl Annotation {
+    const ALL: [Annotation; 5] = [
+        Annotation::Author,
+        Annotation::Action,
+        Annotation::Bot,
+        Annotation::Repository,
+        Annotation::Sender,
+    ];
+
+    fn token(self) -> &'static str {
+        match self {
+            Annotation::Author => "@author",
+            Annotation::Action => "@action",
+            Annotation::Bot => "@bot",
+            Annotation::Repository => "@repository",
+            Annotation::Sender => "@sender",
+        }
+    }
+
+    fn value(self, payload: Option<&Value>, event: &EventAttributes<'_>) -> Result<String> {
+        Ok(match self {
+            Annotation::Author => json_value::to_display_string(json_value::read(
+                json_value::read(payload, "user")?,
+                "login",
+            )?),
+            Annotation::Action => json_value::to_display_string(event.action),
+            Annotation::Bot => bot_name(),
+            Annotation::Repository => display_or_empty(
+                event
+                    .repository
+                    .and_then(|repository| json_value::get(repository, "full_name")),
+            ),
+            Annotation::Sender => display_or_empty(json_value::read(event.sender, "login")?),
+        })
+    }
+}
 
 #[must_use]
 pub fn bot_name() -> String {
@@ -13,27 +57,11 @@ pub fn bot_name() -> String {
     }
 }
 
-fn annotation_value(
-    annotation: &str,
-    payload: Option<&Value>,
-    event: &EventAttributes<'_>,
-) -> JsResult<String> {
-    Ok(match annotation {
-        "@author" => js::to_js_string(js::read(js::read(payload, "user")?, "login")?),
-        "@action" => js::to_js_string(event.action),
-        "@bot" => bot_name(),
-        "@repository" => match event
-            .repository
-            .and_then(|repository| js::get(repository, "full_name"))
-        {
-            None | Some(Value::Null) => String::new(),
-            Some(full_name) => js::to_js_string(Some(full_name)),
-        },
-        _ => match js::read(event.sender, "login")? {
-            None | Some(Value::Null) => String::new(),
-            Some(login) => js::to_js_string(Some(login)),
-        },
-    })
+fn display_or_empty(value: Option<&Value>) -> String {
+    match value {
+        None | Some(Value::Null) => String::new(),
+        present => json_value::to_display_string(present),
+    }
 }
 
 fn replace_first_unescaped(text: &mut String, annotation: &str, replacement: &str) {
@@ -52,10 +80,11 @@ pub fn search_and_replace_special_annotations(
     template: &str,
     payload: Option<&Value>,
     event: &EventAttributes<'_>,
-) -> JsResult<String> {
+) -> Result<String> {
     let mut result = template.to_string();
-    for annotation in ANNOTATIONS {
-        let replacement = annotation_value(annotation, payload, event)?;
+    for annotation in Annotation::ALL {
+        let replacement = annotation.value(payload, event)?;
+        let annotation = annotation.token();
         replace_first_unescaped(&mut result, annotation, &replacement);
         if let Some(backslash_position) = result.find(&format!("\\{annotation}")) {
             result.remove(backslash_position);

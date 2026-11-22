@@ -1,5 +1,5 @@
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use crate::validators::options::lib::{self, OptionResult};
 use serde_json::Value;
 
@@ -7,44 +7,46 @@ const UNKNOWN_INPUT_TYPE_ERROR: &str = "Input type invalid, expected array of st
 
 static EMPTY_LIST: Value = Value::Array(Vec::new());
 
-fn list_or_empty<'filter>(filter: Option<&'filter Value>, key: &str) -> JsResult<&'filter Value> {
-    let listed = js::read(filter, key)?;
+fn list_or_empty<'filter>(filter: Option<&'filter Value>, key: &str) -> Result<&'filter Value> {
+    let listed = json_value::read(filter, key)?;
     Ok(match listed {
-        Some(present) if js::is_truthy(present) => present,
+        Some(present) if json_value::is_truthy(present) => present,
         _ => &EMPTY_LIST,
     })
 }
 
-fn lowercase(user: &Value) -> JsResult<String> {
+fn lowercase(user: &Value) -> Result<String> {
     match user {
         Value::String(text) => Ok(text.to_lowercase()),
-        _ => Err(JsError::type_error("user.toLowerCase is not a function")),
+        _ => Err(Error::type_mismatch("user.toLowerCase is not a function")),
     }
 }
 
-fn list_includes(list: &Value, list_name: &str, user: &Value) -> JsResult<bool> {
+fn list_includes(list: &Value, list_name: &str, user: &Value) -> Result<bool> {
     match list {
-        Value::Array(items) => Ok(items.iter().any(|item| js::strict_equals(item, user))),
-        Value::String(text) => Ok(text.contains(&js::to_js_string(Some(user)))),
-        _ => Err(JsError::type_error(format!(
+        Value::Array(items) => Ok(items
+            .iter()
+            .any(|item| json_value::strict_equals(item, user))),
+        Value::String(text) => Ok(text.contains(&json_value::to_display_string(Some(user)))),
+        _ => Err(Error::type_mismatch(format!(
             "{list_name}.includes is not a function"
         ))),
     }
 }
 
-pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResult<OptionResult> {
-    let filter = js::get(rule, "required");
+pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result<OptionResult> {
+    let filter = json_value::get(rule, "required");
     let reviewers = list_or_empty(filter, "reviewers")?;
     let owners = list_or_empty(filter, "owners")?;
     let assignees = list_or_empty(filter, "assignees")?;
     let requested_reviewers = list_or_empty(filter, "requested_reviewers")?;
-    let message = js::read(filter, "message")?;
+    let message = json_value::read(filter, "message")?;
 
     let Value::Array(approvers) = input else {
-        return Err(JsError::error(UNKNOWN_INPUT_TYPE_ERROR));
+        return Err(Error::general(UNKNOWN_INPUT_TYPE_ERROR));
     };
     let Value::Array(reviewer_list) = reviewers else {
-        return Err(JsError::type_error("reviewers.map is not a function"));
+        return Err(Error::type_mismatch("reviewers.map is not a function"));
     };
     let mut remaining_required: Vec<(String, &Value)> = Vec::new();
     for reviewer in reviewer_list {
@@ -65,7 +67,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
 
     let mut required_descriptions = Vec::new();
     for &(_, user) in &remaining_required {
-        let user_text = js::to_js_string(Some(user));
+        let user_text = json_value::to_display_string(Some(user));
         let described = if list_includes(owners, "owners", user)? {
             format!("{user_text}(Code Owner) ")
         } else if list_includes(assignees, "assignees", user)? {
@@ -97,6 +99,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validators::options::lib::OptionStatus;
     use serde_json::json;
 
     fn run(rule: &Value, input: &Value) -> OptionResult {
@@ -116,7 +119,7 @@ mod tests {
                 &json!(["shine2lay", "jusx"])
             )
             .status,
-            "pass"
+            OptionStatus::Pass
         );
     }
 
@@ -128,7 +131,7 @@ mod tests {
                 &json!(["jusx"])
             )
             .status,
-            "fail"
+            OptionStatus::Fail
         );
     }
 
@@ -136,7 +139,7 @@ mod tests {
     fn passes_when_no_reviewers_are_required() {
         assert_eq!(
             run(&json!({"owners": true}), &json!(["jusx"])).status,
-            "pass"
+            OptionStatus::Pass
         );
     }
 
@@ -148,7 +151,7 @@ mod tests {
                 &json!(["jusxTest"])
             )
             .status,
-            "fail"
+            OptionStatus::Fail
         );
         let result = run(
             &json!({"reviewers": ["camelCaseUser", "jusxtest"]}),

@@ -1,13 +1,14 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
-use crate::lodash;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use crate::validators::Validator;
+use crate::validators::options::lib::OptionStatus;
 use crate::validators::options::must_include;
+use crate::value_lists;
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 
@@ -27,6 +28,39 @@ pub struct CommitSelection {
     pub fail_message: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CheckedCommitField {
+    Message,
+    AuthorEmail,
+    CommitterEmail,
+}
+
+impl CheckedCommitField {
+    fn from_message_type(message_type: Option<&str>) -> Self {
+        match message_type {
+            Some("author_email") => CheckedCommitField::AuthorEmail,
+            Some("committer_email") => CheckedCommitField::CommitterEmail,
+            _ => CheckedCommitField::Message,
+        }
+    }
+
+    fn path(self) -> &'static [&'static str] {
+        match self {
+            CheckedCommitField::Message => &["message"],
+            CheckedCommitField::AuthorEmail => &["author", "email"],
+            CheckedCommitField::CommitterEmail => &["committer", "email"],
+        }
+    }
+
+    fn fail_message(self) -> &'static str {
+        match self {
+            CheckedCommitField::Message => DEFAULT_FAIL_MESSAGE,
+            CheckedCommitField::AuthorEmail => DEFAULT_FAIL_AUTHOR_EMAIL_MESSAGE,
+            CheckedCommitField::CommitterEmail => DEFAULT_FAIL_COMMITTER_EMAIL_MESSAGE,
+        }
+    }
+}
+
 pub enum CommitPlan {
     SkippedForMultipleCommits(Vec<Value>),
     Check(CommitSelection),
@@ -37,63 +71,68 @@ fn validator_context() -> Value {
 }
 
 fn is_option_enabled(settings: &Value, key: &str, default: bool) -> bool {
-    settings.get(key).map_or(default, js::is_truthy)
+    settings.get(key).map_or(default, json_value::is_truthy)
 }
 
-fn includes_merge_branch(message: Option<&Value>) -> JsResult<bool> {
+fn includes_merge_branch(message: Option<&Value>) -> Result<bool> {
     match message {
         Some(Value::String(text)) => Ok(text.contains("Merge branch")),
         Some(Value::Array(items)) => Ok(items
             .iter()
             .any(|item| item.as_str() == Some("Merge branch"))),
-        None => Err(JsError::reading_property_of_undefined("includes")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("includes")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'includes')",
         )),
-        Some(_) => Err(JsError::type_error(
+        Some(_) => Err(Error::type_mismatch(
             "commit.message.includes is not a function",
         )),
     }
 }
 
-fn take_each(commits: &mut [Option<Value>], path: &[&str]) -> JsResult<Vec<Value>> {
+fn take_each(commits: &mut [Option<Value>], path: &[&str]) -> Result<Vec<Value>> {
     commits
         .iter_mut()
         .map(|commit| {
             let mut current = commit.as_ref();
             for key in path {
-                current = js::read(current, key)?;
+                current = json_value::read(current, key)?;
             }
             let mut target = commit.as_mut();
             for key in path {
-                target = target.and_then(|present| js::get_mut(present, key));
+                target = target.and_then(|present| json_value::get_mut(present, key));
             }
             Ok(target.map_or(Value::Null, Value::take))
         })
         .collect()
 }
 
-pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult<CommitPlan> {
+pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> Result<CommitPlan> {
     let oldest_only = is_option_enabled(message_settings, "oldest_only", false);
     let newest_only = is_option_enabled(message_settings, "newest_only", false);
     let skip_merge = is_option_enabled(message_settings, "skip_merge", true);
     let single_commit_only = is_option_enabled(message_settings, "single_commit_only", false);
-    let message_type = js::as_str(message_settings.get("message_type"));
+    let checked_field = CheckedCommitField::from_message_type(json_value::as_str(
+        message_settings.get("message_type"),
+    ));
 
-    let mut ordered = lodash::order_by_path(commits, &["date"], false);
+    let mut ordered =
+        value_lists::order_by_path(commits, &["date"], value_lists::SortOrder::Ascending);
 
     if single_commit_only && ordered.len() != 1 {
         let messages = ordered
             .into_iter()
-            .map(|mut commit| Ok(js::take(Some(&mut commit), "message")?.unwrap_or(Value::Null)))
-            .collect::<JsResult<Vec<Value>>>()?;
+            .map(|mut commit| {
+                Ok(json_value::take(Some(&mut commit), "message")?.unwrap_or(Value::Null))
+            })
+            .collect::<Result<Vec<Value>>>()?;
         return Ok(CommitPlan::SkippedForMultipleCommits(messages));
     }
 
     if skip_merge {
         let mut kept = Vec::new();
         for commit in ordered {
-            if !includes_merge_branch(js::read(Some(&commit), "message")?)? {
+            if !includes_merge_branch(json_value::read(Some(&commit), "message")?)? {
                 kept.push(commit);
             }
         }
@@ -108,18 +147,14 @@ pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult
         selected = vec![selected.into_iter().next_back().flatten()];
     }
 
-    let mut inputs = take_each(&mut selected, &["message"])?;
-    let mut fail_message = DEFAULT_FAIL_MESSAGE;
-    if message_type == Some("author_email") {
-        inputs = take_each(&mut selected, &["author", "email"])?;
-        fail_message = DEFAULT_FAIL_AUTHOR_EMAIL_MESSAGE;
-    } else if message_type == Some("committer_email") {
-        inputs = take_each(&mut selected, &["committer", "email"])?;
-        fail_message = DEFAULT_FAIL_COMMITTER_EMAIL_MESSAGE;
-    }
+    let messages = take_each(&mut selected, CheckedCommitField::Message.path())?;
+    let inputs = match checked_field {
+        CheckedCommitField::Message => messages,
+        email_field => take_each(&mut selected, email_field.path())?,
+    };
     Ok(CommitPlan::Check(CommitSelection {
         inputs,
-        fail_message,
+        fail_message: checked_field.fail_message(),
     }))
 }
 
@@ -135,7 +170,7 @@ pub fn must_include_rule(message_settings: &Value, fail_message: &str) -> Value 
     }
     let message = match message_settings
         .get("message")
-        .filter(|message| js::is_truthy(message))
+        .filter(|message| json_value::is_truthy(message))
     {
         Some(custom) => custom.clone(),
         None => Value::String(fail_message.to_string()),
@@ -156,12 +191,12 @@ fn output(input: Value, settings: &Value, status: Value, description: Value) -> 
     results::consolidate_result(vec![Value::Object(result)], &validator_context())
 }
 
-pub fn check_settings(settings: &Value) -> JsResult<&Value> {
+pub fn check_settings(settings: &Value) -> Result<&Value> {
     let message_settings = settings
         .get("message")
-        .ok_or_else(|| JsError::error(MESSAGE_NOT_FOUND_ERROR))?;
-    if js::read(Some(message_settings), "regex")?.is_none() {
-        return Err(JsError::error(REGEX_NOT_FOUND_ERROR));
+        .ok_or_else(|| Error::general(MESSAGE_NOT_FOUND_ERROR))?;
+    if json_value::read(Some(message_settings), "regex")?.is_none() {
+        return Err(Error::general(REGEX_NOT_FOUND_ERROR));
     }
     Ok(message_settings)
 }
@@ -176,8 +211,8 @@ impl Validator for Commit {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "jira": {"regex": "string", "regex_flag": "string", "message": "string"},
             "message": {
                 "regex": "string",
@@ -189,7 +224,7 @@ impl Validator for Commit {
                 "newest_only": "boolean",
                 "single_commit_only": "boolean",
             },
-        }))
+        })
     }
 
     async fn validate(
@@ -197,20 +232,16 @@ impl Validator for Commit {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let message_settings = check_settings(settings)?;
         let pull_number =
-            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let commits = api::list_commits(context, pull_number).await?;
         evaluate(commits, settings, message_settings)
     }
 }
 
-pub fn evaluate(
-    commits: Vec<Value>,
-    settings: &Value,
-    message_settings: &Value,
-) -> JsResult<Value> {
+pub fn evaluate(commits: Vec<Value>, settings: &Value, message_settings: &Value) -> Result<Value> {
     let selection = match select_commits(commits, message_settings)? {
         CommitPlan::SkippedForMultipleCommits(messages) => {
             return Ok(output(
@@ -227,7 +258,7 @@ pub fn evaluate(
     let rule = must_include_rule(message_settings, selection.fail_message);
     let inputs = Value::Array(selection.inputs);
     let result = must_include::process(&validator_context(), &inputs, &rule)?;
-    let description = if result.status == "pass" {
+    let description = if result.status == OptionStatus::Pass {
         Value::String(DEFAULT_SUCCESS_MESSAGE.to_string())
     } else {
         result.description
@@ -235,7 +266,7 @@ pub fn evaluate(
     Ok(output(
         inputs,
         settings,
-        Value::String(result.status.to_string()),
+        Value::String(result.status.as_str().to_string()),
         description,
     ))
 }
@@ -363,7 +394,7 @@ mod tests {
     }
 
     #[test]
-    fn oldest_only_on_an_empty_list_throws_like_node() {
+    fn oldest_only_on_an_empty_list_fails_with_a_missing_property_error() {
         let error = select_commits(Vec::new(), &json!({"regex": "x", "oldest_only": true}))
             .err()
             .unwrap();
@@ -378,11 +409,13 @@ mod tests {
         assert_eq!(
             check_settings(&json!({"do": "commit"}))
                 .unwrap_err()
-                .message,
+                .message(),
             MESSAGE_NOT_FOUND_ERROR
         );
         assert_eq!(
-            check_settings(&json!({"message": {}})).unwrap_err().message,
+            check_settings(&json!({"message": {}}))
+                .unwrap_err()
+                .message(),
             REGEX_NOT_FOUND_ERROR
         );
     }
@@ -408,7 +441,7 @@ mod tests {
             commit("2024-01-01T00:00:00Z", "fix: this", "a@x", "c@x"),
             commit("2024-01-02T00:00:00Z", "feat: that", "a@x", "c@x"),
         ];
-        assert_eq!(run(mixed, &settings.clone())["status"], "fail");
+        assert_eq!(run(mixed, &settings)["status"], "fail");
         let all_features = vec![
             commit("2024-01-01T00:00:00Z", "feat: this", "a@x", "c@x"),
             commit("2024-01-02T00:00:00Z", "feat: that", "a@x", "c@x"),
@@ -429,7 +462,7 @@ mod tests {
             commit("2024-01-01T00:00:00Z", "fix: this", "a@x", "c@x"),
             commit("2024-01-02T00:00:00Z", "test", "a@x", "c@x"),
         ];
-        let skipped = run(two, &settings.clone());
+        let skipped = run(two, &settings);
         assert_eq!(
             skipped["validations"][0]["description"],
             "Since there are more than one commits, Skipping validation"
@@ -451,7 +484,7 @@ mod tests {
             "support@github.com",
             "valdis@github1.com",
         )];
-        assert_eq!(run(matching, &settings.clone())["status"], "pass");
+        assert_eq!(run(matching, &settings)["status"], "pass");
         let other_domain = vec![commit(
             "2024-01-01T00:00:00Z",
             "fix",

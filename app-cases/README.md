@@ -1,8 +1,16 @@
 # App cases
 
-Each file `rust/app-cases/cases/<name>.json` is one webhook scenario. The `replay` crate (rust/replay) runs it
-against an app (the Node original or the Rust binary) behind a mock GitHub API and compares the GitHub API
-calls the app makes (ADR-005).
+Black-box contract tests. Each file `rust/app-cases/cases/<name>.json` is one recorded webhook scenario. The
+`replay` crate (rust/replay) starts an app process behind a mock GitHub API, sends the signed webhook and compares
+the GitHub API calls the app makes and its HTTP response with the recorded expectation (ADR-005).
+
+- `replay check --bin <mergeable binary>` runs the cases against a build and fails on any difference.
+- `replay record --reference-command <command…>` records `expected` from any reference implementation that
+  speaks the same HTTP and environment interface. Each case is run twice; if the two runs disagree only on call
+  order, the case is marked `unordered`.
+- `replay bench` fires many webhooks drawn from the cases for throughput and latency (BENCHMARK.md).
+
+Commands run from the repository root; `--case <name>` selects cases, `--jobs` sets parallelism.
 
 ## Format
 
@@ -21,12 +29,13 @@ calls the app makes (ADR-005).
     { "method": "GET", "path": "/repos/acme/app/pulls/1/files", "query": {"page": "2"},   // query optional: subset match
       "status": 200, "headers": {"link": "..."}, "body": [ ... ] }
   ],
-  "expected": {                                // written by `replay record` from the Node original, never by hand
+  "expected": {                                // written by `replay record`, never by hand
     "status": 200,                             // webhook HTTP response status
     "calls": [ { "method": "POST", "path": "/repos/acme/app/check-runs", "query": {}, "body": { ... } } ]
   },
-  "unordered": false,                          // set by record when two runs of the original disagree on order
-  "known_diff": null                           // or a reason (approved) why Rust differs; see DECISIONS.md
+  "unordered": false,                          // set by record when two recording runs disagree on order
+  "quiet_ms": 12000,                           // optional: longer quiet window for cases that wait for retries
+  "known_diff": null                           // or the reason for an approved divergence from the recording
 }
 ```
 
@@ -36,7 +45,11 @@ calls the app makes (ADR-005).
   prefix, percent-decoded (`%2F` -> `/`), query as an object with sorted keys.
 - `POST /app/installations/{id}/access_tokens` and `GET /app/installations/...` are answered by the mock (token
   `ghs_test`) and are not recorded.
+- Every response carries `x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset` headers.
 - Anything unmatched answers `404 {"message":"Not Found","documentation_url":"https://docs.github.com/rest"}`.
 - Recorded bodies: JSON parsed; ISO-8601 timestamps replaced by `"<timestamp>"`.
-- Recorded strings: the mock origin `http://127.0.0.1:<port>` is replaced by `http://github.mock`.
-- A case ends when no request arrived for 400 ms after the webhook was answered (max 30 s: probot retries 5xx after 1 s, 4 s, 9 s and spaces writes 1 s apart).
+- Recorded strings: the mock origin `http://127.0.0.1:<port>` is replaced by `http://github.mock`; stack-trace
+  lines inside error texts are ignored when comparing.
+- A case ends when no request arrived for the quiet window (`--quiet-ms`, default 4 s, or the case's `quiet_ms`
+  if longer) after the webhook was answered, at most 40 s. The window covers the client's retries after 1 s, 4 s
+  and 9 s and the 1 s spacing of writes (ADR-007).

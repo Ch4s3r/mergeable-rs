@@ -1,25 +1,25 @@
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use crate::validators::options::lib::{self, OptionResult};
 use serde_json::Value;
 
 const COUNT_NOT_FOUND_ERROR: &str = "Failed to run the test because 'count' is not provided for 'min' option. Please check README for more information about configuration";
 const UNKNOWN_INPUT_TYPE_ERROR: &str = "Input type invalid, expected Array as input";
 
-pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResult<OptionResult> {
-    let filter = js::get(rule, "min");
-    let count_setting = js::read(filter, "count")?;
-    let count = if js::truthy(count_setting) {
+pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result<OptionResult> {
+    let filter = json_value::get(rule, "min");
+    let count_setting = json_value::read(filter, "count")?;
+    let count = if json_value::truthy(count_setting) {
         count_setting
     } else {
         filter
     };
-    let message = js::read(filter, "message")?;
+    let message = json_value::read(filter, "message")?;
     let Some(Value::Number(count_number)) = count else {
-        return Err(JsError::error(COUNT_NOT_FOUND_ERROR));
+        return Err(Error::general(COUNT_NOT_FOUND_ERROR));
     };
     let count_limit = count_number.as_f64().unwrap_or(f64::NAN);
-    let count_text = js::number_to_string(count_number);
+    let count_text = json_value::number_to_string(count_number);
     let validator_name = lib::validator_name(validator_context);
     let success_description = format!("{validator_name} does have a minimum of '{count_text}'");
     let failure_description = lib::message_or_default(
@@ -27,8 +27,8 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
         format!("{validator_name} count is less than \"{count_text}\""),
     );
     let is_mergeable = match input {
-        Value::Array(items) => js::number_from_length(items.len()) >= count_limit,
-        _ => return Err(JsError::error(UNKNOWN_INPUT_TYPE_ERROR)),
+        Value::Array(items) => json_value::number_from_length(items.len()) >= count_limit,
+        _ => return Err(Error::general(UNKNOWN_INPUT_TYPE_ERROR)),
     };
     Ok(OptionResult::decided(
         is_mergeable,
@@ -40,6 +40,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validators::options::lib::OptionStatus;
     use serde_json::json;
 
     #[test]
@@ -49,13 +50,13 @@ mod tests {
             process(&json!({"name": "label"}), &json!(["A", "B", "C"]), &rule)
                 .unwrap()
                 .status,
-            "pass"
+            OptionStatus::Pass
         );
         assert_eq!(
             process(&json!({"name": "label"}), &json!(["A", "B"]), &rule)
                 .unwrap()
                 .status,
-            "fail"
+            OptionStatus::Fail
         );
     }
 
@@ -67,7 +68,7 @@ mod tests {
             &json!({"min": {"regex": 3}}),
         )
         .unwrap_err();
-        assert_eq!(error.message, COUNT_NOT_FOUND_ERROR);
+        assert_eq!(error.message(), COUNT_NOT_FOUND_ERROR);
     }
 
     #[test]
@@ -78,6 +79,6 @@ mod tests {
             &json!({"min": {"count": 3}}),
         )
         .unwrap_err();
-        assert_eq!(error.message, UNKNOWN_INPUT_TYPE_ERROR);
+        assert_eq!(error.message(), UNKNOWN_INPUT_TYPE_ERROR);
     }
 }

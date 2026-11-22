@@ -1,9 +1,8 @@
-use crate::actions::comment::spawn_detached;
-use crate::actions::{Action, get_actionables};
+use crate::actions::{Action, actionables, spawn_detached};
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use async_trait::async_trait;
 use futures::future::join_all;
 use serde_json::Value;
@@ -15,27 +14,60 @@ pub const SUPPORTED_EVENTS: [&str; 4] = [
     "issue_comment.*",
     "schedule.repository",
 ];
-const MODES: [&str; 3] = ["add", "delete", "replace"];
-fn pattern_list(patterns: &Value) -> JsResult<&[Value]> {
-    match patterns {
-        Value::Array(items) => Ok(items),
-        Value::Null => Err(JsError::type_error(
-            "Cannot read properties of null (reading 'some')",
-        )),
-        _ => Err(JsError::type_error("patterns.some is not a function")),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LabelMode {
+    Add,
+    Delete,
+    Replace,
+}
+
+impl LabelMode {
+    const ALL: [LabelMode; 3] = [LabelMode::Add, LabelMode::Delete, LabelMode::Replace];
+
+    fn as_str(self) -> &'static str {
+        match self {
+            LabelMode::Add => "add",
+            LabelMode::Delete => "delete",
+            LabelMode::Replace => "replace",
+        }
+    }
+
+    fn from_setting(mode: Option<&Value>) -> Result<Self> {
+        if !json_value::truthy(mode) {
+            return Ok(LabelMode::Add);
+        }
+        mode.and_then(Value::as_str)
+            .and_then(|name| Self::ALL.into_iter().find(|mode| mode.as_str() == name))
+            .ok_or_else(|| {
+                let supported: Vec<&str> = Self::ALL.iter().map(|mode| mode.as_str()).collect();
+                Error::unsupported_setting(format!(
+                    "Unknown mode, supported modes are {}",
+                    supported.join(", ")
+                ))
+            })
     }
 }
 
-fn matches_any_pattern(label: &Value, patterns: &[Value]) -> JsResult<bool> {
+fn pattern_list(patterns: &Value) -> Result<&[Value]> {
+    match patterns {
+        Value::Array(items) => Ok(items),
+        Value::Null => Err(Error::type_mismatch(
+            "Cannot read properties of null (reading 'some')",
+        )),
+        _ => Err(Error::type_mismatch("patterns.some is not a function")),
+    }
+}
+
+fn matches_any_pattern(label: &Value, patterns: &[Value]) -> Result<bool> {
     for pattern in patterns {
-        if crate::minimatch::minimatch(label, pattern, false)? {
+        if crate::glob::matches_value(label, pattern, crate::glob::DotEntries::Excluded)? {
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-fn labels_without_any_pattern(labels: Vec<Value>, patterns: &[Value]) -> JsResult<Vec<Value>> {
+fn labels_without_any_pattern(labels: Vec<Value>, patterns: &[Value]) -> Result<Vec<Value>> {
     let mut kept = Vec::new();
     for label in labels {
         if !matches_any_pattern(&label, patterns)? {
@@ -45,37 +77,37 @@ fn labels_without_any_pattern(labels: Vec<Value>, patterns: &[Value]) -> JsResul
     Ok(kept)
 }
 
-pub fn labels_without_matches(labels: Vec<Value>, patterns: &Value) -> JsResult<Vec<Value>> {
+pub fn labels_without_matches(labels: Vec<Value>, patterns: &Value) -> Result<Vec<Value>> {
     if labels.is_empty() {
         return Ok(labels);
     }
     labels_without_any_pattern(labels, pattern_list(patterns)?)
 }
 
-pub fn combine_labels(current: Vec<Value>, settings: &Value) -> JsResult<Vec<Value>> {
+pub fn combine_labels(current: Vec<Value>, settings: &Value) -> Result<Vec<Value>> {
     let mut labels = current;
     if let Some(addition) = settings
         .get("add")
-        .filter(|addition| js::is_truthy(addition))
+        .filter(|addition| json_value::is_truthy(addition))
     {
-        labels.extend_from_slice(js::as_array_or_wrap(addition));
+        labels.extend_from_slice(json_value::as_array_or_wrap(addition));
     }
     if let Some(deletion) = settings
         .get("delete")
-        .filter(|deletion| js::is_truthy(deletion))
+        .filter(|deletion| json_value::is_truthy(deletion))
     {
-        labels = labels_without_any_pattern(labels, js::as_array_or_wrap(deletion))?;
+        labels = labels_without_any_pattern(labels, json_value::as_array_or_wrap(deletion))?;
     }
     Ok(labels)
 }
 
-async fn update_labels(context: &Context, issue: &Value, settings: &Value) -> JsResult<()> {
-    let issue_number = js::read(Some(issue), "number")?.unwrap_or(&Value::Null);
+async fn update_labels(context: &Context, issue: &Value, settings: &Value) -> Result<()> {
+    let issue_number = json_value::read(Some(issue), "number")?.unwrap_or(&Value::Null);
     let current = match settings
         .get("replace")
-        .filter(|replacement| js::is_truthy(replacement))
+        .filter(|replacement| json_value::is_truthy(replacement))
     {
-        Some(replacement) => js::as_array_or_wrap(replacement).to_vec(),
+        Some(replacement) => json_value::as_array_or_wrap(replacement).to_vec(),
         None => api::list_labels_on_issue(context, issue_number).await?,
     };
     let labels = combine_labels(current, settings)?;
@@ -84,15 +116,15 @@ async fn update_labels(context: &Context, issue: &Value, settings: &Value) -> Js
         .map(|_| ())
 }
 
-fn labels_to_keep(current: Vec<Value>, patterns: Option<&Value>) -> JsResult<Vec<Value>> {
+fn labels_to_keep(current: Vec<Value>, patterns: Option<&Value>) -> Result<Vec<Value>> {
     match patterns {
         _ if current.is_empty() => Ok(Vec::new()),
-        None => Err(JsError::reading_property_of_undefined("some")),
+        None => Err(Error::missing_property("some")),
         Some(pattern_list) => labels_without_matches(current, pattern_list),
     }
 }
 
-fn log_detached_failure(context: &Context, error: &JsError) {
+fn log_detached_failure(context: &Context, error: &Error) {
     tracing::error!(event_id = %context.event_id, %error, "labels action failed");
 }
 
@@ -135,26 +167,17 @@ impl Action for Labels {
         &SUPPORTED_EVENTS
     }
 
-    async fn before_validate(
-        &self,
-        _context: &Context,
-        _rule: &Value,
-        _rule_name: Option<&Value>,
-    ) -> JsResult<()> {
-        Ok(())
-    }
-
     async fn after_validate(
         &self,
         context: &Context,
         settings: &Value,
         _rule_name: Option<&Value>,
-        results: &Value,
-    ) -> JsResult<()> {
-        let items = get_actionables(context, results);
+        validation_report: &Value,
+    ) -> Result<()> {
+        let items = actionables(context, validation_report);
         let uses_label_operations = ["replace", "add", "delete"]
             .iter()
-            .any(|key| js::truthy(settings.get(*key)));
+            .any(|key| json_value::truthy(settings.get(*key)));
         if uses_label_operations {
             let updates = items
                 .iter()
@@ -164,22 +187,12 @@ impl Action for Labels {
             }
             return Ok(());
         }
-        let mode = settings.get("mode");
-        let mode_name = mode
-            .and_then(Value::as_str)
-            .filter(|name| MODES.contains(name));
-        if js::truthy(mode) && mode_name.is_none() {
-            return Err(JsError::unsupported_setting(format!(
-                "Unknown mode, supported modes are {}",
-                MODES.join(", ")
-            )));
-        }
-        let mode_name = mode_name.unwrap_or("add");
+        let mode = LabelMode::from_setting(settings.get("mode"))?;
         let configured_labels = settings.get("labels");
         let mut issue_numbers = Vec::new();
         let mut unreadable_issue = None;
         for issue in &items {
-            match js::read(Some(&**issue), "number") {
+            match json_value::read(Some(&**issue), "number") {
                 Ok(number) => issue_numbers.push(number.cloned().unwrap_or(Value::Null)),
                 Err(error) => {
                     unreadable_issue = Some(error);
@@ -187,14 +200,14 @@ impl Action for Labels {
                 }
             }
         }
-        if mode_name == "delete" {
+        if mode == LabelMode::Delete {
             delete_matching_labels(context, issue_numbers, configured_labels).await;
         } else {
             let shared_labels = Arc::new(configured_labels.cloned().unwrap_or(Value::Null));
             for issue_number in issue_numbers {
                 let task_context = context.clone();
                 let labels = Arc::clone(&shared_labels);
-                let replaces = mode_name == "replace";
+                let replaces = mode == LabelMode::Replace;
                 spawn_detached(context, "action/labels", async move {
                     let response = if replaces {
                         api::set_labels(&task_context, &issue_number, &labels).await
@@ -257,7 +270,7 @@ mod tests {
     fn replace_then_add_then_delete_is_the_order_of_operations() {
         let settings = json!({"delete": ["not present", "more adds"], "add": ["addition", "more adds"], "replace": ["test present", "not present"]});
         let labels = combine_labels(
-            js::as_array_or_wrap(&settings["replace"]).to_vec(),
+            json_value::as_array_or_wrap(&settings["replace"]).to_vec(),
             &settings,
         )
         .unwrap();
@@ -268,7 +281,7 @@ mod tests {
     fn settings_can_be_single_values() {
         let settings = json!({"delete": "deletion", "add": "addition", "replace": "replace"});
         let labels = combine_labels(
-            js::as_array_or_wrap(&settings["replace"]).to_vec(),
+            json_value::as_array_or_wrap(&settings["replace"]).to_vec(),
             &settings,
         )
         .unwrap();
@@ -293,9 +306,24 @@ mod tests {
     }
 
     #[test]
+    fn mode_defaults_to_add_and_rejects_unknown_names() {
+        assert_eq!(LabelMode::from_setting(None).unwrap(), LabelMode::Add);
+        assert_eq!(
+            LabelMode::from_setting(Some(&json!("replace"))).unwrap(),
+            LabelMode::Replace
+        );
+        assert_eq!(
+            LabelMode::from_setting(Some(&json!("rename")))
+                .unwrap_err()
+                .to_string(),
+            "UnSupportedSettingError: Unknown mode, supported modes are add, delete, replace"
+        );
+    }
+
+    #[test]
     fn non_string_patterns_are_rejected() {
         assert_eq!(
-            crate::minimatch::minimatch(&json!("a"), &json!(1), false)
+            crate::glob::matches_value(&json!("a"), &json!(1), crate::glob::DotEntries::Excluded)
                 .unwrap_err()
                 .to_string(),
             "TypeError: invalid pattern"

@@ -1,9 +1,9 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::filters::Filter;
 use crate::filters::options::lib::{consolidate_results, construct_output};
 use crate::filters::options_processor::{name, topics, visibility};
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
@@ -29,8 +29,8 @@ impl Filter for Repository {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "visibility": "string",
             "topics": {
                 "must_include": {"regex": "string", "regex_flag": "string", "message": "string"},
@@ -40,7 +40,7 @@ impl Filter for Repository {
                 "must_include": {"regex": "string", "regex_flag": "string", "message": "string"},
                 "must_exclude": {"regex": "string", "regex_flag": "string", "message": "string"},
             },
-        }))
+        })
     }
 
     async fn filter(
@@ -48,11 +48,11 @@ impl Filter for Repository {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let mut output = Vec::new();
         let filter_context = json!({"name": settings.get("do").unwrap_or(&Value::Null)});
 
-        if js::truthy(settings.get("topics")) {
+        if json_value::truthy(settings.get("topics")) {
             let processed = topics::process(context, &filter_context, settings).await?;
             output.push(construct_output(
                 &filter_context,
@@ -63,7 +63,7 @@ impl Filter for Repository {
             ));
         }
 
-        if js::truthy(settings.get("visibility")) {
+        if json_value::truthy(settings.get("visibility")) {
             let processed = visibility::process(context, settings)?;
             output.push(construct_output(
                 &filter_context,
@@ -74,7 +74,7 @@ impl Filter for Repository {
             ));
         }
 
-        if js::truthy(settings.get("name")) {
+        if json_value::truthy(settings.get("name")) {
             let processed = name::process(context, &filter_context, settings).await?;
             output.push(construct_output(
                 &filter_context,

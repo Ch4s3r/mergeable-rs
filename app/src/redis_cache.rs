@@ -1,19 +1,33 @@
 use redis::aio::MultiplexedConnection;
 use redis::{AsyncCommands, IntoConnectionInfo};
 use serde_json::Value;
+use std::fmt;
 use tokio::sync::Mutex;
 
 const DEFAULT_HOST: &str = "localhost";
 const DEFAULT_PORT: u16 = 6379;
-const KEYS_PATTERN_OF_UNDEFINED: &str = "";
+const EMPTY_KEYS_PATTERN: &str = "";
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct RedisSettings {
     pub host: String,
     pub port: u16,
     pub password: Option<String>,
     pub database: i64,
     pub ttl_seconds: Option<String>,
+}
+
+impl fmt::Debug for RedisSettings {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RedisSettings")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("database", &self.database)
+            .field("ttl_seconds", &self.ttl_seconds)
+            .finish()
+    }
 }
 
 fn non_empty_variable(name: &str) -> Option<String> {
@@ -53,7 +67,7 @@ impl RedisSettings {
 
 #[must_use]
 pub fn serialize_value(value: &Value) -> Option<String> {
-    (!value.is_null()).then(|| crate::js::stringify(value))
+    (!value.is_null()).then(|| crate::json_value::stringify(value))
 }
 
 pub fn deserialize_value(stored: Option<String>) -> Result<Option<Value>, serde_json::Error> {
@@ -71,7 +85,7 @@ pub struct RedisCache {
 }
 
 fn log_cache_error(operation: &str, error: impl std::fmt::Display) {
-    tracing::error!(operation, %error, "redis cache error");
+    tracing::error!(operation, %error, "redis.cache.failed");
 }
 
 impl RedisCache {
@@ -107,9 +121,7 @@ impl RedisCache {
                 if self.settings.password.is_some()
                     && error.kind() == redis::ErrorKind::AuthenticationFailed =>
             {
-                tracing::warn!(
-                    "Redis server does not require a password, but a password was supplied"
-                );
+                tracing::warn!("redis.connection.password_not_required");
                 self.open_connection(false).await?
             }
             outcome => outcome?,
@@ -160,7 +172,7 @@ impl RedisCache {
             log_cache_error("set", "\"null\" is not a cacheable value");
             return;
         };
-        let ttl_seconds = self.settings.ttl_seconds.clone();
+        let ttl_seconds = self.settings.ttl_seconds.as_deref();
         self.run("set", async |mut connection| match ttl_seconds {
             Some(ttl_seconds) => {
                 redis::cmd("SETEX")
@@ -184,9 +196,7 @@ impl RedisCache {
 
     pub async fn keys(&self) -> Vec<String> {
         self.run("keys", async |mut connection| {
-            connection
-                .keys::<_, Vec<String>>(KEYS_PATTERN_OF_UNDEFINED)
-                .await
+            connection.keys::<_, Vec<String>>(EMPTY_KEYS_PATTERN).await
         })
         .await
         .unwrap_or_default()
@@ -238,7 +248,7 @@ mod tests {
     }
 
     #[test]
-    fn redis_password_is_the_host_like_the_javascript_cache() {
+    fn redis_password_is_taken_from_the_host_setting() {
         let settings = settings_from(&[
             ("CACHE_REDIS_HOST", "redis.internal"),
             ("CACHE_REDIS_PORT", "6380"),
@@ -255,6 +265,14 @@ mod tests {
                 ttl_seconds: Some("60".to_string()),
             }
         );
+    }
+
+    #[test]
+    fn redis_settings_debug_output_redacts_the_password() {
+        let settings = settings_from(&[("CACHE_REDIS_HOST", "secret-host")]);
+        let debug_output = format!("{settings:?}");
+        assert!(debug_output.contains("<redacted>"));
+        assert_eq!(debug_output.matches("secret-host").count(), 1);
     }
 
     #[test]

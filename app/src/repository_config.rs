@@ -1,6 +1,6 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use crate::yaml;
 use fancy_regex::Regex;
 use serde_json::{Map, Value, json};
@@ -13,7 +13,6 @@ static EXTENDS_PATTERN: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(r"(?i)^(?:([a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38})/)?([-_.\w\d]+)(?::([-_./\w\d]+\.ya?ml))?$").ok()
 });
 
-#[derive(Clone)]
 struct ConfigFile {
     owner: String,
     repo: String,
@@ -22,8 +21,8 @@ struct ConfigFile {
     config: Option<Value>,
 }
 
-fn plugin_error(message: &str) -> JsError {
-    JsError::error(format!("[@probot/octokit-plugin-config] {message}"))
+fn config_loader_error(message: &str) -> Error {
+    Error::general(format!("[@probot/octokit-plugin-config] {message}"))
 }
 
 async fn get_config_file(
@@ -32,10 +31,10 @@ async fn get_config_file(
     repo: &str,
     path: &str,
     reference: Option<&str>,
-) -> JsResult<ConfigFile> {
+) -> Result<ConfigFile> {
     let file_extension = path.rsplit('.').next().unwrap_or_default().to_lowercase();
     if !SUPPORTED_FILE_EXTENSIONS.contains(&file_extension.as_str()) {
-        return Err(plugin_error(&format!(
+        return Err(config_loader_error(&format!(
             ".{file_extension} extension is not support for configuration (path: \"{path}\")"
         )));
     }
@@ -43,27 +42,27 @@ async fn get_config_file(
     if let Some(branch) = reference {
         params["ref"] = Value::String(branch.to_string());
     }
-    let url = context.github.endpoint_url(CONTENTS_ROUTE, &params)?;
     let empty = ConfigFile {
         owner: owner.to_string(),
         repo: repo.to_string(),
         path: path.to_string(),
-        url: url.clone(),
+        url: context.github.endpoint_url(CONTENTS_ROUTE, &params)?,
         config: None,
     };
+    let url = &empty.url;
     let response = match context.github.request_raw(CONTENTS_ROUTE, params).await {
         Ok(response) => response,
-        Err(error) if error.status == Some(404) => return Ok(empty),
+        Err(error) if error.has_status(404) => return Ok(empty),
         Err(error) => return Err(error),
     };
     if response.header("content-type") == Some("application/json; charset=utf-8") {
-        return Err(plugin_error(&format!(
+        return Err(config_loader_error(&format!(
             "{url} exists, but is either a directory or a submodule. Ignoring."
         )));
     }
     if file_extension == "json" {
         if response.data.is_string() {
-            return Err(plugin_error(&format!(
+            return Err(config_loader_error(&format!(
                 "Configuration could not be parsed from {url} (invalid JSON)"
             )));
         }
@@ -72,23 +71,23 @@ async fn get_config_file(
             ..empty
         });
     }
-    let text = js::to_js_string(Some(&response.data));
-    let parsed = yaml::parse_like_js_yaml_4(&text).map_err(|error| {
+    let text = json_value::to_display_string(Some(&response.data));
+    let parsed = yaml::parse_strict(&text).map_err(|error| {
         let reason = if error.message.contains("unknown tag") {
             "unsafe YAML"
         } else {
             "invalid YAML"
         };
-        plugin_error(&format!(
+        config_loader_error(&format!(
             "Configuration could not be parsed from {url} ({reason})"
         ))
     })?;
     let config = match parsed {
-        Some(value) if js::is_truthy(&value) => value,
+        Some(value) if json_value::is_truthy(&value) => value,
         _ => Value::Object(Map::new()),
     };
     if config.is_string() {
-        return Err(plugin_error(&format!(
+        return Err(config_loader_error(&format!(
             "Configuration could not be parsed from {url} (YAML is not an object)"
         )));
     }
@@ -109,18 +108,18 @@ fn extends_to_target(
     path: &str,
     url: &str,
     extends_value: &Value,
-) -> JsResult<ExtendsTarget> {
+) -> Result<ExtendsTarget> {
     let Value::String(extends_text) = extends_value else {
-        return Err(plugin_error(&format!(
+        return Err(config_loader_error(&format!(
             "Invalid value {} for _extends in {url}",
-            js::stringify(extends_value)
+            json_value::stringify(extends_value)
         )));
     };
     let captures = EXTENDS_PATTERN
         .as_ref()
         .and_then(|pattern| pattern.captures(extends_text).ok().flatten())
         .ok_or_else(|| {
-            plugin_error(&format!(
+            config_loader_error(&format!(
                 "Invalid value \"{extends_text}\" for _extends in {url}"
             ))
         })?;
@@ -136,10 +135,14 @@ fn take_extends(file: &mut ConfigFile) -> Option<Value> {
     let Some(Value::Object(config)) = file.config.as_mut() else {
         return None;
     };
-    if !config.get("_extends").is_some_and(js::is_truthy) {
+    if !config.get("_extends").is_some_and(json_value::is_truthy) {
         return None;
     }
     config.shift_remove("_extends")
+}
+
+fn last_url(files: &[ConfigFile]) -> &str {
+    files.last().map_or("", |file| file.url.as_str())
 }
 
 async fn get_config_files(
@@ -147,7 +150,7 @@ async fn get_config_files(
     owner: &str,
     repo: &str,
     path: &str,
-) -> JsResult<Vec<ConfigFile>> {
+) -> Result<Vec<ConfigFile>> {
     let requested = get_config_file(context, owner, repo, path, None).await?;
     let mut files = vec![requested];
     if files[0].config.is_none() {
@@ -156,25 +159,24 @@ async fn get_config_files(
         }
         files.push(get_config_file(context, owner, ".github", path, None).await?);
     }
-    let last_index = files.len() - 1;
-    let Some(extends_value) = take_extends(&mut files[last_index]) else {
+    let Some(extends_value) = files.last_mut().and_then(take_extends) else {
         return Ok(files);
     };
-    let mut target = extends_to_target(owner, path, &files[last_index].url, &extends_value)?;
+    let mut target = extends_to_target(owner, path, last_url(&files), &extends_value)?;
     loop {
         let mut extended =
             get_config_file(context, &target.owner, &target.repo, &target.path, None).await?;
         let next_extends = take_extends(&mut extended);
-        let extended_url = extended.url.clone();
         files.push(extended);
         let Some(extends_value) = next_extends else {
             return Ok(files);
         };
-        target = extends_to_target(owner, path, &extended_url, &extends_value)?;
+        let extended_url = last_url(&files);
+        target = extends_to_target(owner, path, extended_url, &extends_value)?;
         if let Some(already_loaded) = files.iter().find(|file| {
             file.owner == target.owner && file.repo == target.repo && file.path == target.path
         }) {
-            return Err(plugin_error(&format!(
+            return Err(config_loader_error(&format!(
                 "Recursion detected. Ignoring  \"_extends: undefined\" from {extended_url} because {} was already loaded.",
                 already_loaded.url
             )));
@@ -186,7 +188,7 @@ fn is_mergeable_object(value: &Value) -> bool {
     value.is_object() || value.is_array()
 }
 
-fn deepmerge_owned(target: Value, source: Value) -> Value {
+fn deep_merge(target: Value, source: Value) -> Value {
     match (target, source) {
         (Value::Array(mut target_items), Value::Array(source_items)) => {
             target_items.extend(source_items);
@@ -196,7 +198,7 @@ fn deepmerge_owned(target: Value, source: Value) -> Value {
             for (key, source_value) in source_map {
                 let merged = match destination.get_mut(&key) {
                     Some(target_value) if is_mergeable_object(&source_value) => {
-                        deepmerge_owned(target_value.take(), source_value)
+                        deep_merge(target_value.take(), source_value)
                     }
                     _ => source_value,
                 };
@@ -212,23 +214,23 @@ pub async fn load(
     context: &Context,
     file_name: &str,
     default_config: Option<Value>,
-) -> JsResult<Option<Value>> {
+) -> Result<Option<Value>> {
     let (owner, repo) = context.repo()?;
     let path = format!(".github/{}", file_name.trim_start_matches('/'));
     let files = get_config_files(context, &owner, &repo, &path).await?;
-    let has_default = default_config.as_ref().is_some_and(js::is_truthy);
+    let has_default = default_config.as_ref().is_some_and(json_value::is_truthy);
     if !has_default && files.iter().all(|file| file.config.is_none()) {
         return Ok(None);
     }
     let initial = match default_config {
-        Some(default_value) if js::is_truthy(&default_value) => default_value,
+        Some(default_value) if json_value::is_truthy(&default_value) => default_value,
         _ => Value::Object(Map::new()),
     };
     let merged = files
         .into_iter()
         .rev()
-        .filter_map(|file| file.config.filter(js::is_truthy))
-        .fold(initial, deepmerge_owned);
+        .filter_map(|file| file.config.filter(json_value::is_truthy))
+        .fold(initial, deep_merge);
     Ok(Some(merged))
 }
 
@@ -237,11 +239,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn deepmerge_concatenates_arrays_like_the_deepmerge_package() {
+    fn deep_merge_concatenates_arrays_and_keeps_untouched_keys() {
         let base = json!({"mergeable": [{"when": "a"}], "version": 2});
         let repo = json!({"mergeable": [{"when": "b"}]});
         assert_eq!(
-            deepmerge_owned(base, repo),
+            deep_merge(base, repo),
             json!({"mergeable": [{"when": "a"}, {"when": "b"}], "version": 2})
         );
     }

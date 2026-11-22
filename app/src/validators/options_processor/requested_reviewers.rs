@@ -1,11 +1,11 @@
-use crate::error::JsResult;
-use crate::js;
+use crate::error::Result;
+use crate::json_value;
 use crate::validators::options_processor::map_logins;
 use serde_json::Value;
 
-pub fn process(payload: Option<&Value>) -> JsResult<Vec<Value>> {
+pub fn process(payload: Option<&Value>) -> Result<Vec<Value>> {
     map_logins(
-        js::read(payload, "requested_reviewers")?,
+        json_value::read(payload, "requested_reviewers")?,
         "payload.requested_reviewers",
     )
 }
@@ -28,7 +28,7 @@ mod tests {
     fn missing_list_is_a_type_error() {
         let error = process(Some(&json!({}))).unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "Cannot read properties of undefined (reading 'map')"
         );
     }

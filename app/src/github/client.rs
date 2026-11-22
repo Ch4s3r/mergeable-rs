@@ -1,18 +1,16 @@
-use crate::error::{JsError, JsResult};
-use crate::github::app_auth::{next_page_url, octokit_error_message};
+use crate::error::{Error, Result};
+use crate::github::app_auth::{AppSigner, build_http_client};
 use crate::github::throttle::RequestThrottle;
-use crate::js;
+use crate::json_value;
 use crate::metrics::Metrics;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use reqwest::Method;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex;
+use std::sync::{Arc, PoisonError};
+use std::time::{Duration, SystemTime};
 
 const URI_COMPONENT_SAFE: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -28,6 +26,11 @@ const URI_COMPONENT_SAFE: &AsciiSet = &NON_ALPHANUMERIC
 const STATUSES_NEVER_RETRIED: [u16; 6] = [400, 401, 403, 404, 422, 451];
 const RETRY_ATTEMPTS: u32 = 3;
 const INSTALLATION_TOKEN_REFRESH_MARGIN: Duration = Duration::from_mins(5);
+const INSTALLATION_TOKEN_FALLBACK_LIFETIME: Duration = Duration::from_mins(50);
+const NOT_MODIFIED: u16 = 304;
+const CONFLICT: u16 = 409;
+pub(crate) const DEFAULT_ACCEPT: &str = "application/vnd.github.v3+json";
+const RAW_ACCEPT: &str = "application/vnd.github.v3.raw";
 
 #[must_use]
 pub fn encode_uri_component(text: &str) -> String {
@@ -38,10 +41,10 @@ fn push_uri_component(target: &mut String, text: &str) {
     target.extend(utf8_percent_encode(text, URI_COMPONENT_SAFE));
 }
 
-fn js_text(value: &Value) -> Cow<'_, str> {
+fn display_text(value: &Value) -> Cow<'_, str> {
     match value {
         Value::String(text) => Cow::Borrowed(text),
-        other => Cow::Owned(js::to_js_string(Some(other))),
+        other => Cow::Owned(json_value::to_display_string(Some(other))),
     }
 }
 
@@ -52,6 +55,56 @@ pub fn header_text<'headers>(headers: &'headers HeaderMap, name: &str) -> Option
         .iter()
         .filter_map(|value| value.to_str().ok())
         .next_back()
+}
+
+#[must_use]
+pub fn api_error_message(data: &Value) -> String {
+    match data {
+        Value::String(text) => text.clone(),
+        Value::Object(map) => {
+            let documentation_suffix = map
+                .get("documentation_url")
+                .map(|url| format!(" - {}", json_value::to_display_string(Some(url))))
+                .unwrap_or_default();
+            match map.get("message") {
+                Some(message) => match map.get("errors") {
+                    Some(Value::Array(errors)) => format!(
+                        "{}: {}{documentation_suffix}",
+                        json_value::to_display_string(Some(message)),
+                        errors
+                            .iter()
+                            .map(json_value::stringify)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    _ => format!(
+                        "{}{documentation_suffix}",
+                        json_value::to_display_string(Some(message))
+                    ),
+                },
+                None => format!("Unknown error: {}", json_value::stringify(data)),
+            }
+        }
+        other => format!("Unknown error: {}", json_value::stringify(other)),
+    }
+}
+
+#[must_use]
+pub fn next_page_url(link_header: &str) -> Option<String> {
+    link_header.split(',').find_map(|part| {
+        let (target, relation) = part.split_once(';')?;
+        relation.contains("rel=\"next\"").then(|| {
+            target
+                .trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .to_string()
+        })
+    })
+}
+
+fn transport_error(error: &reqwest::Error) -> Error {
+    Error::http(500, error.to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -73,49 +126,44 @@ struct CachedInstallationToken {
     refresh_after: SystemTime,
 }
 
+type InstallationTokenSlot = Arc<tokio::sync::Mutex<Option<CachedInstallationToken>>>;
+
 pub struct GithubAppSettings {
     pub base_url: String,
     pub app_id: String,
     pub private_key_pem: String,
     pub retry_base_delay: Duration,
-    pub throttle: RequestThrottle,
+    pub throttle: Option<RequestThrottle>,
 }
 
 pub struct GithubApp {
     http: reqwest::Client,
     base_url: String,
     base_path: String,
-    jwt_issuer: Value,
-    signing_key: EncodingKey,
-    installation_tokens: Mutex<HashMap<u64, CachedInstallationToken>>,
+    signer: AppSigner,
+    installation_tokens: std::sync::Mutex<HashMap<u64, InstallationTokenSlot>>,
     retry_base_delay: Duration,
-    throttle: RequestThrottle,
+    throttle: Option<RequestThrottle>,
     metrics: Option<Arc<Metrics>>,
 }
 
 impl GithubApp {
-    pub fn new(settings: GithubAppSettings, metrics: Option<Arc<Metrics>>) -> JsResult<Self> {
-        let signing_key = EncodingKey::from_rsa_pem(settings.private_key_pem.as_bytes())
-            .map_err(|error| JsError::error(format!("invalid PRIVATE_KEY: {error}")))?;
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("mergeable-rust/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|error| JsError::error(error.to_string()))?;
+    pub fn new(settings: GithubAppSettings, metrics: Option<Arc<Metrics>>) -> Result<Self> {
+        let issuer = settings
+            .app_id
+            .parse::<u64>()
+            .map_or_else(|_| Value::String(settings.app_id), Value::from);
+        let signer = AppSigner::new(issuer, &settings.private_key_pem)?;
         let base_url = settings.base_url.trim_end_matches('/').to_string();
         let base_path = reqwest::Url::parse(&base_url)
             .map(|url| url.path().trim_end_matches('/').to_string())
             .unwrap_or_default();
-        let jwt_issuer = settings
-            .app_id
-            .parse::<u64>()
-            .map_or_else(|_| Value::String(settings.app_id), Value::from);
         Ok(GithubApp {
-            http,
+            http: build_http_client()?,
             base_url,
             base_path,
-            jwt_issuer,
-            signing_key,
-            installation_tokens: Mutex::new(HashMap::new()),
+            signer,
+            installation_tokens: std::sync::Mutex::new(HashMap::new()),
             retry_base_delay: settings.retry_base_delay,
             throttle: settings.throttle,
             metrics,
@@ -138,28 +186,32 @@ impl GithubApp {
         }
     }
 
-    fn app_jwt(&self) -> JsResult<String> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_secs())
-            .unwrap_or_default();
-        let issued_at = now.saturating_sub(30);
-        let claims = json!({
-            "iat": issued_at,
-            "exp": issued_at + 600,
-            "iss": self.jwt_issuer,
-        });
-        jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &self.signing_key)
-            .map_err(|error| JsError::error(format!("could not sign app JWT: {error}")))
+    fn installation_token_slot(&self, installation_id: u64) -> InstallationTokenSlot {
+        let mut slots = self
+            .installation_tokens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        Arc::clone(slots.entry(installation_id).or_default())
     }
 
-    async fn installation_authorization(&self, installation_id: u64) -> JsResult<HeaderValue> {
-        let mut tokens = self.installation_tokens.lock().await;
-        if let Some(cached) = tokens.get(&installation_id)
-            && SystemTime::now() < cached.refresh_after
+    async fn installation_authorization(&self, installation_id: u64) -> Result<HeaderValue> {
+        let slot = self.installation_token_slot(installation_id);
+        let mut cached = slot.lock().await;
+        if let Some(token) = cached.as_ref()
+            && SystemTime::now() < token.refresh_after
         {
-            return Ok(cached.authorization.clone());
+            return Ok(token.authorization.clone());
         }
+        let fresh = self.create_installation_token(installation_id).await?;
+        let authorization = fresh.authorization.clone();
+        *cached = Some(fresh);
+        Ok(authorization)
+    }
+
+    async fn create_installation_token(
+        &self,
+        installation_id: u64,
+    ) -> Result<CachedInstallationToken> {
         let url = format!(
             "{}/app/installations/{installation_id}/access_tokens",
             self.base_url
@@ -167,38 +219,30 @@ impl GithubApp {
         let response = self
             .http
             .post(&url)
-            .header(AUTHORIZATION, format!("bearer {}", self.app_jwt()?))
+            .header(AUTHORIZATION, self.signer.bearer_authorization()?)
             .header(ACCEPT, DEFAULT_ACCEPT)
             .send()
             .await
-            .map_err(|error| JsError::http(500, error.to_string(), None))?;
+            .map_err(|error| transport_error(&error))?;
         let status = response.status().as_u16();
         let data: Value = response.json().await.unwrap_or(Value::Null);
         if status >= 400 {
-            return Err(JsError::http(
-                status,
-                octokit_error_message(&data),
-                Some(data),
-            ));
+            return Err(Error::http(status, api_error_message(&data)));
         }
-        let token = js::as_str(data.get("token"))
-            .ok_or_else(|| JsError::error("installation token missing in response"))?;
+        let token = json_value::as_str(data.get("token"))
+            .ok_or_else(|| Error::general("installation token missing in response"))?;
         let authorization = HeaderValue::try_from(format!("token {token}"))
-            .map_err(|error| JsError::http(500, error.to_string(), None))?;
-        let refresh_after = js::as_str(data.get("expires_at"))
+            .map_err(|error| Error::http(500, error.to_string()))?;
+        let refresh_after = json_value::as_str(data.get("expires_at"))
             .and_then(|expires| chrono::DateTime::parse_from_rfc3339(expires).ok())
             .map_or_else(
-                || SystemTime::now() + Duration::from_mins(50),
+                || SystemTime::now() + INSTALLATION_TOKEN_FALLBACK_LIFETIME,
                 |expires| SystemTime::from(expires) - INSTALLATION_TOKEN_REFRESH_MARGIN,
             );
-        tokens.insert(
-            installation_id,
-            CachedInstallationToken {
-                authorization: authorization.clone(),
-                refresh_after,
-            },
-        );
-        Ok(authorization)
+        Ok(CachedInstallationToken {
+            authorization,
+            refresh_after,
+        })
     }
 }
 
@@ -216,16 +260,13 @@ struct PreparedRequest {
     accept: Cow<'static, str>,
 }
 
-const DEFAULT_ACCEPT: &str = "application/vnd.github.v3+json";
-const RAW_ACCEPT: &str = "application/vnd.github.v3.raw";
-
 impl InstallationClient {
-    fn prepare(&self, route: &str, params: Value) -> JsResult<PreparedRequest> {
+    fn prepare(&self, route: &str, params: Value) -> Result<PreparedRequest> {
         let (method_name, path_template) = route
             .split_once(' ')
-            .ok_or_else(|| JsError::error(format!("invalid route {route}")))?;
+            .ok_or_else(|| Error::general(format!("invalid route {route}")))?;
         let method = Method::from_bytes(method_name.as_bytes())
-            .map_err(|error| JsError::error(error.to_string()))?;
+            .map_err(|error| Error::general(error.to_string()))?;
         let mut remaining = match params {
             Value::Object(map) => map,
             _ => Map::new(),
@@ -242,13 +283,13 @@ impl InstallationClient {
             let end = rest[start..]
                 .find('}')
                 .map(|offset| start + offset)
-                .ok_or_else(|| JsError::error(format!("invalid route {route}")))?;
+                .ok_or_else(|| Error::general(format!("invalid route {route}")))?;
             let parameter_name = &rest[start + 1..end];
             if let Some(present) = remaining
                 .shift_remove(parameter_name)
                 .filter(|present| !present.is_null())
             {
-                push_uri_component(&mut url, &js_text(&present));
+                push_uri_component(&mut url, &display_text(&present));
             }
             rest = &rest[end + 1..];
         }
@@ -258,7 +299,7 @@ impl InstallationClient {
             for (name, value) in &remaining {
                 url.push(separator);
                 separator = '&';
-                let text = js_text(value);
+                let text = display_text(value);
                 if name == "q" {
                     url.push_str("q=");
                     for (index, term) in text.split('+').enumerate() {
@@ -289,51 +330,43 @@ impl InstallationClient {
         })
     }
 
-    pub fn endpoint_url(&self, route: &str, params: &Value) -> JsResult<String> {
+    pub fn endpoint_url(&self, route: &str, params: &Value) -> Result<String> {
         Ok(self.prepare(route, params.clone())?.url)
     }
 
-    pub async fn request(&self, route: &str, params: Value) -> JsResult<GithubResponse> {
+    pub async fn request(&self, route: &str, params: Value) -> Result<GithubResponse> {
         let prepared = self.prepare(route, params)?;
         self.send_with_retries(&prepared).await
     }
 
-    fn explain_missing_authentication(
-        &self,
-        prepared: &PreparedRequest,
-        mut error: JsError,
-    ) -> JsError {
+    fn explain_missing_authentication(&self, prepared: &PreparedRequest, error: Error) -> Error {
         let Some(reason) = &self.unauthenticated_reason else {
             return error;
         };
-        match error.status {
+        let explanation = match error.status() {
             Some(404) => {
-                error.message =
-                    format!("Not found. May be due to lack of authentication. Reason: {reason}");
+                format!("Not found. May be due to lack of authentication. Reason: {reason}")
             }
-            Some(401) => {
-                error.message = format!(
-                    "Unauthorized. \"{} {}\" failed most likely due to lack of authentication. Reason: {reason}",
-                    prepared.method, prepared.url
-                );
-            }
+            Some(401) => format!(
+                "Unauthorized. \"{} {}\" failed most likely due to lack of authentication. Reason: {reason}",
+                prepared.method, prepared.url
+            ),
             Some(status) if (400..500).contains(&status) => {
-                let trimmed = error.message.strip_suffix('.').unwrap_or(&error.message);
-                error.message =
-                    format!("{trimmed}. May be caused by lack of authentication ({reason}).");
+                let trimmed = error.message().strip_suffix('.').unwrap_or(error.message());
+                format!("{trimmed}. May be caused by lack of authentication ({reason}).")
             }
-            _ => {}
-        }
-        error
+            _ => return error,
+        };
+        error.with_message(explanation)
     }
 
-    pub async fn request_raw(&self, route: &str, params: Value) -> JsResult<GithubResponse> {
+    pub async fn request_raw(&self, route: &str, params: Value) -> Result<GithubResponse> {
         let mut prepared = self.prepare(route, params)?;
         prepared.accept = Cow::Borrowed(RAW_ACCEPT);
         self.send_with_retries(&prepared).await
     }
 
-    pub async fn request_url(&self, url: &str) -> JsResult<GithubResponse> {
+    async fn request_url(&self, url: &str) -> Result<GithubResponse> {
         let absolute_url = if url.starts_with('/') {
             format!("{}{}", self.app.base_url, url)
         } else {
@@ -348,10 +381,10 @@ impl InstallationClient {
         self.send_with_retries(&prepared).await
     }
 
-    pub async fn paginate(&self, route: &str, params: Value) -> JsResult<Vec<Value>> {
+    pub async fn paginate(&self, route: &str, params: Value) -> Result<Vec<Value>> {
         let mut collected = Vec::new();
         let mut response = match self.request(route, params).await {
-            Err(error) if error.status == Some(409) => return Ok(collected),
+            Err(error) if error.has_status(CONFLICT) => return Ok(collected),
             other => other?,
         };
         loop {
@@ -374,13 +407,13 @@ impl InstallationClient {
                 return Ok(collected);
             };
             response = match self.request_url(&next_url).await {
-                Err(error) if error.status == Some(409) => return Ok(collected),
+                Err(error) if error.has_status(CONFLICT) => return Ok(collected),
                 other => other?,
             };
         }
     }
 
-    async fn send_with_retries(&self, prepared: &PreparedRequest) -> JsResult<GithubResponse> {
+    async fn send_with_retries(&self, prepared: &PreparedRequest) -> Result<GithubResponse> {
         self.send_with_retries_unexplained(prepared)
             .await
             .map_err(|error| self.explain_missing_authentication(prepared, error))
@@ -389,13 +422,13 @@ impl InstallationClient {
     async fn send_with_retries_unexplained(
         &self,
         prepared: &PreparedRequest,
-    ) -> JsResult<GithubResponse> {
+    ) -> Result<GithubResponse> {
         let mut retry_count: u32 = 0;
         loop {
             match self.send_once(prepared).await {
                 Err(error)
                     if retry_count < RETRY_ATTEMPTS
-                        && error.status.is_some_and(|status| {
+                        && error.status().is_some_and(|status| {
                             status >= 400 && !STATUSES_NEVER_RETRIED.contains(&status)
                         }) =>
                 {
@@ -407,18 +440,17 @@ impl InstallationClient {
         }
     }
 
-    async fn send_once(&self, prepared: &PreparedRequest) -> JsResult<GithubResponse> {
+    async fn send_once(&self, prepared: &PreparedRequest) -> Result<GithubResponse> {
         let parsed_url = reqwest::Url::parse(&prepared.url);
         let full_path = parsed_url.as_ref().map_or("", reqwest::Url::path);
         let pathname = full_path
             .strip_prefix(self.app.base_path.as_str())
             .filter(|rest| rest.starts_with('/'))
             .unwrap_or(full_path);
-        let _permit = self
-            .app
-            .throttle
-            .acquire(prepared.method.as_str(), pathname)
-            .await;
+        let _concurrency_permit = match &self.app.throttle {
+            Some(throttle) => throttle.acquire(&prepared.method, pathname).await,
+            None => None,
+        };
         let builder = match parsed_url {
             Ok(url) => self.app.http.request(prepared.method.clone(), url),
             Err(_) => self
@@ -436,12 +468,12 @@ impl InstallationClient {
         if let Some(body) = &prepared.body {
             builder = builder
                 .header(CONTENT_TYPE, "application/json; charset=utf-8")
-                .body(js::stringify(body));
+                .body(json_value::stringify(body));
         }
         let response = builder
             .send()
             .await
-            .map_err(|error| JsError::http(500, error.to_string(), None))?;
+            .map_err(|error| transport_error(&error))?;
         let status = response.status().as_u16();
         let headers = response.headers().clone();
         if let (Some(metrics), Some(installation_id)) = (&self.app.metrics, self.installation_id) {
@@ -455,26 +487,17 @@ impl InstallationClient {
         } else {
             Value::String(text)
         };
-        if status == 304 {
-            return Err(JsError::http(status, "Not modified", Some(data)));
+        if status == NOT_MODIFIED {
+            return Err(Error::http(status, "Not modified"));
         }
         if status >= 400 {
-            return Err(JsError::http(
-                status,
-                octokit_error_message(&data),
-                Some(data),
-            ));
+            return Err(Error::http(status, api_error_message(&data)));
         }
         Ok(GithubResponse {
             status,
             headers,
             data,
         })
-    }
-
-    #[must_use]
-    pub fn base_path(&self) -> &str {
-        &self.app.base_path
     }
 }
 
@@ -495,7 +518,7 @@ fn preview_accept_header(media_type: &Value) -> Option<String> {
             .map(|preview| {
                 format!(
                     "application/vnd.github.{}-preview{format}",
-                    js::to_js_string(Some(preview))
+                    json_value::to_display_string(Some(preview))
                 )
             })
             .collect::<Vec<_>>()
@@ -506,12 +529,13 @@ fn preview_accept_header(media_type: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
-    fn octokit_error_message_appends_documentation_url_and_errors() {
+    fn api_error_message_appends_documentation_url_and_errors() {
         let data = json!({"message": "Validation Failed", "errors": [{"code": "invalid"}], "documentation_url": "https://docs"});
         assert_eq!(
-            octokit_error_message(&data),
+            api_error_message(&data),
             "Validation Failed: {\"code\":\"invalid\"} - https://docs"
         );
     }
@@ -526,7 +550,22 @@ mod tests {
     }
 
     #[test]
-    fn uri_component_encoding_matches_javascript() {
+    fn api_error_message_without_errors_appends_only_the_documentation_url() {
+        let data =
+            json!({"message": "Not Found", "documentation_url": "https://docs.github.com/rest"});
+        assert_eq!(
+            api_error_message(&data),
+            "Not Found - https://docs.github.com/rest"
+        );
+    }
+
+    #[test]
+    fn link_header_without_a_next_relation_has_no_next_page() {
+        assert_eq!(next_page_url("<https://x/?page=1>; rel=\"prev\""), None);
+    }
+
+    #[test]
+    fn uri_component_encoding_escapes_reserved_characters() {
         assert_eq!(
             encode_uri_component(".github/mergeable.yml"),
             ".github%2Fmergeable.yml"

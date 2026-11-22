@@ -1,11 +1,29 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
-use crate::flex;
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use crate::validators::options::lib::construct_error_output;
+use crate::workflow;
 use serde_json::{Map, Value, json};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogicalOperator {
+    And,
+    Or,
+    Not,
+}
+
+impl LogicalOperator {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            LogicalOperator::And => "And",
+            LogicalOperator::Or => "Or",
+            LogicalOperator::Not => "Not",
+        }
+    }
+}
 
 const OPTION_MISSING_ERROR_MESSAGE: &str = "Failed to validate because the 'validate' option is missing or empty. Please check the documentation.";
 
@@ -23,8 +41,9 @@ pub async fn process(
     context: &Context,
     settings: Option<&Value>,
     registry: &Registry,
-    validator_name: &str,
-) -> JsResult<Value> {
+    operator: LogicalOperator,
+) -> Result<Value> {
+    let validator_name = operator.name();
     let Some(Value::Array(validations)) =
         settings.filter(|present| matches!(present, Value::Array(items) if !items.is_empty()))
     else {
@@ -44,10 +63,10 @@ pub async fn process(
         ));
     }
 
-    let output = flex::validator_results(context, registry, &rules).await?;
+    let output = workflow::validator_results(context, registry, &rules).await?;
 
     let mut validations_out = Vec::new();
-    let mut status = if validator_name == "And" {
+    let mut status = if operator == LogicalOperator::And {
         "pass"
     } else {
         "fail"
@@ -55,7 +74,7 @@ pub async fn process(
     let output_count = output.len();
     let negated_first_status = match output
         .first()
-        .and_then(|first| js::as_str(first.get("status")))
+        .and_then(|first| json_value::as_str(first.get("status")))
     {
         Some("error") => Some("error"),
         Some("pass") => Some("fail"),
@@ -63,23 +82,23 @@ pub async fn process(
         _ => None,
     };
     for (count, mut result) in output.into_iter().enumerate() {
-        let result_status = js::as_str(result.get("status"));
+        let result_status = json_value::as_str(result.get("status"));
         if result_status == Some("error") {
             status = "error";
         }
-        if validator_name == "Or" && result_status == Some("pass") && status != "error" {
+        if operator == LogicalOperator::Or && result_status == Some("pass") && status != "error" {
             status = "pass";
         }
-        if validator_name == "And" && result_status == Some("fail") && status != "error" {
+        if operator == LogicalOperator::And && result_status == Some("fail") && status != "error" {
             status = "fail";
         }
-        let result_name = js::to_js_string(result.get("name"));
+        let result_name = json_value::to_display_string(result.get("name"));
         let Some(Value::Array(result_validations)) = result.get_mut("validations").map(Value::take)
         else {
-            return Err(JsError::type_error("result.validations is not iterable"));
+            return Err(Error::type_mismatch("result.validations is not iterable"));
         };
         for mut renamed in result_validations {
-            let description = js::to_js_string(renamed.get("description"));
+            let description = json_value::to_display_string(renamed.get("description"));
             if let Value::Object(fields) = &mut renamed {
                 fields.insert(
                     "description".to_string(),
@@ -94,7 +113,7 @@ pub async fn process(
     }
 
     let mut final_status = Some(status);
-    if validator_name == "Not" {
+    if operator == LogicalOperator::Not {
         if output_count != 1 {
             return Ok(error_result(
                 validator_name,

@@ -1,6 +1,7 @@
 use super::default_actions_for;
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
+use crate::results::Status;
 use serde_json::{Map, Value, json};
 use std::sync::LazyLock;
 
@@ -32,9 +33,9 @@ struct OutcomeActions {
 
 fn pull_request_outcomes() -> OutcomeActions {
     OutcomeActions {
-        pass: default_actions_for("pass").clone(),
-        fail: default_actions_for("fail").clone(),
-        error: default_actions_for("error").clone(),
+        pass: default_actions_for(Status::Pass).clone(),
+        fail: default_actions_for(Status::Fail).clone(),
+        error: default_actions_for(Status::Error).clone(),
     }
 }
 
@@ -46,19 +47,21 @@ fn issue_outcomes() -> OutcomeActions {
     }
 }
 
-pub fn transform(config: &mut Value) -> JsResult<Value> {
-    js::read(js::read(Some(config), "mergeable")?, "issues")?;
-    let Some(mergeable) = js::get_mut(config, "mergeable") else {
+pub fn transform(config: &mut Value) -> Result<Value> {
+    json_value::read(json_value::read(Some(config), "mergeable")?, "issues")?;
+    let Some(mergeable) = json_value::get_mut(config, "mergeable") else {
         return Ok(json!({ "mergeable": [] }));
     };
     let mut output = Vec::new();
-    let has_issues = js::truthy(js::get(mergeable, "issues"));
-    let has_pull_requests = js::truthy(js::get(mergeable, "pull_requests"));
-    if has_issues && let Some(issues) = js::get_mut(mergeable, "issues") {
+    let has_issues = json_value::truthy(json_value::get(mergeable, "issues"));
+    let has_pull_requests = json_value::truthy(json_value::get(mergeable, "pull_requests"));
+    if has_issues && let Some(issues) = json_value::get_mut(mergeable, "issues") {
         output.push(process_validators("issues.*", issues, issue_outcomes())?);
         process_stale("issues", issues, &mut output);
     }
-    if has_pull_requests && let Some(pull_requests) = js::get_mut(mergeable, "pull_requests") {
+    if has_pull_requests
+        && let Some(pull_requests) = json_value::get_mut(mergeable, "pull_requests")
+    {
         output.push(process_validators(
             "pull_request.*",
             pull_requests,
@@ -87,19 +90,19 @@ pub fn transform(config: &mut Value) -> JsResult<Value> {
 }
 
 fn process_stale(rule_type: &str, config: &Value, output: &mut Vec<Value>) {
-    let stale = js::get(config, "stale");
-    if !js::truthy(stale) {
+    let stale = json_value::get(config, "stale");
+    if !json_value::truthy(stale) {
         return;
     }
     let mut stale_validator = Map::new();
     stale_validator.insert("do".to_string(), json!("stale"));
-    if let Some(days) = stale.and_then(|stale| js::get(stale, "days")) {
+    if let Some(days) = stale.and_then(|stale| json_value::get(stale, "days")) {
         stale_validator.insert("days".to_string(), days.clone());
     }
     stale_validator.insert("type".to_string(), json!(rule_type));
     let message = stale
-        .and_then(|stale| js::get(stale, "message"))
-        .filter(|message| js::is_truthy(message))
+        .and_then(|stale| json_value::get(stale, "message"))
+        .filter(|message| json_value::is_truthy(message))
         .cloned()
         .unwrap_or_else(|| json!(DEFAULT_STALE_MESSAGE));
     output.push(json!({
@@ -109,14 +112,14 @@ fn process_stale(rule_type: &str, config: &Value, output: &mut Vec<Value>) {
     }));
 }
 
-fn simple_config_mapping(validator: &str, value: &Value) -> JsResult<Value> {
+fn shorthand_validator(validator: &str, value: &Value) -> Result<Value> {
     match validator {
         "assignee" | "approvals" => Ok(json!({ "do": validator, "min": { "count": value } })),
         "label" | "title" => Ok(json!({ "do": validator, "must_exclude": { "regex": value } })),
         "milestone" | "project" => {
             Ok(json!({ "do": validator, "must_include": { "regex": value } }))
         }
-        _ => Err(JsError::type_error(
+        _ => Err(Error::type_mismatch(
             "simpleConfigMapping[validator] is not a function",
         )),
     }
@@ -131,8 +134,8 @@ fn is_array_index_key(key: &str) -> bool {
             .is_ok_and(|index| index < u64::from(u32::MAX))
 }
 
-fn object_keys_in_property_order(config: &Value) -> JsResult<Vec<String>> {
-    let mut keys = js::object_keys(Some(config))?;
+fn keys_with_integer_keys_first(config: &Value) -> Result<Vec<String>> {
+    let mut keys = json_value::object_keys(Some(config))?;
     if config.is_object() {
         let (mut index_keys, named_keys): (Vec<String>, Vec<String>) =
             keys.into_iter().partition(|key| is_array_index_key(key));
@@ -143,13 +146,13 @@ fn object_keys_in_property_order(config: &Value) -> JsResult<Vec<String>> {
     Ok(keys)
 }
 
-fn remove_excluded_keys(config: &mut Value) -> JsResult<()> {
-    let exclude = js::get(config, "exclude");
-    if !js::truthy(exclude) {
+fn remove_excluded_keys(config: &mut Value) -> Result<()> {
+    let exclude = json_value::get(config, "exclude");
+    if !json_value::truthy(exclude) {
         return Ok(());
     }
     let Some(Value::String(exclude_list)) = exclude else {
-        return Err(JsError::type_error(
+        return Err(Error::type_mismatch(
             "config.exclude.split is not a function",
         ));
     };
@@ -171,18 +174,18 @@ fn remove_excluded_keys(config: &mut Value) -> JsResult<()> {
     Ok(())
 }
 
-fn description_no_empty(value: &Value) -> JsResult<Option<Value>> {
-    js::read(Some(value), "no_empty")?;
-    if let Some(Value::Bool(enabled)) = js::get(value, "no_empty") {
+fn description_no_empty(value: &Value) -> Result<Option<Value>> {
+    json_value::read(Some(value), "no_empty")?;
+    if let Some(Value::Bool(enabled)) = json_value::get(value, "no_empty") {
         return Ok(Some(
             json!({ "do": "description", "no_empty": { "enabled": enabled } }),
         ));
     }
-    let Some(no_empty_dashed) = js::get(value, "no-empty") else {
+    let Some(no_empty_dashed) = json_value::get(value, "no-empty") else {
         return Ok(None);
     };
-    let enabled = match js::read(Some(no_empty_dashed), "enabled")? {
-        Some(enabled) if js::is_truthy(enabled) => enabled.clone(),
+    let enabled = match json_value::read(Some(no_empty_dashed), "enabled")? {
+        Some(enabled) if json_value::is_truthy(enabled) => enabled.clone(),
         _ => no_empty_dashed.clone(),
     };
     Ok(Some(
@@ -190,37 +193,33 @@ fn description_no_empty(value: &Value) -> JsResult<Option<Value>> {
     ))
 }
 
-fn assign_do(validator: &str, value: &mut Value) -> JsResult<Value> {
+fn assign_do(validator: &str, value: &mut Value) -> Result<Value> {
     match value {
-        Value::Null => Err(JsError::type_error(
+        Value::Null => Err(Error::type_mismatch(
             "Cannot convert undefined or null to object",
         )),
         Value::Object(fields) => {
             fields.insert("do".to_string(), json!(validator));
             Ok(value.clone())
         }
-        // ponytail: a JS array gets a non-index `do` property that serde_json cannot hold, so the array is kept as is
+        // ponytail: a list cannot carry an extra `do` key in serde_json, so the list is kept as is
         _ => Ok(value.clone()),
     }
 }
 
-fn process_validators(
-    event: &str,
-    config: &mut Value,
-    outcomes: OutcomeActions,
-) -> JsResult<Value> {
+fn process_validators(event: &str, config: &mut Value, outcomes: OutcomeActions) -> Result<Value> {
     remove_excluded_keys(config)?;
     let mut validate = Vec::new();
-    for validator in object_keys_in_property_order(config)? {
+    for validator in keys_with_integer_keys_first(config)? {
         if validator == "stale" {
             continue;
         }
-        let Some(value) = js::get_mut(config, &validator) else {
-            validate.push(simple_config_mapping(&validator, &Value::Null)?);
+        let Some(value) = json_value::get_mut(config, &validator) else {
+            validate.push(shorthand_validator(&validator, &Value::Null)?);
             continue;
         };
-        if js::type_of(Some(value)) != "object" {
-            validate.push(simple_config_mapping(&validator, value)?);
+        if json_value::type_of(Some(value)) != "object" {
+            validate.push(shorthand_validator(&validator, value)?);
             continue;
         }
         if validator == "description"
@@ -244,7 +243,7 @@ fn process_validators(
 mod tests {
     use super::*;
 
-    fn transformed(mergeable: Value) -> JsResult<Value> {
+    fn transformed(mergeable: Value) -> Result<Value> {
         let mut config = Value::Object(Map::from_iter([("mergeable".to_string(), mergeable)]));
         transform(&mut config).map(|output| output["mergeable"].clone())
     }
@@ -254,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn top_level_simple_values_become_pull_request_and_review_rule_sets() -> JsResult<()> {
+    fn top_level_simple_values_become_pull_request_and_review_rule_sets() -> Result<()> {
         let rule_sets = transformed(json!({"title": "wip", "approvals": 2, "milestone": "v1"}))?;
         let expected_validate = json!([
             {"do": "title", "must_exclude": {"regex": "wip"}},
@@ -270,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn issues_pull_requests_and_stale_produce_rule_sets_in_node_order() -> JsResult<()> {
+    fn issues_pull_requests_and_stale_produce_rule_sets_in_configuration_order() -> Result<()> {
         let rule_sets = transformed(json!({
             "issues": {"assignee": 1, "stale": {"days": 20}},
             "pull_requests": {"label": "wip", "stale": {"days": 10, "message": "ping"}}
@@ -308,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn exclude_list_removes_trimmed_keys_and_itself() -> JsResult<()> {
+    fn exclude_list_removes_trimmed_keys_and_itself() -> Result<()> {
         let rule_sets = transformed(json!({
             "pull_requests": {"title": "wip", "label": "x", "stale": {"days": 3}, "exclude": "label, stale"}
         }))?;
@@ -321,10 +320,10 @@ mod tests {
     }
 
     #[test]
-    fn non_string_exclude_fails_like_split_on_a_non_string() {
+    fn non_string_exclude_is_rejected() {
         let failure = transformed(json!({"exclude": 5}))
             .err()
-            .map(|error| error.message);
+            .map(|error| error.message().to_string());
         assert_eq!(
             failure.as_deref(),
             Some("config.exclude.split is not a function")
@@ -332,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn description_no_empty_variants_become_enabled_flags() -> JsResult<()> {
+    fn description_no_empty_variants_become_enabled_flags() -> Result<()> {
         for (description, expected_enabled) in [
             (json!({"no_empty": true}), json!(true)),
             (json!({"no-empty": false}), json!(false)),
@@ -352,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn object_validators_get_do_appended_or_kept_in_place() -> JsResult<()> {
+    fn object_validators_get_do_appended_or_kept_in_place() -> Result<()> {
         let rule_sets = transformed(json!({
             "description": {"must_include": {"regex": "a"}},
             "size": {"do": "ignored", "max": {"count": 5}}
@@ -368,10 +367,10 @@ mod tests {
     }
 
     #[test]
-    fn unknown_simple_validator_fails_like_calling_an_undefined_mapping() {
+    fn unknown_shorthand_validator_is_rejected() {
         let failure = transformed(json!({"size": 5}))
             .err()
-            .map(|error| error.message);
+            .map(|error| error.message().to_string());
         assert_eq!(
             failure.as_deref(),
             Some("simpleConfigMapping[validator] is not a function")
@@ -379,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn integer_like_keys_are_visited_first_like_object_keys() -> JsResult<()> {
+    fn integer_like_keys_are_visited_first_in_ascending_order() -> Result<()> {
         let rule_sets = transformed(json!({"title": "a", "10": {}, "2": {}}))?;
         let order: Vec<Value> = validate_of(&rule_sets[0])
             .as_array()

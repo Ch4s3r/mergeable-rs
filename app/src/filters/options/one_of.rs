@@ -1,5 +1,5 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::validators::options::lib::OptionResult;
 use crate::validators::options_processor::list_processor;
 use serde_json::{Map, Value};
@@ -9,7 +9,7 @@ pub async fn process(
     filter_context: &Value,
     input: &Value,
     rule: &Value,
-) -> JsResult<Value> {
+) -> Result<Value> {
     let listed = rule.get("one_of").unwrap_or(&Value::Null);
     let candidates = list_processor::process(listed, context).await?;
     let mut candidate_rule = Map::new();

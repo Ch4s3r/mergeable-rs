@@ -1,7 +1,8 @@
 use super::mark::{self, Mark};
 use super::types::{IMPLICIT_TYPES, MERGE_TAG, TypeContext, YamlType};
-use super::value::{Heap, JsValue};
+use super::value::{Heap, HeapValue};
 use super::{Dialect, YamlError};
+use crate::error::ErrorKind;
 use std::collections::{HashMap, HashSet};
 
 const NOT_A_CHARACTER: u32 = u32::MAX;
@@ -34,7 +35,7 @@ const LEFT_BRACE: u32 = 0x7B;
 const VERTICAL_BAR: u32 = 0x7C;
 const RIGHT_BRACE: u32 = 0x7D;
 const BYTE_ORDER_MARK: u16 = 0xFEFF;
-// ponytail: V8 overflows its stack at roughly 1700-1900 nested nodes; a fixed 1000 approximates that RangeError
+// ponytail: nesting deeper than a fixed 1000 levels fails with an out-of-range error instead of growing the stack without bound
 const MAXIMUM_NESTING_DEPTH: usize = 1000;
 const CORE_TAG_PREFIX: &str = "tag:yaml.org,2002:";
 
@@ -63,6 +64,30 @@ enum NodeContext {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
+enum SegmentCharacters {
+    Printable,
+    JsonCompatible,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Comments {
+    Skip,
+    Stop,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SeparationSpace {
+    Skip,
+    Keep,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CompactCollections {
+    Allowed,
+    Forbidden,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Chomping {
     Clip,
     Strip,
@@ -79,7 +104,7 @@ enum IndentStatus {
 #[derive(Debug)]
 pub(super) enum LoadError {
     Yaml { reason: String, mark: Mark },
-    Thrown { name: &'static str, message: String },
+    Aborted { kind: ErrorKind, message: String },
 }
 
 #[derive(Clone, Copy, Default)]
@@ -97,7 +122,7 @@ impl KeyStart {
 
 type LoadResult<T> = Result<T, LoadError>;
 
-fn is_eol(character: u32) -> bool {
+fn is_line_break(character: u32) -> bool {
     character == LINE_FEED || character == CARRIAGE_RETURN
 }
 
@@ -105,8 +130,8 @@ fn is_white_space(character: u32) -> bool {
     character == TAB || character == SPACE
 }
 
-fn is_ws_or_eol(character: u32) -> bool {
-    is_white_space(character) || is_eol(character)
+fn is_whitespace_or_line_break(character: u32) -> bool {
+    is_white_space(character) || is_line_break(character)
 }
 
 fn is_flow_indicator(character: u32) -> bool {
@@ -300,15 +325,15 @@ fn text_of(units: &[u16]) -> String {
 pub(super) fn load_documents(
     text: &str,
     dialect: Dialect,
-) -> Result<(Vec<JsValue>, Heap), YamlError> {
+) -> Result<(Vec<HeapValue>, Heap), YamlError> {
     let mut loader = Loader::new(text, dialect);
     match loader.load_documents() {
         Ok(()) => Ok((loader.documents, loader.heap)),
-        Err(LoadError::Yaml { reason, mark }) => Err(YamlError::yaml_exception(match dialect {
-            Dialect::JsYaml3 => mark::format_js_yaml_3(&reason, &mark),
-            Dialect::JsYaml4 => mark::format_js_yaml_4(&reason, &mark),
+        Err(LoadError::Yaml { reason, mark }) => Err(YamlError::syntax(match dialect {
+            Dialect::Lenient => mark::format_lenient_error(&reason, &mark),
+            Dialect::Strict => mark::format_strict_error(&reason, &mark),
         })),
-        Err(LoadError::Thrown { name, message }) => Err(YamlError { name, message }),
+        Err(LoadError::Aborted { kind, message }) => Err(YamlError { kind, message }),
     }
 }
 
@@ -323,12 +348,12 @@ struct Loader {
     first_tab_in_line: Option<usize>,
     version: Option<String>,
     tag_map: HashMap<String, String>,
-    anchor_map: HashMap<String, JsValue>,
+    anchor_map: HashMap<String, HeapValue>,
     tag: Option<String>,
     anchor: Option<String>,
     kind: Option<Kind>,
-    result: JsValue,
-    documents: Vec<JsValue>,
+    result: HeapValue,
+    documents: Vec<HeapValue>,
     heap: Heap,
     nesting_depth: usize,
 }
@@ -360,15 +385,15 @@ impl Loader {
             tag: None,
             anchor: None,
             kind: None,
-            result: JsValue::Null,
+            result: HeapValue::Null,
             documents: Vec::new(),
             heap: Heap::default(),
             nesting_depth: 0,
         }
     }
 
-    fn is_js_yaml_4(&self) -> bool {
-        self.dialect == Dialect::JsYaml4
+    fn is_strict(&self) -> bool {
+        self.dialect == Dialect::Strict
     }
 
     fn character_at(&self, position: usize) -> u32 {
@@ -392,8 +417,8 @@ impl Loader {
 
     fn error(&self, reason: impl Into<String>) -> LoadError {
         let buffer = match self.dialect {
-            Dialect::JsYaml3 => self.input.clone(),
-            Dialect::JsYaml4 => self
+            Dialect::Lenient => self.input.clone(),
+            Dialect::Strict => self
                 .input
                 .get(..self.input.len().saturating_sub(1))
                 .unwrap_or_default()
@@ -414,14 +439,14 @@ impl Loader {
         Err(self.error(reason))
     }
 
-    fn register_anchor(&mut self, anchor: String, value: JsValue) {
-        if self.dialect == Dialect::JsYaml3 && anchor == "__proto__" {
+    fn register_anchor(&mut self, anchor: String, value: HeapValue) {
+        if self.dialect == Dialect::Lenient && anchor == "__proto__" {
             return;
         }
         self.anchor_map.insert(anchor, value);
     }
 
-    fn register_current_anchor(&mut self, value: JsValue) {
+    fn register_current_anchor(&mut self, value: HeapValue) {
         if let Some(anchor) = self.anchor.clone() {
             self.register_anchor(anchor, value);
         }
@@ -447,26 +472,31 @@ impl Loader {
         &self,
         start: usize,
         end: usize,
-        check_json: bool,
+        allowed_characters: SegmentCharacters,
         buffer: &mut Vec<u16>,
     ) -> LoadResult<()> {
         if start >= end {
             return Ok(());
         }
         let segment = self.input.get(start..end).unwrap_or_default();
-        if check_json {
-            if segment.iter().any(|unit| *unit != 0x09 && *unit < 0x20) {
-                return self.fail("expected valid JSON character");
+        match allowed_characters {
+            SegmentCharacters::JsonCompatible => {
+                if segment.iter().any(|unit| *unit != 0x09 && *unit < 0x20) {
+                    return self.fail("expected valid JSON character");
+                }
             }
-        } else if is_non_printable(segment) {
-            return self.fail("the stream contains non-printable characters");
+            SegmentCharacters::Printable => {
+                if is_non_printable(segment) {
+                    return self.fail("the stream contains non-printable characters");
+                }
+            }
         }
         buffer.extend_from_slice(segment);
         Ok(())
     }
 
-    fn assign_property(&mut self, object_id: usize, key: String, value: JsValue) {
-        if self.dialect == Dialect::JsYaml3 && key == "__proto__" {
+    fn assign_property(&mut self, object_id: usize, key: String, value: HeapValue) {
+        if self.dialect == Dialect::Lenient && key == "__proto__" {
             return;
         }
         self.heap.objects[object_id].set(key, value);
@@ -475,10 +505,10 @@ impl Loader {
     fn merge_mappings(
         &mut self,
         destination: usize,
-        source: &JsValue,
+        source: &HeapValue,
         overridable_keys: &mut HashSet<String>,
     ) -> LoadResult<()> {
-        if !source.is_js_object() {
+        if !source.is_object_like() {
             return self.fail("cannot merge mappings; the provided source object is unacceptable");
         }
         for (key, value) in self.heap.own_enumerable_entries(source) {
@@ -492,17 +522,17 @@ impl Loader {
         Ok(())
     }
 
-    fn mapping_key_string(&self, key_node: &JsValue) -> LoadResult<String> {
+    fn mapping_key_string(&self, key_node: &HeapValue) -> LoadResult<String> {
         match key_node {
-            JsValue::Array(id) => {
+            HeapValue::Array(id) => {
                 let mut converted = Vec::new();
                 for item in &self.heap.arrays[*id] {
                     match item {
-                        JsValue::Array(_) => {
+                        HeapValue::Array(_) => {
                             return self.fail("nested arrays are not supported inside keys");
                         }
-                        JsValue::Object(_) => {
-                            converted.push(JsValue::String("[object Object]".to_string()));
+                        HeapValue::Object(_) => {
+                            converted.push(HeapValue::String("[object Object]".to_string()));
                         }
                         other => converted.push(other.clone()),
                     }
@@ -510,14 +540,14 @@ impl Loader {
                 Ok(converted
                     .iter()
                     .map(|item| match item {
-                        JsValue::Null => String::new(),
-                        other => self.heap.to_js_string(other, self.dialect),
+                        HeapValue::Null => String::new(),
+                        other => self.heap.to_display_string(other, self.dialect),
                     })
                     .collect::<Vec<_>>()
                     .join(","))
             }
-            JsValue::Object(_) => Ok("[object Object]".to_string()),
-            other => Ok(self.heap.to_js_string(other, self.dialect)),
+            HeapValue::Object(_) => Ok("[object Object]".to_string()),
+            other => Ok(self.heap.to_display_string(other, self.dialect)),
         }
     }
 
@@ -526,14 +556,14 @@ impl Loader {
         target: Option<usize>,
         overridable_keys: &mut HashSet<String>,
         key_tag: Option<&str>,
-        key_node: &JsValue,
-        value_node: JsValue,
+        key_node: &HeapValue,
+        value_node: HeapValue,
         key_start: KeyStart,
     ) -> LoadResult<usize> {
         let key = self.mapping_key_string(key_node)?;
         let object_id = target.unwrap_or_else(|| self.heap.new_object());
         if key_tag == Some(MERGE_TAG) {
-            if let JsValue::Array(id) = &value_node {
+            if let HeapValue::Array(id) = &value_node {
                 let sources = self.heap.arrays[*id].clone();
                 for source in &sources {
                     self.merge_mappings(object_id, source, overridable_keys)?;
@@ -568,23 +598,23 @@ impl Loader {
         }
         self.line += 1;
         self.line_start = self.position;
-        if self.is_js_yaml_4() {
+        if self.is_strict() {
             self.first_tab_in_line = None;
         }
         Ok(())
     }
 
-    fn skip_separation_space(&mut self, allow_comments: bool) -> LoadResult<usize> {
+    fn skip_separation_space(&mut self, comments: Comments) -> LoadResult<usize> {
         let mut line_breaks = 0;
         let mut character = self.current();
         while character != NUL {
             while is_white_space(character) {
-                if self.is_js_yaml_4() && character == TAB && self.first_tab_in_line.is_none() {
+                if self.is_strict() && character == TAB && self.first_tab_in_line.is_none() {
                     self.first_tab_in_line = Some(self.position);
                 }
                 character = self.advance();
             }
-            if allow_comments && character == HASH {
+            if comments == Comments::Skip && character == HASH {
                 loop {
                     character = self.advance();
                     if character == LINE_FEED || character == CARRIAGE_RETURN || character == NUL {
@@ -592,7 +622,7 @@ impl Loader {
                     }
                 }
             }
-            if !is_eol(character) {
+            if !is_line_break(character) {
                 break;
             }
             self.read_line_break()?;
@@ -615,7 +645,7 @@ impl Loader {
             && character == self.character_at(position + 2)
         {
             let following = self.character_at(position + 3);
-            return following == NUL || is_ws_or_eol(following);
+            return following == NUL || is_whitespace_or_line_break(following);
         }
         false
     }
@@ -631,10 +661,11 @@ impl Loader {
     fn read_plain_scalar(
         &mut self,
         node_indent: i64,
-        within_flow_collection: bool,
+        node_context: NodeContext,
     ) -> LoadResult<bool> {
+        let within_flow_collection = node_context == NodeContext::FlowIn;
         let mut character = self.current();
-        if is_ws_or_eol(character)
+        if is_whitespace_or_line_break(character)
             || is_flow_indicator(character)
             || matches!(
                 character,
@@ -654,7 +685,9 @@ impl Loader {
         }
         if character == QUESTION_MARK || character == HYPHEN {
             let following = self.character_at(self.position + 1);
-            if is_ws_or_eol(following) || (within_flow_collection && is_flow_indicator(following)) {
+            if is_whitespace_or_line_break(following)
+                || (within_flow_collection && is_flow_indicator(following))
+            {
                 return Ok(false);
             }
         }
@@ -668,7 +701,7 @@ impl Loader {
         while character != NUL {
             if character == COLON {
                 let following = self.character_at(self.position + 1);
-                if is_ws_or_eol(following)
+                if is_whitespace_or_line_break(following)
                     || (within_flow_collection && is_flow_indicator(following))
                 {
                     break;
@@ -678,18 +711,18 @@ impl Loader {
                     .position
                     .checked_sub(1)
                     .map_or(NOT_A_CHARACTER, |previous| self.character_at(previous));
-                if is_ws_or_eol(preceding) {
+                if is_whitespace_or_line_break(preceding) {
                     break;
                 }
             } else if (self.position == self.line_start && self.test_document_separator())
                 || (within_flow_collection && is_flow_indicator(character))
             {
                 break;
-            } else if is_eol(character) {
+            } else if is_line_break(character) {
                 saved_line = self.line;
                 let saved_line_start = self.line_start;
                 let saved_line_indent = self.line_indent;
-                self.skip_separation_space(false)?;
+                self.skip_separation_space(Comments::Stop)?;
                 if self.line_indent >= node_indent {
                     has_pending_content = true;
                     character = self.current();
@@ -702,7 +735,12 @@ impl Loader {
                 break;
             }
             if has_pending_content {
-                self.capture_segment(capture_start, capture_end, false, &mut buffer)?;
+                self.capture_segment(
+                    capture_start,
+                    capture_end,
+                    SegmentCharacters::Printable,
+                    &mut buffer,
+                )?;
                 Self::write_folded_lines(&mut buffer, self.line - saved_line);
                 capture_start = self.position;
                 capture_end = self.position;
@@ -713,9 +751,14 @@ impl Loader {
             }
             character = self.advance();
         }
-        self.capture_segment(capture_start, capture_end, false, &mut buffer)?;
+        self.capture_segment(
+            capture_start,
+            capture_end,
+            SegmentCharacters::Printable,
+            &mut buffer,
+        )?;
         if !buffer.is_empty() {
-            self.result = JsValue::String(text_of(&buffer));
+            self.result = HeapValue::String(text_of(&buffer));
             return Ok(true);
         }
         self.kind = saved_kind;
@@ -738,18 +781,28 @@ impl Loader {
                 break;
             }
             if character == SINGLE_QUOTE {
-                self.capture_segment(capture_start, self.position, true, &mut buffer)?;
+                self.capture_segment(
+                    capture_start,
+                    self.position,
+                    SegmentCharacters::JsonCompatible,
+                    &mut buffer,
+                )?;
                 if self.advance() == SINGLE_QUOTE {
                     capture_start = self.position;
                     self.position += 1;
                     capture_end = self.position;
                 } else {
-                    self.result = JsValue::String(text_of(&buffer));
+                    self.result = HeapValue::String(text_of(&buffer));
                     return Ok(true);
                 }
-            } else if is_eol(character) {
-                self.capture_segment(capture_start, capture_end, true, &mut buffer)?;
-                let line_breaks = self.skip_separation_space(false)?;
+            } else if is_line_break(character) {
+                self.capture_segment(
+                    capture_start,
+                    capture_end,
+                    SegmentCharacters::JsonCompatible,
+                    &mut buffer,
+                )?;
+                let line_breaks = self.skip_separation_space(Comments::Stop)?;
                 Self::write_folded_lines(&mut buffer, line_breaks);
                 capture_start = self.position;
                 capture_end = self.position;
@@ -779,16 +832,26 @@ impl Loader {
                 break;
             }
             if character == DOUBLE_QUOTE {
-                self.capture_segment(capture_start, self.position, true, &mut buffer)?;
+                self.capture_segment(
+                    capture_start,
+                    self.position,
+                    SegmentCharacters::JsonCompatible,
+                    &mut buffer,
+                )?;
                 self.position += 1;
-                self.result = JsValue::String(text_of(&buffer));
+                self.result = HeapValue::String(text_of(&buffer));
                 return Ok(true);
             } else if character == BACKSLASH {
-                self.capture_segment(capture_start, self.position, true, &mut buffer)?;
+                self.capture_segment(
+                    capture_start,
+                    self.position,
+                    SegmentCharacters::JsonCompatible,
+                    &mut buffer,
+                )?;
                 character = self.advance();
                 let hex_length = escaped_hex_length(character);
-                if is_eol(character) {
-                    self.skip_separation_space(false)?;
+                if is_line_break(character) {
+                    self.skip_separation_space(Comments::Stop)?;
                 } else if let Some(escaped) =
                     simple_escape_sequence(character).filter(|_| character < 256)
                 {
@@ -810,9 +873,14 @@ impl Loader {
                 }
                 capture_start = self.position;
                 capture_end = self.position;
-            } else if is_eol(character) {
-                self.capture_segment(capture_start, capture_end, true, &mut buffer)?;
-                let line_breaks = self.skip_separation_space(false)?;
+            } else if is_line_break(character) {
+                self.capture_segment(
+                    capture_start,
+                    capture_end,
+                    SegmentCharacters::JsonCompatible,
+                    &mut buffer,
+                )?;
+                let line_breaks = self.skip_separation_space(Comments::Stop)?;
                 Self::write_folded_lines(&mut buffer, line_breaks);
                 capture_start = self.position;
                 capture_end = self.position;
@@ -828,7 +896,7 @@ impl Loader {
 
     #[expect(
         clippy::too_many_lines,
-        reason = "a faithful port of js-yaml readFlowCollection keeps its single loop"
+        reason = "the flow collection reader keeps its parsing states in a single loop"
     )]
     fn read_flow_collection(&mut self, node_indent: i64) -> LoadResult<bool> {
         let saved_tag = self.tag.clone();
@@ -838,10 +906,10 @@ impl Loader {
             (
                 RIGHT_BRACKET,
                 false,
-                JsValue::Array(self.heap.new_array(Vec::new())),
+                HeapValue::Array(self.heap.new_array(Vec::new())),
             )
         } else if character == LEFT_BRACE {
-            (RIGHT_BRACE, true, JsValue::Object(self.heap.new_object()))
+            (RIGHT_BRACE, true, HeapValue::Object(self.heap.new_object()))
         } else {
             return Ok(false);
         };
@@ -850,7 +918,7 @@ impl Loader {
         let mut read_next = true;
         character = self.advance();
         while character != NUL {
-            self.skip_separation_space(true)?;
+            self.skip_separation_space(Comments::Skip)?;
             character = self.current();
             if character == terminator {
                 self.position += 1;
@@ -865,20 +933,22 @@ impl Loader {
                 return Ok(true);
             } else if !read_next {
                 return self.fail("missed comma between flow collection entries");
-            } else if self.is_js_yaml_4() && character == COMMA {
+            } else if self.is_strict() && character == COMMA {
                 return self.fail("expected the node content, but found ','");
             }
-            let mut value_node = JsValue::Null;
+            let mut value_node = HeapValue::Null;
             let mut is_pair = false;
             let mut is_explicit_pair = false;
-            if character == QUESTION_MARK && is_ws_or_eol(self.character_at(self.position + 1)) {
+            if character == QUESTION_MARK
+                && is_whitespace_or_line_break(self.character_at(self.position + 1))
+            {
                 is_pair = true;
                 is_explicit_pair = true;
                 self.position += 1;
-                self.skip_separation_space(true)?;
+                self.skip_separation_space(Comments::Skip)?;
             }
             let line = self.line;
-            let key_start = if self.is_js_yaml_4() {
+            let key_start = if self.is_strict() {
                 KeyStart {
                     line: Some(line),
                     line_start: Some(self.line_start),
@@ -887,20 +957,30 @@ impl Loader {
             } else {
                 KeyStart::default()
             };
-            self.compose_node(node_indent, NodeContext::FlowIn, false, true)?;
+            self.compose_node(
+                node_indent,
+                NodeContext::FlowIn,
+                SeparationSpace::Keep,
+                CompactCollections::Allowed,
+            )?;
             let key_tag = self.tag.clone();
             let key_node = self.result.clone();
-            self.skip_separation_space(true)?;
+            self.skip_separation_space(Comments::Skip)?;
             character = self.current();
             if (is_explicit_pair || self.line == line) && character == COLON {
                 is_pair = true;
                 self.advance();
-                self.skip_separation_space(true)?;
-                self.compose_node(node_indent, NodeContext::FlowIn, false, true)?;
+                self.skip_separation_space(Comments::Skip)?;
+                self.compose_node(
+                    node_indent,
+                    NodeContext::FlowIn,
+                    SeparationSpace::Keep,
+                    CompactCollections::Allowed,
+                )?;
                 value_node = self.result.clone();
             }
             match &collection {
-                JsValue::Object(id) => {
+                HeapValue::Object(id) => {
                     self.store_mapping_pair(
                         Some(*id),
                         &mut overridable_keys,
@@ -910,9 +990,9 @@ impl Loader {
                         key_start,
                     )?;
                 }
-                JsValue::Array(id) => {
+                HeapValue::Array(id) => {
                     let item = if is_pair {
-                        JsValue::Object(self.store_mapping_pair(
+                        HeapValue::Object(self.store_mapping_pair(
                             None,
                             &mut overridable_keys,
                             key_tag.as_deref(),
@@ -927,7 +1007,7 @@ impl Loader {
                 }
                 _ => {}
             }
-            self.skip_separation_space(true)?;
+            self.skip_separation_space(Comments::Skip)?;
             character = self.current();
             if character == COMMA {
                 read_next = true;
@@ -941,7 +1021,7 @@ impl Loader {
 
     #[expect(
         clippy::too_many_lines,
-        reason = "a faithful port of js-yaml readBlockScalar keeps its header and body loops together"
+        reason = "the block scalar reader keeps its header and body loops together"
     )]
     fn read_block_scalar(&mut self, node_indent: i64) -> LoadResult<bool> {
         let mut character = self.current();
@@ -998,7 +1078,7 @@ impl Loader {
             if character == HASH {
                 loop {
                     character = self.advance();
-                    if is_eol(character) || character == NUL {
+                    if is_line_break(character) || character == NUL {
                         break;
                     }
                 }
@@ -1016,7 +1096,7 @@ impl Loader {
             if !detected_indent && self.line_indent > text_indent {
                 text_indent = self.line_indent;
             }
-            if is_eol(character) {
+            if is_line_break(character) {
                 empty_lines += 1;
                 continue;
             }
@@ -1065,12 +1145,17 @@ impl Loader {
             detected_indent = true;
             empty_lines = 0;
             let capture_start = self.position;
-            while !is_eol(character) && character != NUL {
+            while !is_line_break(character) && character != NUL {
                 character = self.advance();
             }
-            self.capture_segment(capture_start, self.position, false, &mut buffer)?;
+            self.capture_segment(
+                capture_start,
+                self.position,
+                SegmentCharacters::Printable,
+                &mut buffer,
+            )?;
         }
-        self.result = JsValue::String(text_of(&buffer));
+        self.result = HeapValue::String(text_of(&buffer));
         Ok(true)
     }
 
@@ -1083,34 +1168,41 @@ impl Loader {
     }
 
     fn read_block_sequence(&mut self, node_indent: i64) -> LoadResult<bool> {
-        if self.is_js_yaml_4() && self.first_tab_in_line.is_some() {
+        if self.is_strict() && self.first_tab_in_line.is_some() {
             return Ok(false);
         }
         let saved_tag = self.tag.clone();
         let saved_anchor = self.anchor.clone();
         let sequence = self.heap.new_array(Vec::new());
-        self.register_current_anchor(JsValue::Array(sequence));
+        self.register_current_anchor(HeapValue::Array(sequence));
         let mut detected = false;
         let mut character = self.current();
         while character != NUL {
-            if self.is_js_yaml_4() {
+            if self.is_strict() {
                 self.fail_on_tab_indentation()?;
             }
-            if character != HYPHEN || !is_ws_or_eol(self.character_at(self.position + 1)) {
+            if character != HYPHEN
+                || !is_whitespace_or_line_break(self.character_at(self.position + 1))
+            {
                 break;
             }
             detected = true;
             self.position += 1;
-            if self.skip_separation_space(true)? > 0 && self.line_indent <= node_indent {
-                self.heap.arrays[sequence].push(JsValue::Null);
+            if self.skip_separation_space(Comments::Skip)? > 0 && self.line_indent <= node_indent {
+                self.heap.arrays[sequence].push(HeapValue::Null);
                 character = self.current();
                 continue;
             }
             let line = self.line;
-            self.compose_node(node_indent, NodeContext::BlockIn, false, true)?;
+            self.compose_node(
+                node_indent,
+                NodeContext::BlockIn,
+                SeparationSpace::Keep,
+                CompactCollections::Allowed,
+            )?;
             let item = self.result.clone();
             self.heap.arrays[sequence].push(item);
-            self.skip_separation_space(true)?;
+            self.skip_separation_space(Comments::Skip)?;
             character = self.current();
             if (self.line == line || self.line_indent > node_indent) && character != NUL {
                 return self.fail("bad indentation of a sequence entry");
@@ -1122,47 +1214,49 @@ impl Loader {
             self.tag = saved_tag;
             self.anchor = saved_anchor;
             self.kind = Some(Kind::Sequence);
-            self.result = JsValue::Array(sequence);
+            self.result = HeapValue::Array(sequence);
         }
         Ok(detected)
     }
 
     #[expect(
         clippy::too_many_lines,
-        reason = "a faithful port of js-yaml readBlockMapping keeps its single state machine"
+        reason = "the block mapping reader keeps its parsing states in a single state machine"
     )]
     fn read_block_mapping(&mut self, node_indent: i64, flow_indent: i64) -> LoadResult<bool> {
-        if self.is_js_yaml_4() && self.first_tab_in_line.is_some() {
+        if self.is_strict() && self.first_tab_in_line.is_some() {
             return Ok(false);
         }
         let saved_tag = self.tag.clone();
         let saved_anchor = self.anchor.clone();
         let mapping = self.heap.new_object();
-        self.register_current_anchor(JsValue::Object(mapping));
+        self.register_current_anchor(HeapValue::Object(mapping));
         let mut overridable_keys = HashSet::new();
         let mut key_tag: Option<String> = None;
-        let mut key_node = JsValue::Null;
-        let mut value_node = JsValue::Null;
+        let mut key_node = HeapValue::Null;
+        let mut value_node = HeapValue::Null;
         let mut at_explicit_key = false;
         let mut detected = false;
-        let mut allow_compact: bool;
+        let mut compact_collections: CompactCollections;
         let mut key_start = KeyStart::default();
-        let explicit_key_start = |loader: &Self, js_yaml_4_start: KeyStart| {
-            if loader.is_js_yaml_4() {
-                js_yaml_4_start
+        let explicit_key_start = |loader: &Self, strict_start: KeyStart| {
+            if loader.is_strict() {
+                strict_start
             } else {
                 KeyStart::default()
             }
         };
         let mut character = self.current();
         while character != NUL {
-            if self.is_js_yaml_4() && !at_explicit_key {
+            if self.is_strict() && !at_explicit_key {
                 self.fail_on_tab_indentation()?;
             }
             let following = self.character_at(self.position + 1);
             let line = self.line;
             let entry_position = self.position;
-            if (character == QUESTION_MARK || character == COLON) && is_ws_or_eol(following) {
+            if (character == QUESTION_MARK || character == COLON)
+                && is_whitespace_or_line_break(following)
+            {
                 if character == QUESTION_MARK {
                     if at_explicit_key {
                         let start = explicit_key_start(self, key_start);
@@ -1171,33 +1265,38 @@ impl Loader {
                             &mut overridable_keys,
                             key_tag.as_deref(),
                             &key_node,
-                            JsValue::Null,
+                            HeapValue::Null,
                             start,
                         )?;
                         key_tag = None;
-                        key_node = JsValue::Null;
-                        value_node = JsValue::Null;
+                        key_node = HeapValue::Null;
+                        value_node = HeapValue::Null;
                     }
                     detected = true;
                     at_explicit_key = true;
-                    allow_compact = true;
+                    compact_collections = CompactCollections::Allowed;
                 } else if at_explicit_key {
                     at_explicit_key = false;
-                    allow_compact = true;
+                    compact_collections = CompactCollections::Allowed;
                 } else {
                     return self.fail("incomplete explicit mapping pair; a key node is missed; or followed by a non-tabulated empty line");
                 }
                 self.position += 1;
                 character = following;
             } else {
-                if self.is_js_yaml_4() {
+                if self.is_strict() {
                     key_start = KeyStart {
                         line: Some(self.line),
                         line_start: Some(self.line_start),
                         position: Some(self.position),
                     };
                 }
-                if !self.compose_node(flow_indent, NodeContext::FlowOut, false, true)? {
+                if !self.compose_node(
+                    flow_indent,
+                    NodeContext::FlowOut,
+                    SeparationSpace::Keep,
+                    CompactCollections::Allowed,
+                )? {
                     break;
                 }
                 if self.line == line {
@@ -1207,7 +1306,7 @@ impl Loader {
                     }
                     if character == COLON {
                         character = self.advance();
-                        if !is_ws_or_eol(character) {
+                        if !is_whitespace_or_line_break(character) {
                             return self.fail("a whitespace character is expected after the key-value separator within a block mapping");
                         }
                         if at_explicit_key {
@@ -1217,14 +1316,14 @@ impl Loader {
                                 &mut overridable_keys,
                                 key_tag.as_deref(),
                                 &key_node,
-                                JsValue::Null,
+                                HeapValue::Null,
                                 start,
                             )?;
-                            value_node = JsValue::Null;
+                            value_node = HeapValue::Null;
                         }
                         detected = true;
                         at_explicit_key = false;
-                        allow_compact = false;
+                        compact_collections = CompactCollections::Forbidden;
                         key_tag = self.tag.clone();
                         key_node = self.result.clone();
                     } else if detected {
@@ -1244,14 +1343,19 @@ impl Loader {
                 }
             }
             if self.line == line || self.line_indent > node_indent {
-                if self.is_js_yaml_4() && at_explicit_key {
+                if self.is_strict() && at_explicit_key {
                     key_start = KeyStart {
                         line: Some(self.line),
                         line_start: Some(self.line_start),
                         position: Some(self.position),
                     };
                 }
-                if self.compose_node(node_indent, NodeContext::BlockOut, true, allow_compact)? {
+                if self.compose_node(
+                    node_indent,
+                    NodeContext::BlockOut,
+                    SeparationSpace::Skip,
+                    compact_collections,
+                )? {
                     if at_explicit_key {
                         key_node = self.result.clone();
                     } else {
@@ -1259,7 +1363,7 @@ impl Loader {
                     }
                 }
                 if !at_explicit_key {
-                    let start = if self.is_js_yaml_4() {
+                    let start = if self.is_strict() {
                         key_start
                     } else {
                         KeyStart {
@@ -1273,16 +1377,16 @@ impl Loader {
                         &mut overridable_keys,
                         key_tag.as_deref(),
                         &key_node,
-                        std::mem::replace(&mut value_node, JsValue::Null),
+                        std::mem::replace(&mut value_node, HeapValue::Null),
                         start,
                     )?;
                     key_tag = None;
-                    key_node = JsValue::Null;
+                    key_node = HeapValue::Null;
                 }
-                self.skip_separation_space(true)?;
+                self.skip_separation_space(Comments::Skip)?;
                 character = self.current();
             }
-            let is_misindented = if self.is_js_yaml_4() {
+            let is_misindented = if self.is_strict() {
                 self.line == line || self.line_indent > node_indent
             } else {
                 self.line_indent > node_indent
@@ -1300,7 +1404,7 @@ impl Loader {
                 &mut overridable_keys,
                 key_tag.as_deref(),
                 &key_node,
-                JsValue::Null,
+                HeapValue::Null,
                 start,
             )?;
         }
@@ -1308,7 +1412,7 @@ impl Loader {
             self.tag = saved_tag;
             self.anchor = saved_anchor;
             self.kind = Some(Kind::Mapping);
-            self.result = JsValue::Object(mapping);
+            self.result = HeapValue::Object(mapping);
         }
         Ok(detected)
     }
@@ -1349,7 +1453,7 @@ impl Loader {
                 return self.fail("unexpected end of the stream within a verbatim tag");
             }
         } else {
-            while character != NUL && !is_ws_or_eol(character) {
+            while character != NUL && !is_whitespace_or_line_break(character) {
                 if character == EXCLAMATION {
                     if is_named {
                         return self.fail("tag suffix cannot contain exclamation marks");
@@ -1377,7 +1481,7 @@ impl Loader {
                 text_of(&tag_name)
             ));
         }
-        let tag_name = if self.is_js_yaml_4() {
+        let tag_name = if self.is_strict() {
             match decode_uri_component(&tag_name) {
                 Some(decoded) => decoded,
                 None => {
@@ -1413,7 +1517,10 @@ impl Loader {
         }
         character = self.advance();
         let start = self.position;
-        while character != NUL && !is_ws_or_eol(character) && !is_flow_indicator(character) {
+        while character != NUL
+            && !is_whitespace_or_line_break(character)
+            && !is_flow_indicator(character)
+        {
             character = self.advance();
         }
         if self.position == start {
@@ -1430,7 +1537,10 @@ impl Loader {
         }
         character = self.advance();
         let start = self.position;
-        while character != NUL && !is_ws_or_eol(character) && !is_flow_indicator(character) {
+        while character != NUL
+            && !is_whitespace_or_line_break(character)
+            && !is_flow_indicator(character)
+        {
             character = self.advance();
         }
         if self.position == start {
@@ -1441,7 +1551,7 @@ impl Loader {
             return self.fail(format!("unidentified alias \"{alias}\""));
         };
         self.result = value;
-        self.skip_separation_space(true)?;
+        self.skip_separation_space(Comments::Skip)?;
         Ok(true)
     }
 
@@ -1457,18 +1567,22 @@ impl Loader {
         &mut self,
         parent_indent: i64,
         node_context: NodeContext,
-        allow_to_seek: bool,
-        allow_compact: bool,
+        separation_space: SeparationSpace,
+        compact_collections: CompactCollections,
     ) -> LoadResult<bool> {
         self.nesting_depth += 1;
         if self.nesting_depth > MAXIMUM_NESTING_DEPTH {
-            return Err(LoadError::Thrown {
-                name: "RangeError",
+            return Err(LoadError::Aborted {
+                kind: ErrorKind::OutOfRange,
                 message: "Maximum call stack size exceeded".to_string(),
             });
         }
-        let composed =
-            self.compose_node_at_depth(parent_indent, node_context, allow_to_seek, allow_compact);
+        let composed = self.compose_node_at_depth(
+            parent_indent,
+            node_context,
+            separation_space,
+            compact_collections,
+        );
         self.nesting_depth -= 1;
         composed
     }
@@ -1477,13 +1591,13 @@ impl Loader {
         &mut self,
         parent_indent: i64,
         node_context: NodeContext,
-        allow_to_seek: bool,
-        allow_compact: bool,
+        separation_space: SeparationSpace,
+        compact_collections: CompactCollections,
     ) -> LoadResult<bool> {
         self.tag = None;
         self.anchor = None;
         self.kind = None;
-        self.result = JsValue::Null;
+        self.result = HeapValue::Null;
         let allow_block_styles =
             matches!(node_context, NodeContext::BlockOut | NodeContext::BlockIn);
         let allow_block_scalars = allow_block_styles;
@@ -1491,13 +1605,15 @@ impl Loader {
         let mut indent_status = IndentStatus::Deeper;
         let mut at_new_line = false;
         let mut has_content = false;
-        if allow_to_seek && self.skip_separation_space(true)? > 0 {
+        if separation_space == SeparationSpace::Skip
+            && self.skip_separation_space(Comments::Skip)? > 0
+        {
             at_new_line = true;
             indent_status = self.indent_status(parent_indent);
         }
         if indent_status == IndentStatus::Deeper {
             while self.read_tag_property()? || self.read_anchor_property()? {
-                if self.skip_separation_space(true)? > 0 {
+                if self.skip_separation_space(Comments::Skip)? > 0 {
                     at_new_line = true;
                     allow_block_collections = allow_block_styles;
                     indent_status = self.indent_status(parent_indent);
@@ -1507,7 +1623,8 @@ impl Loader {
             }
         }
         if allow_block_collections {
-            allow_block_collections = at_new_line || allow_compact;
+            allow_block_collections =
+                at_new_line || compact_collections == CompactCollections::Allowed;
         }
         if indent_status == IndentStatus::Deeper || node_context == NodeContext::BlockOut {
             let flow_indent = if matches!(node_context, NodeContext::FlowIn | NodeContext::FlowOut)
@@ -1535,9 +1652,7 @@ impl Loader {
                         if self.tag.is_some() || self.anchor.is_some() {
                             return self.fail("alias node should not have any properties");
                         }
-                    } else if self
-                        .read_plain_scalar(flow_indent, node_context == NodeContext::FlowIn)?
-                    {
+                    } else if self.read_plain_scalar(flow_indent, node_context)? {
                         has_content = true;
                         if self.tag.is_none() {
                             self.tag = Some("?".to_string());
@@ -1553,16 +1668,16 @@ impl Loader {
         Ok(self.tag.is_some() || self.anchor.is_some() || has_content)
     }
 
-    fn type_error(message: String) -> LoadError {
-        LoadError::Thrown {
-            name: "TypeError",
+    fn type_mismatch(message: String) -> LoadError {
+        LoadError::Aborted {
+            kind: ErrorKind::TypeMismatch,
             message,
         }
     }
 
     fn resolve_tag(&mut self) -> LoadResult<()> {
         let Some(tag) = self.tag.clone() else {
-            if self.is_js_yaml_4() {
+            if self.is_strict() {
                 self.register_current_anchor(self.result.clone());
             }
             return Ok(());
@@ -1585,11 +1700,11 @@ impl Loader {
                 };
                 if types
                     .resolve(implicit_type, &self.result)
-                    .map_err(Self::type_error)?
+                    .map_err(Self::type_mismatch)?
                 {
                     let constructed = types
                         .construct(implicit_type, self.result.clone())
-                        .map_err(Self::type_error)?;
+                        .map_err(Self::type_mismatch)?;
                     self.result = constructed;
                     self.tag = Some(implicit_type.tag().to_string());
                     self.register_current_anchor(self.result.clone());
@@ -1614,13 +1729,13 @@ impl Loader {
         };
         if !types
             .resolve(explicit_type, &self.result)
-            .map_err(Self::type_error)?
+            .map_err(Self::type_mismatch)?
         {
             return self.fail(format!("cannot resolve a node with !<{tag}> explicit tag"));
         }
         let constructed = types
             .construct(explicit_type, self.result.clone())
-            .map_err(Self::type_error)?;
+            .map_err(Self::type_mismatch)?;
         self.result = constructed;
         self.register_current_anchor(self.result.clone());
         Ok(())
@@ -1666,7 +1781,7 @@ impl Loader {
         if !is_tag_uri(prefix) {
             return self.fail("ill-formed tag prefix (second argument) of the TAG directive");
         }
-        let prefix = if self.is_js_yaml_4() {
+        let prefix = if self.is_strict() {
             match decode_uri_component(prefix) {
                 Some(decoded) => decoded,
                 None => {
@@ -1686,7 +1801,7 @@ impl Loader {
         self.anchor_map.clear();
         let mut has_directives = false;
         while self.current() != NUL {
-            self.skip_separation_space(true)?;
+            self.skip_separation_space(Comments::Skip)?;
             let mut character = self.current();
             if self.line_indent > 0 || character != PERCENT {
                 break;
@@ -1694,7 +1809,7 @@ impl Loader {
             has_directives = true;
             character = self.advance();
             let mut start = self.position;
-            while character != NUL && !is_ws_or_eol(character) {
+            while character != NUL && !is_whitespace_or_line_break(character) {
                 character = self.advance();
             }
             let directive_name = self.slice(start, self.position);
@@ -1709,17 +1824,17 @@ impl Loader {
                 if character == HASH {
                     loop {
                         character = self.advance();
-                        if character == NUL || is_eol(character) {
+                        if character == NUL || is_line_break(character) {
                             break;
                         }
                     }
                     break;
                 }
-                if is_eol(character) {
+                if is_line_break(character) {
                     break;
                 }
                 start = self.position;
-                while character != NUL && !is_ws_or_eol(character) {
+                while character != NUL && !is_whitespace_or_line_break(character) {
                     character = self.advance();
                 }
                 directive_arguments.push(self.slice(start, self.position));
@@ -1733,24 +1848,29 @@ impl Loader {
                 _ => {}
             }
         }
-        self.skip_separation_space(true)?;
+        self.skip_separation_space(Comments::Skip)?;
         if self.line_indent == 0
             && self.current() == HYPHEN
             && self.character_at(self.position + 1) == HYPHEN
             && self.character_at(self.position + 2) == HYPHEN
         {
             self.position += 3;
-            self.skip_separation_space(true)?;
+            self.skip_separation_space(Comments::Skip)?;
         } else if has_directives {
             return self.fail("directives end mark is expected");
         }
-        self.compose_node(self.line_indent - 1, NodeContext::BlockOut, false, true)?;
-        self.skip_separation_space(true)?;
+        self.compose_node(
+            self.line_indent - 1,
+            NodeContext::BlockOut,
+            SeparationSpace::Keep,
+            CompactCollections::Allowed,
+        )?;
+        self.skip_separation_space(Comments::Skip)?;
         self.documents.push(self.result.clone());
         if self.position == self.line_start && self.test_document_separator() {
             if self.current() == PERIOD {
                 self.position += 3;
-                self.skip_separation_space(true)?;
+                self.skip_separation_space(Comments::Skip)?;
             }
             return Ok(());
         }

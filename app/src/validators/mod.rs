@@ -1,6 +1,6 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, ErrorKind, Result};
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use async_trait::async_trait;
@@ -55,7 +55,7 @@ pub const DEFAULT_SUPPORTED_OPTIONS: [&str; 14] = [
 pub trait Validator: Send + Sync {
     fn name(&self) -> &'static str;
     fn supported_events(&self) -> &'static [&'static str];
-    fn supported_settings(&self) -> Option<Value>;
+    fn supported_settings(&self) -> Value;
     fn checks_settings(&self) -> bool {
         true
     }
@@ -64,7 +64,7 @@ pub trait Validator: Send + Sync {
         context: &Context,
         settings: &Value,
         registry: &Registry,
-    ) -> JsResult<Value>;
+    ) -> Result<Value>;
 }
 
 #[must_use]
@@ -105,10 +105,8 @@ pub async fn process_validate(
     context: &Context,
     settings: &Value,
     registry: &Registry,
-) -> JsResult<Value> {
-    let supported_settings = validator.supported_settings().ok_or_else(|| {
-        JsError::error("Class extending validators must provide supported Settings")
-    })?;
+) -> Result<Value> {
+    let supported_settings = validator.supported_settings();
     tracing::info!(
         event_id = %context.event_id,
         repo = %context.repository_full_name(),
@@ -124,13 +122,13 @@ pub async fn process_validate(
             &[],
         ) {
             Ok(()) => {}
-            Err(error) if error.is_named("UnSupportedSettingError") => {
+            Err(error) if error.kind() == ErrorKind::UnsupportedSetting => {
                 let validator_context = json!({"name": validator.name()});
                 let output = vec![results::construct_error_output(
                     &validator_context,
-                    Value::String(js::stringify(&supported_settings)),
+                    Value::String(json_value::stringify(&supported_settings)),
                     settings,
-                    &error.name,
+                    error.kind().name(),
                     Some(Value::String(error.to_string())),
                 )];
                 return Ok(results::consolidate_result(output, &validator_context));
@@ -145,7 +143,7 @@ pub async fn process_validate(
 pub fn option_type(option: &Value) -> &'static str {
     match option {
         Value::Array(_) => "array",
-        other => js::type_of(Some(other)),
+        other => json_value::type_of(Some(other)),
     }
 }
 
@@ -154,23 +152,23 @@ pub fn validate_settings(
     supported_settings: &Value,
     setting_to_check: &Value,
     nestings: &[String],
-) -> JsResult<()> {
-    let supported_keys = js::object_keys(Some(supported_settings))?;
+) -> Result<()> {
+    let supported_keys = json_value::object_keys(Some(supported_settings))?;
     let prefix = if nestings.is_empty() {
         String::new()
     } else {
         format!("{}.", nestings.join("."))
     };
-    for key in js::object_keys(Some(setting_to_check))? {
+    for key in json_value::object_keys(Some(setting_to_check))? {
         if key == "do" || key == "and" || key == "or" {
             continue;
         }
         if !supported_keys.contains(&key) {
-            return Err(JsError::unsupported_setting(format!(
+            return Err(Error::unsupported_setting(format!(
                 "{owner}: {prefix}{key} option is not supported"
             )));
         }
-        let value_to_check = js::get(setting_to_check, &key).unwrap_or(&Value::Null);
+        let value_to_check = json_value::get(setting_to_check, &key).unwrap_or(&Value::Null);
         let supported_value = supported_setting_at(supported_settings, &key);
         let value_type = option_type(value_to_check);
         if value_type == "object" {
@@ -182,15 +180,15 @@ pub fn validate_settings(
                 Value::String(text) => text.contains(value_type),
                 Value::Array(items) => items.iter().any(|item| item.as_str() == Some(value_type)),
                 _ => {
-                    return Err(JsError::type_error(
+                    return Err(Error::type_mismatch(
                         "supportedSettings[key].includes is not a function",
                     ));
                 }
             };
             if !allowed {
-                return Err(JsError::unsupported_setting(format!(
+                return Err(Error::unsupported_setting(format!(
                     "{owner}: {prefix}{key} is expected to be of type: {}",
-                    js::to_js_string(Some(supported_value.as_ref()))
+                    json_value::to_display_string(Some(supported_value.as_ref()))
                 )));
             }
         }
@@ -211,24 +209,27 @@ fn supported_setting_at<'settings>(
                     Value::String(String::from_utf16_lossy(&[unit]))
                 }),
         ),
-        other => Cow::Borrowed(js::get(other, key).unwrap_or(&js::NULL)),
+        other => Cow::Borrowed(json_value::get(other, key).unwrap_or(&json_value::NULL)),
     }
+}
+
+#[must_use]
+pub fn options_context(settings: &Value, supported_options: &[&str]) -> Value {
+    json!({
+        "name": settings.get("do").unwrap_or(&Value::Null),
+        "supportedOptions": supported_options,
+    })
 }
 
 pub async fn process_options(
     settings: &Value,
     input: &Value,
     supported_options: Option<&[&str]>,
-) -> JsResult<Value> {
-    let supported: Vec<Value> = supported_options
-        .unwrap_or(&DEFAULT_SUPPORTED_OPTIONS)
-        .iter()
-        .map(|option| Value::String((*option).to_string()))
-        .collect();
-    let validator_context = json!({
-        "name": settings.get("do").unwrap_or(&Value::Null),
-        "supportedOptions": supported,
-    });
+) -> Result<Value> {
+    let validator_context = options_context(
+        settings,
+        supported_options.unwrap_or(&DEFAULT_SUPPORTED_OPTIONS),
+    );
     options::process(&validator_context, input, settings, false).await
 }
 
@@ -263,7 +264,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "validator/title: must_include.regex is expected to be of type: string,array"
         );
     }

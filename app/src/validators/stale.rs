@@ -1,22 +1,20 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, ErrorKind, Result};
 use crate::github::api;
-use crate::js;
-use crate::lodash;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::Validator;
 use async_trait::async_trait;
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
 use serde_json::{Map, Value, json};
 
-const DAY_OF_THE_WEEK: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MAX_ISSUES: u64 = 20;
 const MILLISECONDS_PER_DAY: f64 = 86_400_000.0;
 
 pub struct Stale;
 
 pub struct LocalTime {
-    pub day_of_week: usize,
+    pub weekday: Weekday,
     pub hour: u32,
 }
 
@@ -27,12 +25,12 @@ pub fn local_time(now: DateTime<Utc>, time_zone: Option<&str>) -> LocalTime {
         Some(zone) => {
             let local = now.with_timezone(&zone);
             LocalTime {
-                day_of_week: local.weekday().num_days_from_sunday() as usize,
+                weekday: local.weekday(),
                 hour: local.hour(),
             }
         }
         None => LocalTime {
-            day_of_week: now.weekday().num_days_from_sunday() as usize,
+            weekday: now.weekday(),
             hour: now.hour(),
         },
     }
@@ -41,10 +39,10 @@ pub fn local_time(now: DateTime<Utc>, time_zone: Option<&str>) -> LocalTime {
 fn construct_stale_output(input: &str, settings: &Value, result: &Value) -> Value {
     let mut output = Map::new();
     output.insert("validator".to_string(), Value::String("stale".to_string()));
-    if let Some(status) = js::get(result, "status") {
+    if let Some(status) = json_value::get(result, "status") {
         output.insert("status".to_string(), status.clone());
     }
-    if let Some(description) = js::get(result, "description") {
+    if let Some(description) = json_value::get(result, "description") {
         output.insert("description".to_string(), description.clone());
     }
     output.insert(
@@ -62,27 +60,27 @@ fn craft_fail_output(settings: &Value) -> Value {
     })
 }
 
-pub fn outside_time_constraint(settings: &Value, now: DateTime<Utc>) -> JsResult<bool> {
+pub fn outside_time_constraint(settings: &Value, now: DateTime<Utc>) -> Result<bool> {
     let Some(time_options) = settings
         .get("time_constraint")
-        .filter(|value| js::is_truthy(value))
+        .filter(|value| json_value::is_truthy(value))
     else {
         return Ok(false);
     };
-    let time_zone = js::read(Some(time_options), "time_zone")?
-        .filter(|value| js::is_truthy(value))
-        .map(|zone| js::to_js_string(Some(zone)));
+    let time_zone = json_value::read(Some(time_options), "time_zone")?
+        .filter(|value| json_value::is_truthy(value))
+        .map(|zone| json_value::to_display_string(Some(zone)));
     let local = local_time(now, time_zone.as_deref());
-    if let Some(days_of_week) =
-        js::read(Some(time_options), "days_of_week")?.filter(|value| js::is_truthy(value))
+    if let Some(days_of_week) = json_value::read(Some(time_options), "days_of_week")?
+        .filter(|value| json_value::is_truthy(value))
     {
-        let today = Value::String(DAY_OF_THE_WEEK[local.day_of_week].to_string());
-        if !js::includes(Some(days_of_week), &today)? {
+        let today = Value::String(local.weekday.to_string());
+        if !json_value::includes(Some(days_of_week), &today)? {
             return Ok(true);
         }
     }
-    if let Some(hours_between) =
-        js::read(Some(time_options), "hours_between")?.filter(|value| js::is_truthy(value))
+    if let Some(hours_between) = json_value::read(Some(time_options), "hours_between")?
+        .filter(|value| json_value::is_truthy(value))
     {
         let length = match hours_between {
             Value::Array(items) => Some(items.len()),
@@ -91,10 +89,10 @@ pub fn outside_time_constraint(settings: &Value, now: DateTime<Utc>) -> JsResult
         };
         if length == Some(2) {
             let hour_now = json!(local.hour);
-            let earliest = js::get(hours_between, "0");
-            let latest = js::get(hours_between, "1");
-            if lodash::less_than(Some(&hour_now), earliest)
-                || lodash::greater_than(Some(&hour_now), latest)
+            let earliest = json_value::get(hours_between, "0");
+            let latest = json_value::get(hours_between, "1");
+            if json_value::less_than(Some(&hour_now), earliest)
+                || json_value::greater_than(Some(&hour_now), latest)
             {
                 return Ok(true);
             }
@@ -112,7 +110,10 @@ fn search_type_for(item: &Value) -> Option<&'static str> {
 }
 
 pub fn requested_types(settings: &Value) -> Vec<Value> {
-    match settings.get("type").filter(|value| js::is_truthy(value)) {
+    match settings
+        .get("type")
+        .filter(|value| json_value::is_truthy(value))
+    {
         None => Vec::new(),
         Some(Value::Array(items)) => items
             .iter()
@@ -127,29 +128,35 @@ pub fn requested_types(settings: &Value) -> Vec<Value> {
 
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "the finite, already truncated JavaScript millisecond timestamp maps to i64 like Date does"
+    reason = "the finite, already truncated millisecond timestamp maps to i64 exactly"
 )]
-pub fn search_timestamp(now: DateTime<Utc>, days: f64) -> JsResult<String> {
+pub fn search_timestamp(now: DateTime<Utc>, days: f64) -> Result<String> {
     let offset_milliseconds = days * MILLISECONDS_PER_DAY;
-    let target_milliseconds = (js::number_from_timestamp_milliseconds(now.timestamp_millis())
-        - offset_milliseconds)
-        .trunc();
+    let target_milliseconds =
+        (json_value::number_from_timestamp_milliseconds(now.timestamp_millis())
+            - offset_milliseconds)
+            .trunc();
     if !target_milliseconds.is_finite() {
-        return Err(JsError::named("RangeError", "Invalid time value"));
+        return Err(Error::new(ErrorKind::OutOfRange, "Invalid time value"));
     }
     let target = DateTime::<Utc>::from_timestamp_millis(target_milliseconds as i64)
-        .ok_or_else(|| JsError::named("RangeError", "Invalid time value"))?;
+        .ok_or_else(|| Error::new(ErrorKind::OutOfRange, "Invalid time value"))?;
     Ok(target.format("%Y-%m-%dT%H:%M:%S").to_string())
 }
 
-fn label_query_parts(label: &Value, key: &str, prefix: &str) -> JsResult<Vec<String>> {
-    match js::get(label, key).filter(|value| js::is_truthy(value)) {
+fn label_query_parts(label: &Value, key: &str, prefix: &str) -> Result<Vec<String>> {
+    match json_value::get(label, key).filter(|value| json_value::is_truthy(value)) {
         None => Ok(Vec::new()),
         Some(Value::Array(labels)) => Ok(labels
             .iter()
-            .map(|name| format!("{prefix}label:\"{}\"", js::to_js_string(Some(name))))
+            .map(|name| {
+                format!(
+                    "{prefix}label:\"{}\"",
+                    json_value::to_display_string(Some(name))
+                )
+            })
             .collect()),
-        Some(_) => Err(JsError::type_error(format!(
+        Some(_) => Err(Error::type_mismatch(format!(
             "(label.{key} || []).map is not a function"
         ))),
     }
@@ -161,55 +168,55 @@ pub fn search_query(
     settings: &Value,
     types: &[Value],
     timestamp: &str,
-) -> JsResult<String> {
+) -> Result<String> {
     let type_query = if types.len() == 1 {
-        format!(" type:{}", js::to_js_string(types.first()))
+        format!(" type:{}", json_value::to_display_string(types.first()))
     } else {
         String::new()
     };
     let default_label = json!({});
     let label = settings
         .get("label")
-        .filter(|value| js::is_truthy(value))
+        .filter(|value| json_value::is_truthy(value))
         .unwrap_or(&default_label);
     let mut label_parts = label_query_parts(label, "match", "")?;
     label_parts.extend(label_query_parts(label, "ignore", "-")?);
     let label_query = label_parts.join(" ");
     let mut ignore_query = String::new();
-    if js::truthy(settings.get("ignore_drafts")) {
+    if json_value::truthy(settings.get("ignore_drafts")) {
         ignore_query.push_str("-is:draft ");
     }
-    if js::truthy(settings.get("ignore_milestones")) {
+    if json_value::truthy(settings.get("ignore_milestones")) {
         ignore_query.push_str("no:milestone ");
     }
-    if js::truthy(settings.get("ignore_projects")) {
+    if json_value::truthy(settings.get("ignore_projects")) {
         ignore_query.push_str("no:project ");
     }
     let query = format!(
         "repo:{owner}/{repository} is:open updated:<{timestamp}{type_query} {label_query} {ignore_query}"
     );
-    Ok(lodash::js_trim(&query).to_string())
+    Ok(json_value::trim_whitespace_and_byte_order_mark(&query).to_string())
 }
 
-pub fn schedule_result(items: Value, input: &Value, settings: &Value) -> JsResult<Value> {
+pub fn schedule_result(items: Value, input: &Value, settings: &Value) -> Result<Value> {
     let items = match items {
         Value::Array(items) => items,
         Value::Null => {
-            return Err(JsError::type_error(
+            return Err(Error::type_mismatch(
                 "Cannot read properties of null (reading 'filter')",
             ));
         }
-        _ => return Err(JsError::type_error("items.filter is not a function")),
+        _ => return Err(Error::type_mismatch("items.filter is not a function")),
     };
     let mut issues = Vec::new();
     let mut pulls = Vec::new();
     for item in items {
         if item.is_null() {
-            return Err(JsError::type_error(
+            return Err(Error::type_mismatch(
                 "Cannot read properties of null (reading 'pull_request')",
             ));
         }
-        if js::truthy(js::get(&item, "pull_request")) {
+        if json_value::truthy(json_value::get(&item, "pull_request")) {
             pulls.push(item);
         } else {
             issues.push(item);
@@ -238,7 +245,7 @@ pub fn schedule_result(items: Value, input: &Value, settings: &Value) -> JsResul
 pub fn days_setting(settings: &Value) -> Value {
     settings
         .get("days")
-        .filter(|value| js::is_truthy(value))
+        .filter(|value| json_value::is_truthy(value))
         .cloned()
         .unwrap_or_else(|| json!(20))
 }
@@ -253,8 +260,8 @@ impl Validator for Stale {
         &["schedule.repository"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "days": "number",
             "type": "array",
             "label": {"match": "array", "ignore": "array"},
@@ -262,7 +269,7 @@ impl Validator for Stale {
             "ignore_milestones": "boolean",
             "ignore_projects": "boolean",
             "time_constraint": {"time_zone": "string", "hours_between": "array", "days_of_week": "array"},
-        }))
+        })
     }
 
     async fn validate(
@@ -270,14 +277,14 @@ impl Validator for Stale {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let now = Utc::now();
         if outside_time_constraint(settings, now)? {
             return Ok(craft_fail_output(settings));
         }
         let days = days_setting(settings);
         let types = requested_types(settings);
-        let timestamp = search_timestamp(Utc::now(), lodash::to_number(Some(&days)))?;
+        let timestamp = search_timestamp(Utc::now(), json_value::to_number(Some(&days)))?;
         let (owner, repository) = context.repo()?;
         let query = search_query(&owner, &repository, settings, &types, &timestamp)?;
         let items = api::search_issues_and_pull_requests(
@@ -410,9 +417,9 @@ mod tests {
             .single()
             .unwrap_or_default();
         let tokyo = local_time(late_sunday_utc, Some("Asia/Tokyo"));
-        assert_eq!((tokyo.day_of_week, tokyo.hour), (1, 8));
+        assert_eq!((tokyo.weekday, tokyo.hour), (Weekday::Mon, 8));
         let unknown = local_time(late_sunday_utc, Some("Not/AZone"));
-        assert_eq!((unknown.day_of_week, unknown.hour), (0, 23));
+        assert_eq!((unknown.weekday, unknown.hour), (Weekday::Sun, 23));
     }
 
     #[test]
@@ -423,6 +430,23 @@ mod tests {
             output["validations"],
             json!({"validator": "stale", "details": {"input": "fail", "settings": settings}})
         );
+    }
+
+    #[test]
+    fn weekdays_are_named_by_their_three_letter_abbreviation() {
+        let names: Vec<String> = [
+            Weekday::Sun,
+            Weekday::Mon,
+            Weekday::Tue,
+            Weekday::Wed,
+            Weekday::Thu,
+            Weekday::Fri,
+            Weekday::Sat,
+        ]
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+        assert_eq!(names, ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
     }
 
     #[test]

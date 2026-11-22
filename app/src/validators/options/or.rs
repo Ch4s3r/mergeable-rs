@@ -1,18 +1,20 @@
-use crate::error::JsResult;
-use crate::validators::options::lib::{OptionResult, and_or_processor};
+use crate::error::Result;
+use crate::validators::options::lib::OptionResult;
+use crate::validators::options::lib::and_or_processor::{self, Connective};
 use serde_json::Value;
 
 pub async fn process(
     validator_context: &Value,
     input: &Value,
     rule: &Value,
-) -> JsResult<OptionResult> {
-    and_or_processor::process(validator_context, input, rule, "or").await
+) -> Result<OptionResult> {
+    and_or_processor::process(validator_context, input, rule, Connective::Or).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validators::options::lib::OptionStatus;
     use serde_json::json;
 
     fn option_context() -> Value {
@@ -28,7 +30,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            "pass"
+            OptionStatus::Pass
         );
     }
 
@@ -44,7 +46,7 @@ mod tests {
             .await
             .unwrap()
             .status,
-            "fail"
+            OptionStatus::Fail
         );
     }
 
@@ -55,7 +57,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "Input type invalid, expected array type as input"
         );
     }
@@ -69,7 +71,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            "error"
+            OptionStatus::Error
         );
         let unknown_option =
             json!({"or": [{"must_inclde": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
@@ -78,7 +80,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            "error"
+            OptionStatus::Error
         );
     }
 
@@ -90,7 +92,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            "pass"
+            OptionStatus::Pass
         );
     }
 
@@ -101,7 +103,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "Cannot read properties of undefined (reading 'status')"
         );
     }

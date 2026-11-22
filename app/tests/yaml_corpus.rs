@@ -1,7 +1,8 @@
+use mergeable::error::ErrorKind;
 use mergeable::yaml::{self, YamlError};
 use serde_json::{Map, Number, Value, json};
 
-const JS_YAML_CORPUS: &str = include_str!("fixtures/yaml.json");
+const YAML_CORPUS: &str = include_str!("fixtures/yaml.json");
 
 fn numbers_to_fifteen_significant_digits(value: &Value) -> Value {
     match value {
@@ -30,7 +31,7 @@ fn outcome_of(parsed: Result<Option<Value>, YamlError>) -> Value {
     match parsed {
         Ok(Some(output)) => json!({"output": numbers_to_fifteen_significant_digits(&output)}),
         Ok(None) => json!({"empty": true}),
-        Err(error) => json!({"error": error.message, "errorName": error.name}),
+        Err(error) => json!({"error": error.message, "errorName": error.kind.name()}),
     }
 }
 
@@ -48,7 +49,7 @@ fn mismatches_against_corpus(
     parse: fn(&str) -> Result<Option<Value>, YamlError>,
     recorded_outcome: fn(&Value) -> &Value,
 ) -> (usize, Vec<String>) {
-    let corpus: Vec<Value> = serde_json::from_str(JS_YAML_CORPUS).unwrap();
+    let corpus: Vec<Value> = serde_json::from_str(YAML_CORPUS).unwrap();
     let mismatches = corpus
         .iter()
         .filter_map(|entry| {
@@ -63,23 +64,23 @@ fn mismatches_against_corpus(
 }
 
 #[test]
-fn every_corpus_document_parses_like_js_yaml_3_safe_load() {
+fn every_corpus_document_parses_leniently_as_recorded() {
     let (total, mismatches) = mismatches_against_corpus(yaml::parse, |entry| entry);
     assert!(
         mismatches.is_empty(),
-        "{} of {total} corpus entries differ from js-yaml 3.14.1 safeLoad:\n{}",
+        "{} of {total} corpus entries differ from the recorded lenient outcome:\n{}",
         mismatches.len(),
         mismatches.join("\n")
     );
 }
 
 #[test]
-fn every_corpus_document_parses_like_js_yaml_4_load() {
+fn every_corpus_document_parses_strictly_as_recorded() {
     let (total, mismatches) =
-        mismatches_against_corpus(yaml::parse_like_js_yaml_4, |entry| &entry["jsYaml4"]);
+        mismatches_against_corpus(yaml::parse_strict, |entry| &entry["strict"]);
     assert!(
         mismatches.is_empty(),
-        "{} of {total} corpus entries differ from js-yaml 4.1.0 load:\n{}",
+        "{} of {total} corpus entries differ from the recorded strict outcome:\n{}",
         mismatches.len(),
         mismatches.join("\n")
     );
@@ -91,8 +92,8 @@ fn deeply_nested_documents_stop_with_a_range_error_instead_of_overflowing_the_st
     assert!(yaml::parse(&nested(990)).is_ok());
     let error = yaml::parse(&nested(5000)).unwrap_err();
     assert_eq!(
-        (error.name, error.message.as_str()),
-        ("RangeError", "Maximum call stack size exceeded")
+        (error.kind, error.message.as_str()),
+        (ErrorKind::OutOfRange, "Maximum call stack size exceeded")
     );
     let block_mapping = (0..990)
         .map(|depth| " ".repeat(depth) + "k:\n")
@@ -101,7 +102,7 @@ fn deeply_nested_documents_stop_with_a_range_error_instead_of_overflowing_the_st
 }
 
 #[test]
-fn invalid_pull_request_config_reports_the_js_yaml_bad_indentation_message() {
+fn invalid_pull_request_config_reports_the_bad_indentation_message() {
     let config = "version: 2\nmergeable:\n  - when: pull_request.*\n     validate: [\n";
     let error = yaml::parse(config).unwrap_err();
     assert_eq!(

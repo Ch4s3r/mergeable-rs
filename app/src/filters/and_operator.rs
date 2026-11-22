@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::filters::Filter;
-use crate::filters::lib::logical_connective;
+use crate::filters::lib::logical_connective::{self, Connective};
 use crate::registry::Registry;
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -18,8 +18,8 @@ impl Filter for And {
         &["*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({}))
+    fn supported_settings(&self) -> Value {
+        json!({})
     }
 
     fn supported_options(&self) -> Option<&'static [&'static str]> {
@@ -35,7 +35,8 @@ impl Filter for And {
         context: &Context,
         settings: &Value,
         registry: &Registry,
-    ) -> JsResult<Value> {
-        logical_connective::process(context, settings.get("filter"), registry, "And").await
+    ) -> Result<Value> {
+        logical_connective::process(context, settings.get("filter"), registry, Connective::And)
+            .await
     }
 }

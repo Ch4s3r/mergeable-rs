@@ -1,9 +1,9 @@
-use crate::actions::{Action, get_actionables};
+use crate::actions::{Action, actionables, spawn_detached};
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::template;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -31,12 +31,12 @@ fn bot_login() -> String {
 async fn fetch_comments_by_mergeable(
     context: &Context,
     issue_number: &Value,
-) -> JsResult<Vec<Value>> {
+) -> Result<Vec<Value>> {
     let comments = api::list_comments(context, issue_number).await?;
     let bot = bot_login();
     let mut by_bot = Vec::new();
     for comment in comments {
-        let login = js::read_string(&comment, &["user", "login"])?;
+        let login = json_value::read_string(&comment, &["user", "login"])?;
         if login.to_lowercase() == bot {
             by_bot.push(comment);
         }
@@ -44,23 +44,23 @@ async fn fetch_comments_by_mergeable(
     Ok(by_bot)
 }
 
-async fn delete_old_comments(context: &Context, old_comments: &[Value]) -> JsResult<()> {
+async fn delete_old_comments(context: &Context, old_comments: &[Value]) -> Result<()> {
     for comment in old_comments {
-        let comment_id = js::read(Some(comment), "id")?.unwrap_or(&Value::Null);
+        let comment_id = json_value::read(Some(comment), "id")?.unwrap_or(&Value::Null);
         api::delete_comment(context, comment_id).await?;
     }
     Ok(())
 }
 
-pub async fn remove_error_comments(context: &Context) -> JsResult<()> {
+pub async fn remove_error_comments(context: &Context) -> Result<()> {
     let Some(payload) = event_aware::get_payload(context) else {
         return Ok(());
     };
-    let issue_number = js::read(Some(payload), "number")?.unwrap_or(&Value::Null);
+    let issue_number = json_value::read(Some(payload), "number")?.unwrap_or(&Value::Null);
     let old_comments = fetch_comments_by_mergeable(context, issue_number).await?;
     let mut error_comments = Vec::new();
     for comment in old_comments {
-        if js::read_string(&comment, &["body"])?
+        if json_value::read_string(&comment, &["body"])?
             .to_lowercase()
             .contains("error")
         {
@@ -70,26 +70,13 @@ pub async fn remove_error_comments(context: &Context) -> JsResult<()> {
     delete_old_comments(context, &error_comments).await
 }
 
-pub async fn handle_error(context: &Context, body: &str) -> JsResult<()> {
+pub async fn handle_error(context: &Context, body: &str) -> Result<()> {
     let issue_number =
-        js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+        json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
     remove_error_comments(context).await?;
     api::create_comment(context, issue_number, Value::String(body.to_string()))
         .await
         .map(|_| ())
-}
-
-pub fn spawn_detached(
-    context: &Context,
-    task_name: &'static str,
-    future: impl std::future::Future<Output = JsResult<()>> + Send + 'static,
-) {
-    let event_id = context.event_id.clone();
-    tokio::spawn(async move {
-        if let Err(error) = future.await {
-            tracing::error!(task = task_name, event_id = %event_id, %error, "comment action failed");
-        }
-    });
 }
 
 #[derive(Default)]
@@ -105,32 +92,28 @@ impl Action for Comment {
         &SUPPORTED_EVENTS
     }
 
-    async fn before_validate(
-        &self,
-        _context: &Context,
-        _rule: &Value,
-        _rule_name: Option<&Value>,
-    ) -> JsResult<()> {
-        Ok(())
-    }
-
     async fn after_validate(
         &self,
         context: &Context,
         settings: &Value,
         _rule_name: Option<&Value>,
-        results: &Value,
-    ) -> JsResult<()> {
-        let commentables = get_actionables(context, results);
+        validation_report: &Value,
+    ) -> Result<()> {
+        let commentables = actionables(context, validation_report);
         let event = event_aware::get_event_attributes(context);
-        let leave_old_comment = js::truthy(settings.get("leave_old_comment"));
+        let leave_old_comment = json_value::truthy(settings.get("leave_old_comment"));
         for issue in commentables {
-            let issue_number = js::read(Some(&*issue), "number")?
+            let issue_number = json_value::read(Some(&*issue), "number")?
                 .cloned()
                 .unwrap_or(Value::Null);
             let body_template =
-                js::read_path(settings, &["payload", "body"])?.unwrap_or(&Value::Null);
-            let body = template::populate_template(body_template, results, Some(&issue), &event)?;
+                json_value::read_path(settings, &["payload", "body"])?.unwrap_or(&Value::Null);
+            let body = template::populate_template(
+                body_template,
+                validation_report,
+                Some(&issue),
+                &event,
+            )?;
             let old_comments = if leave_old_comment {
                 Ok(Vec::new())
             } else {

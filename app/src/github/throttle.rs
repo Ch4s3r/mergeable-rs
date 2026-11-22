@@ -1,8 +1,14 @@
 use regex::Regex;
+use reqwest::Method;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::time::Instant;
+
+const MAXIMUM_CONCURRENT_REQUESTS: usize = 10;
+const WRITE_SPACING: Duration = Duration::from_secs(1);
+const SEARCH_SPACING: Duration = Duration::from_secs(2);
+const NOTIFICATION_SPACING: Duration = Duration::from_secs(3);
 
 const NOTIFICATION_TRIGGERING_PATHS: [&str; 17] = [
     "/orgs/{org}/invitations",
@@ -72,41 +78,42 @@ impl SpacedLane {
 
 #[derive(Clone)]
 pub struct RequestThrottle {
-    enabled: bool,
     concurrency: Arc<Semaphore>,
     writes: Arc<SpacedLane>,
     searches: Arc<SpacedLane>,
     notifications: Arc<SpacedLane>,
 }
 
+impl Default for RequestThrottle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RequestThrottle {
     #[must_use]
-    pub fn like_probot(enabled: bool) -> Self {
+    pub fn new() -> Self {
         RequestThrottle {
-            enabled,
-            concurrency: Arc::new(Semaphore::new(10)),
-            writes: Arc::new(SpacedLane::new(Duration::from_millis(1000))),
-            searches: Arc::new(SpacedLane::new(Duration::from_millis(2000))),
-            notifications: Arc::new(SpacedLane::new(Duration::from_millis(3000))),
+            concurrency: Arc::new(Semaphore::new(MAXIMUM_CONCURRENT_REQUESTS)),
+            writes: Arc::new(SpacedLane::new(WRITE_SPACING)),
+            searches: Arc::new(SpacedLane::new(SEARCH_SPACING)),
+            notifications: Arc::new(SpacedLane::new(NOTIFICATION_SPACING)),
         }
     }
 
-    pub async fn acquire(&self, method: &str, pathname: &str) -> Option<OwnedSemaphorePermit> {
-        if !self.enabled {
-            return None;
-        }
-        let is_write = method != "GET" && method != "HEAD";
-        if is_write || pathname.starts_with("/graphql") {
+    pub async fn acquire(&self, method: &Method, pathname: &str) -> Option<OwnedSemaphorePermit> {
+        let is_read = method == Method::GET || method == Method::HEAD;
+        if !is_read || pathname.starts_with("/graphql") {
             self.writes.wait_turn().await;
         }
-        if is_write
+        if !is_read
             && NOTIFICATION_PATH_PATTERN
                 .as_ref()
                 .is_some_and(|pattern| pattern.is_match(pathname))
         {
             self.notifications.wait_turn().await;
         }
-        if method == "GET" && pathname.starts_with("/search/") {
+        if method == Method::GET && pathname.starts_with("/search/") {
             self.searches.wait_turn().await;
         }
         Arc::clone(&self.concurrency).acquire_owned().await.ok()
@@ -119,7 +126,9 @@ mod tests {
 
     #[test]
     fn issue_comment_creation_is_a_notification_path() {
-        let pattern = NOTIFICATION_PATH_PATTERN.as_ref().unwrap();
+        let Some(pattern) = NOTIFICATION_PATH_PATTERN.as_ref() else {
+            panic!("the notification path pattern must compile");
+        };
         assert!(pattern.is_match("/repos/acme/app/issues/1/comments"));
         assert!(!pattern.is_match("/repos/acme/app/check-runs"));
     }

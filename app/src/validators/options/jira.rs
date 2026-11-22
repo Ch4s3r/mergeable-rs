@@ -1,5 +1,5 @@
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use crate::validators::options::lib::{self, OptionResult};
 use serde_json::Value;
 
@@ -70,18 +70,18 @@ pub async fn process(
     _validator_context: &Value,
     input: &Value,
     rule: &Value,
-) -> JsResult<OptionResult> {
-    let filter = js::get(rule, "jira");
-    let message = js::read(filter, "message")?;
-    let regex = js::read(filter, "regex")?;
-    let Some(regex) = regex.filter(|present| js::is_truthy(present)) else {
-        return Err(JsError::error(REGEX_NOT_FOUND_ERROR));
+) -> Result<OptionResult> {
+    let filter = json_value::get(rule, "jira");
+    let message = json_value::read(filter, "message")?;
+    let regex = json_value::read(filter, "regex")?;
+    let Some(regex) = regex.filter(|present| json_value::is_truthy(present)) else {
+        return Err(Error::general(REGEX_NOT_FOUND_ERROR));
     };
     let failure_description = lib::message_or_default(message, FAILURE_DESCRIPTION.to_string());
     let flags = lib::regex_flags(filter.unwrap_or(&Value::Null));
     let ticket_id = {
         let compiled = lib::compile_user_regex(regex, &flags)?;
-        compiled.exec_first_match(&js::to_js_string(Some(input)))
+        compiled.first_match(&json_value::to_display_string(Some(input)))
     };
     let is_mergeable = match ticket_id {
         Some(ticket) => check_ticket_status(&ticket).await,
@@ -97,6 +97,7 @@ pub async fn process(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validators::options::lib::OptionStatus;
     use serde_json::json;
 
     #[tokio::test]
@@ -108,7 +109,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert_eq!(error.message, REGEX_NOT_FOUND_ERROR);
+        assert_eq!(error.message(), REGEX_NOT_FOUND_ERROR);
     }
 
     #[tokio::test]
@@ -120,7 +121,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.status, "fail");
+        assert_eq!(result.status, OptionStatus::Fail);
         assert_eq!(result.description, json!(FAILURE_DESCRIPTION));
     }
 
@@ -130,7 +131,7 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "Failed to create a regex expression with the provided regex: ["
         );
     }

@@ -179,8 +179,7 @@ fn print_summary(outcomes: &[RecordOutcome]) {
     println!("failed ({}): {}", failed.len(), failed.join(", "));
 }
 
-pub async fn record(cases: Vec<Case>, options: &RunOptions) -> Result<()> {
-    let program = AppProgram::node_original()?;
+pub async fn record(program: AppProgram, cases: Vec<Case>, options: &RunOptions) -> Result<()> {
     let outcomes = if options.reuse_process {
         record_in_one_process(&program, cases, options).await?
     } else {

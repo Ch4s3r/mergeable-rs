@@ -1,6 +1,6 @@
 use super::Dialect;
 use super::loader::Kind;
-use super::value::{Heap, JsValue, days_from_civil};
+use super::value::{Heap, HeapValue, days_from_civil};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -9,7 +9,7 @@ const BASE64_ALPHABET: &[u8; 67] =
 const BASE64_PADDING_CODE: usize = 64;
 const MAXIMUM_TIME_VALUE: f64 = 8.64e15;
 
-static JS_YAML_3_FLOAT_PATTERN: LazyLock<Option<Regex>> = LazyLock::new(|| {
+static LENIENT_FLOAT_PATTERN: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(concat!(
         r"^(?:[-+]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?",
         r"|\.[0-9_]+(?:[eE][-+]?[0-9]+)?",
@@ -20,7 +20,7 @@ static JS_YAML_3_FLOAT_PATTERN: LazyLock<Option<Regex>> = LazyLock::new(|| {
     .ok()
 });
 
-static JS_YAML_4_FLOAT_PATTERN: LazyLock<Option<Regex>> = LazyLock::new(|| {
+static STRICT_FLOAT_PATTERN: LazyLock<Option<Regex>> = LazyLock::new(|| {
     Regex::new(concat!(
         r"^(?:[-+]?(?:[0-9][0-9_]*)(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?",
         r"|\.[0-9_]+(?:[eE][-+]?[0-9]+)?",
@@ -146,25 +146,25 @@ fn type_error(message: &str) -> String {
 }
 
 impl TypeContext<'_> {
-    fn coerce_to_string(&self, data: &JsValue) -> String {
-        self.heap.to_js_string(data, self.dialect)
+    fn coerce_to_string(&self, data: &HeapValue) -> String {
+        self.heap.to_display_string(data, self.dialect)
     }
 
-    pub(super) fn resolve(&self, yaml_type: YamlType, data: &JsValue) -> Result<bool, String> {
+    pub(super) fn resolve(&self, yaml_type: YamlType, data: &HeapValue) -> Result<bool, String> {
         match yaml_type {
             YamlType::Null => Ok(match data {
-                JsValue::Null => true,
-                JsValue::String(text) => matches!(text.as_str(), "~" | "null" | "Null" | "NULL"),
+                HeapValue::Null => true,
+                HeapValue::String(text) => matches!(text.as_str(), "~" | "null" | "Null" | "NULL"),
                 _ => false,
             }),
             YamlType::Bool => Ok(matches!(
                 data,
-                JsValue::String(text)
+                HeapValue::String(text)
                     if matches!(text.as_str(), "true" | "True" | "TRUE" | "false" | "False" | "FALSE")
             )),
             YamlType::Int => match data {
-                JsValue::String(text) => Ok(resolve_integer(text.as_bytes(), self.dialect)),
-                JsValue::Binary(bytes) if !bytes.is_empty() => {
+                HeapValue::String(text) => Ok(resolve_integer(text.as_bytes(), self.dialect)),
+                HeapValue::Binary(bytes) if !bytes.is_empty() => {
                     Err(type_error("data.charCodeAt is not a function"))
                 }
                 _ => Ok(false),
@@ -174,11 +174,11 @@ impl TypeContext<'_> {
                     return Ok(false);
                 }
                 let pattern = match self.dialect {
-                    Dialect::JsYaml3 => &JS_YAML_3_FLOAT_PATTERN,
-                    Dialect::JsYaml4 => &JS_YAML_4_FLOAT_PATTERN,
+                    Dialect::Lenient => &LENIENT_FLOAT_PATTERN,
+                    Dialect::Strict => &STRICT_FLOAT_PATTERN,
                 };
                 let ends_with_underscore =
-                    matches!(data, JsValue::String(text) if text.ends_with('_'));
+                    matches!(data, HeapValue::String(text) if text.ends_with('_'));
                 Ok(matches(pattern, &self.coerce_to_string(data)) && !ends_with_underscore)
             }
             YamlType::Timestamp => {
@@ -189,14 +189,14 @@ impl TypeContext<'_> {
                 Ok(matches(&DATE_PATTERN, &text) || matches(&TIMESTAMP_PATTERN, &text))
             }
             YamlType::Merge => Ok(match data {
-                JsValue::Null => true,
-                JsValue::String(text) => text == "<<",
+                HeapValue::Null => true,
+                HeapValue::String(text) => text == "<<",
                 _ => false,
             }),
             YamlType::Binary => match data {
-                JsValue::Null => Ok(false),
-                JsValue::String(text) => Ok(resolve_binary(text)),
-                JsValue::Binary(bytes) if !bytes.is_empty() => {
+                HeapValue::Null => Ok(false),
+                HeapValue::String(text) => Ok(resolve_binary(text)),
+                HeapValue::Binary(bytes) if !bytes.is_empty() => {
                     Err(type_error("data.charAt is not a function"))
                 }
                 _ => Ok(true),
@@ -205,21 +205,21 @@ impl TypeContext<'_> {
             YamlType::Omap => Ok(self.resolve_ordered_map(data)),
             YamlType::Pairs => Ok(self.resolve_pairs(data)),
             YamlType::Set => Ok(match data {
-                JsValue::Object(id) => self.heap.objects[*id].values().all(JsValue::is_null),
+                HeapValue::Object(id) => self.heap.objects[*id].values().all(HeapValue::is_null),
                 _ => true,
             }),
         }
     }
 
-    fn single_key_pairs(&self, data: &JsValue) -> Option<Vec<Option<String>>> {
-        let JsValue::Array(id) = data else {
+    fn single_key_pairs(&self, data: &HeapValue) -> Option<Vec<Option<String>>> {
+        let HeapValue::Array(id) = data else {
             return None;
         };
         Some(
             self.heap.arrays[*id]
                 .iter()
                 .map(|pair| match pair {
-                    JsValue::Object(pair_id) => {
+                    HeapValue::Object(pair_id) => {
                         let pair_object = &self.heap.objects[*pair_id];
                         if pair_object.len() == 1 {
                             pair_object
@@ -237,7 +237,7 @@ impl TypeContext<'_> {
         )
     }
 
-    fn resolve_ordered_map(&self, data: &JsValue) -> bool {
+    fn resolve_ordered_map(&self, data: &HeapValue) -> bool {
         if data.is_null() {
             return true;
         }
@@ -257,7 +257,7 @@ impl TypeContext<'_> {
         true
     }
 
-    fn resolve_pairs(&self, data: &JsValue) -> bool {
+    fn resolve_pairs(&self, data: &HeapValue) -> bool {
         if data.is_null() {
             return true;
         }
@@ -268,57 +268,61 @@ impl TypeContext<'_> {
     pub(super) fn construct(
         &mut self,
         yaml_type: YamlType,
-        data: JsValue,
-    ) -> Result<JsValue, String> {
+        data: HeapValue,
+    ) -> Result<HeapValue, String> {
         match yaml_type {
-            YamlType::Null => Ok(JsValue::Null),
-            YamlType::Bool => Ok(JsValue::Bool(matches!(
+            YamlType::Null => Ok(HeapValue::Null),
+            YamlType::Bool => Ok(HeapValue::Bool(matches!(
                 &data,
-                JsValue::String(text) if matches!(text.as_str(), "true" | "True" | "TRUE")
+                HeapValue::String(text) if matches!(text.as_str(), "true" | "True" | "TRUE")
             ))),
             YamlType::Int => match &data {
-                JsValue::String(text) => Ok(JsValue::Number(construct_integer(text, self.dialect))),
+                HeapValue::String(text) => {
+                    Ok(HeapValue::Number(construct_integer(text, self.dialect)))
+                }
                 _ => Err(type_error("value.indexOf is not a function")),
             },
             YamlType::Float => match &data {
-                JsValue::String(text) => Ok(JsValue::Number(construct_float(text, self.dialect))),
+                HeapValue::String(text) => {
+                    Ok(HeapValue::Number(construct_float(text, self.dialect)))
+                }
                 _ => Err(type_error("data.replace is not a function")),
             },
             YamlType::Timestamp => {
                 let text = self.coerce_to_string(&data);
                 construct_timestamp(&text)
-                    .map(JsValue::Date)
+                    .map(HeapValue::Date)
                     .ok_or_else(|| type_error("Date resolve error"))
             }
             YamlType::Merge => Ok(data),
             YamlType::Str => Ok(match data {
-                JsValue::Null => JsValue::String(String::new()),
+                HeapValue::Null => HeapValue::String(String::new()),
                 other => other,
             }),
             YamlType::Seq | YamlType::Omap => Ok(match data {
-                JsValue::Null => JsValue::Array(self.heap.new_array(Vec::new())),
+                HeapValue::Null => HeapValue::Array(self.heap.new_array(Vec::new())),
                 other => other,
             }),
             YamlType::Map | YamlType::Set => Ok(match data {
-                JsValue::Null => JsValue::Object(self.heap.new_object()),
+                HeapValue::Null => HeapValue::Object(self.heap.new_object()),
                 other => other,
             }),
             YamlType::Binary => match &data {
-                JsValue::String(text) => Ok(JsValue::Binary(construct_binary(text))),
+                HeapValue::String(text) => Ok(HeapValue::Binary(construct_binary(text))),
                 _ => Err(type_error("data.replace is not a function")),
             },
             YamlType::Pairs => Ok(self.construct_pairs(&data)),
         }
     }
 
-    fn construct_pairs(&mut self, data: &JsValue) -> JsValue {
-        let JsValue::Array(id) = data else {
-            return JsValue::Array(self.heap.new_array(Vec::new()));
+    fn construct_pairs(&mut self, data: &HeapValue) -> HeapValue {
+        let HeapValue::Array(id) = data else {
+            return HeapValue::Array(self.heap.new_array(Vec::new()));
         };
-        let pairs: Vec<(String, JsValue)> = self.heap.arrays[*id]
+        let pairs: Vec<(String, HeapValue)> = self.heap.arrays[*id]
             .iter()
             .filter_map(|pair| match pair {
-                JsValue::Object(pair_id) => self.heap.objects[*pair_id]
+                HeapValue::Object(pair_id) => self.heap.objects[*pair_id]
                     .entries_in_enumeration_order()
                     .into_iter()
                     .next(),
@@ -328,10 +332,10 @@ impl TypeContext<'_> {
         let pair_arrays = pairs
             .into_iter()
             .map(|(key, value)| {
-                JsValue::Array(self.heap.new_array(vec![JsValue::String(key), value]))
+                HeapValue::Array(self.heap.new_array(vec![HeapValue::String(key), value]))
             })
             .collect();
-        JsValue::Array(self.heap.new_array(pair_arrays))
+        HeapValue::Array(self.heap.new_array(pair_arrays))
     }
 }
 
@@ -355,13 +359,13 @@ fn resolve_integer(text: &[u8], dialect: Dialect) -> bool {
         let radix_digits: Option<fn(u8) -> bool> = match (character, dialect) {
             (Some(b'b'), _) => Some(|digit| matches!(digit, b'0' | b'1')),
             (Some(b'x'), _) => Some(|digit: u8| digit.is_ascii_hexdigit()),
-            (Some(b'o'), Dialect::JsYaml4) => Some(|digit| (b'0'..=b'7').contains(&digit)),
+            (Some(b'o'), Dialect::Strict) => Some(|digit| (b'0'..=b'7').contains(&digit)),
             _ => None,
         };
         if let Some(is_radix_digit) = radix_digits {
             return resolve_digits_after_prefix(text, index + 1, character, is_radix_digit);
         }
-        if dialect == Dialect::JsYaml3 {
+        if dialect == Dialect::Lenient {
             return resolve_digits_after_prefix(text, index, character, |digit| {
                 (b'0'..=b'7').contains(&digit)
             });
@@ -377,7 +381,7 @@ fn resolve_integer(text: &[u8], dialect: Dialect) -> bool {
             index += 1;
             continue;
         }
-        if dialect == Dialect::JsYaml3 && character == Some(b':') {
+        if dialect == Dialect::Lenient && character == Some(b':') {
             break;
         }
         if !character.is_some_and(|digit| digit.is_ascii_digit()) {
@@ -452,7 +456,7 @@ fn parse_integer_digits(digits: &str, radix: u32) -> f64 {
     }
     #[expect(
         clippy::cast_precision_loss,
-        reason = "u64 to f64 rounds to nearest even like JavaScript parseInt; the sticky bit keeps the rounding exact"
+        reason = "u64 to f64 rounds to nearest even; the sticky bit keeps the rounding exact"
     )]
     let mantissa = leading as f64;
     let remaining_bits = i32::try_from(bits.len() - significant_bits).unwrap_or(i32::MAX);
@@ -476,14 +480,14 @@ fn construct_integer(text: &str, dialect: Dialect) -> f64 {
         match (value.as_bytes().get(1), dialect) {
             (Some(b'b'), _) => return sign * parse_integer_digits(digits_after_prefix, 2),
             (Some(b'x'), _) => return sign * parse_integer_digits(digits_after_prefix, 16),
-            (Some(b'o'), Dialect::JsYaml4) => {
+            (Some(b'o'), Dialect::Strict) => {
                 return sign * parse_integer_digits(digits_after_prefix, 8);
             }
-            (_, Dialect::JsYaml3) => return sign * parse_integer_digits(&value, 8),
+            (_, Dialect::Lenient) => return sign * parse_integer_digits(&value, 8),
             _ => {}
         }
     }
-    if dialect == Dialect::JsYaml3 && value.contains(':') {
+    if dialect == Dialect::Lenient && value.contains(':') {
         return sign * sexagesimal_sum(&value, |part| parse_integer_digits(part, 10));
     }
     sign * parse_integer_digits(&value, 10)
@@ -499,7 +503,7 @@ fn sexagesimal_sum(value: &str, parse_part: impl Fn(&str) -> f64) -> f64 {
     total
 }
 
-fn js_parse_float(text: &str) -> f64 {
+fn parse_leading_float(text: &str) -> f64 {
     let trimmed = text.trim_start();
     let bytes = trimmed.as_bytes();
     let mut end = 0;
@@ -572,10 +576,10 @@ fn construct_float(text: &str, dialect: Dialect) -> f64 {
     if value == ".nan" {
         return f64::NAN;
     }
-    if dialect == Dialect::JsYaml3 && value.contains(':') {
-        return sign * sexagesimal_sum(&value, js_parse_float);
+    if dialect == Dialect::Lenient && value.contains(':') {
+        return sign * sexagesimal_sum(&value, parse_leading_float);
     }
-    sign * js_parse_float(&value)
+    sign * parse_leading_float(&value)
 }
 
 fn time_clip(time: f64) -> f64 {
@@ -587,7 +591,7 @@ fn time_clip(time: f64) -> f64 {
 
 #[expect(
     clippy::cast_precision_loss,
-    reason = "JavaScript Date arithmetic is done in Numbers; every intermediate stays far below 2^53"
+    reason = "date arithmetic is done in f64; every intermediate stays far below 2^53"
 )]
 fn date_utc(year: i64, month: i64, day: i64, time_of_day_milliseconds: i64) -> f64 {
     let full_year = if (0..=99).contains(&year) {

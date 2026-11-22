@@ -1,9 +1,9 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::validators::options_processor::git_pattern;
-use crate::validators::options_processor::teams;
+use crate::validators::options_processor::{teams, unique_values};
 use serde_json::{Value, json};
 
 const OWNER_FILE_PATH: &str = ".github/CODEOWNERS";
@@ -29,21 +29,21 @@ pub fn separate_teams_and_individuals(owners: Vec<String>) -> SeparatedOwners {
     separated
 }
 
-fn extract_user_ids(owners: &[String]) -> JsResult<Vec<String>> {
+fn extract_user_ids(owners: &[String]) -> Result<Vec<String>> {
     owners
         .iter()
         .map(|owner| match owner.strip_prefix('@') {
             Some(user_id) => Ok(user_id.to_string()),
-            None => Err(JsError::type_error("EMAIL_REGEX.test is not a function")),
+            None => Err(Error::type_mismatch("EMAIL_REGEX.test is not a function")),
         })
         .collect()
 }
 
-async fn retrieve_codeowners(context: &Context) -> JsResult<Option<String>> {
+async fn retrieve_codeowners(context: &Context) -> Result<Option<String>> {
     let (owner, repo) = context.repo()?;
     if context.event_name == "pull_request" || context.event_name == "pull_request_review" {
-        let pull_number =
-            js::read_path(&context.payload, &["pull_request", "number"])?.unwrap_or(&Value::Null);
+        let pull_number = json_value::read_path(&context.payload, &["pull_request", "number"])?
+            .unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -51,15 +51,16 @@ async fn retrieve_codeowners(context: &Context) -> JsResult<Option<String>> {
         .await?;
         let mut is_owner_file_modified = false;
         for changed_file in &files {
-            let status = js::read(Some(changed_file), "status")?;
-            if matches!(js::as_str(status), Some("modified" | "added")) {
-                let filename = js::read(Some(changed_file), "filename")?;
-                is_owner_file_modified |= js::as_str(filename) == Some(OWNER_FILE_PATH);
+            let status = json_value::read(Some(changed_file), "status")?;
+            if matches!(json_value::as_str(status), Some("modified" | "added")) {
+                let filename = json_value::read(Some(changed_file), "filename")?;
+                is_owner_file_modified |= json_value::as_str(filename) == Some(OWNER_FILE_PATH);
             }
         }
         if is_owner_file_modified {
-            let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
-                .unwrap_or(&Value::Null);
+            let head_sha =
+                json_value::read_path(&context.payload, &["pull_request", "head", "sha"])?
+                    .unwrap_or(&Value::Null);
             let call_parameters =
                 json!({"owner": owner, "repo": repo, "path": OWNER_FILE_PATH, "ref": head_sha});
             return api::get_content(context, call_parameters).await;
@@ -73,35 +74,34 @@ async fn retrieve_codeowners(context: &Context) -> JsResult<Option<String>> {
 }
 
 fn union(first: Vec<Value>, second: Vec<Value>) -> Vec<Value> {
-    let mut combined: Vec<Value> = Vec::new();
-    for value in first.into_iter().chain(second) {
-        if !combined.contains(&value) {
-            combined.push(value);
-        }
-    }
-    combined
+    unique_values(first.into_iter().chain(second).collect())
 }
 
-pub async fn process(payload: &Value, context: &Context) -> JsResult<Vec<Value>> {
+pub async fn process(payload: &Value, context: &Context) -> Result<Vec<Value>> {
     let Some(codeowners) = retrieve_codeowners(context).await? else {
         return Ok(Vec::new());
     };
     let owner_file = git_pattern::parse_owner_file(&codeowners);
 
-    let base_sha = js::read_path(payload, &["base", "sha"])?.unwrap_or(&Value::Null);
-    let head_sha = js::read_path(payload, &["head", "sha"])?.unwrap_or(&Value::Null);
+    let base_sha = json_value::read_path(payload, &["base", "sha"])?.unwrap_or(&Value::Null);
+    let head_sha = json_value::read_path(payload, &["head", "sha"])?.unwrap_or(&Value::Null);
     let compare = api::compare_commits(
         context,
         context.repo_params(json!({"base": base_sha, "head": head_sha}))?,
     )
     .await?;
-    let paths: Vec<String> = match js::read(Some(&compare), "files")? {
+    let paths: Vec<String> = match json_value::read(Some(&compare), "files")? {
         Some(Value::Array(files)) => files
             .iter()
-            .map(|changed_file| Ok(js::to_js_string(js::read(Some(changed_file), "filename")?)))
-            .collect::<JsResult<_>>()?,
-        None => return Err(JsError::reading_property_of_undefined("map")),
-        Some(_) => return Err(JsError::type_error("compare.files.map is not a function")),
+            .map(|changed_file| {
+                Ok(json_value::to_display_string(json_value::read(
+                    Some(changed_file),
+                    "filename",
+                )?))
+            })
+            .collect::<Result<_>>()?,
+        None => return Err(Error::missing_property("map")),
+        Some(_) => return Err(Error::type_mismatch("compare.files.map is not a function")),
     };
 
     let mut owner_list: &[String] = &[];
@@ -135,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn at_prefix_is_stripped_and_email_owners_hit_the_node_type_error() {
+    fn at_prefix_is_stripped_and_email_owners_fail_with_a_type_error() {
         assert_eq!(
             extract_user_ids(&["@bob".to_string()]).unwrap(),
             vec!["bob"]

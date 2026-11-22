@@ -1,8 +1,8 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
 use crate::filters::{self, Filter};
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -19,11 +19,11 @@ impl Filter for BaseRef {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "must_include": {"regex": "string", "regex_flag": "string", "message": "string"},
             "must_exclude": {"regex": "string", "regex_flag": "string", "message": "string"},
-        }))
+        })
     }
 
     async fn filter(
@@ -31,9 +31,10 @@ impl Filter for BaseRef {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let payload = event_aware::get_payload(context);
-        let base_ref = js::read(js::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
+        let base_ref =
+            json_value::read(json_value::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
         filters::process_options(self, context, base_ref, settings).await
     }
 }

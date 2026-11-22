@@ -7,8 +7,8 @@ use prometheus_client::metrics::histogram::{Histogram, exponential_buckets};
 use prometheus_client::registry::Registry;
 use regex::Regex;
 use reqwest::header::HeaderMap;
+use std::sync::LazyLock;
 use std::sync::atomic::AtomicU64;
-use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const METRICS_PATH: &str = "/metrics";
@@ -68,11 +68,12 @@ pub fn normalize_status_code(status: u16) -> &'static str {
 }
 
 fn header_number(headers: &HeaderMap, name: &str) -> f64 {
-    crate::github::client::header_text(headers, name).map_or(f64::NAN, crate::scheduler::js_number)
+    crate::github::client::header_text(headers, name)
+        .map_or(f64::NAN, crate::scheduler::parse_decimal_number)
 }
 
 pub struct Metrics {
-    registry: Mutex<Registry>,
+    registry: Registry,
     rate_limit_remaining: Family<InstallationLabels, Gauge<f64, AtomicU64>>,
     rate_limit_limit: Family<InstallationLabels, Gauge<f64, AtomicU64>>,
     http_requests: Family<HttpRequestLabels, Counter>,
@@ -153,7 +154,7 @@ impl Metrics {
             process_start_time,
         );
         Metrics {
-            registry: Mutex::new(registry),
+            registry,
             rate_limit_remaining,
             rate_limit_limit,
             http_requests,
@@ -188,10 +189,11 @@ impl Metrics {
             .observe(seconds);
     }
 
+    #[must_use]
     pub fn render(&self) -> String {
         let mut output = String::new();
-        if let Ok(registry) = self.registry.lock() {
-            let _encoding_result = encode(&mut output, &registry);
+        if let Err(error) = encode(&mut output, &self.registry) {
+            tracing::error!(%error, "metrics.render.failed");
         }
         output
     }
@@ -202,7 +204,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ids_in_request_paths_are_masked_like_url_value_parser() {
+    fn identifier_segments_in_request_paths_are_masked() {
         assert_eq!(normalize_path("/nope/123"), "/nope/#val");
         assert_eq!(
             normalize_path("/github-ratelimit/4242"),
@@ -215,7 +217,7 @@ mod tests {
         );
         assert_eq!(normalize_path("/commit/deadbeef"), "/commit/#val");
         assert_eq!(normalize_path("/commit/DeadBeef"), "/commit/DeadBeef");
-        assert_eq!(normalize_path("//probot//"), "/probot");
+        assert_eq!(normalize_path("//ping//"), "/ping");
         assert_eq!(normalize_path("/"), "/");
     }
 

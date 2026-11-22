@@ -73,6 +73,8 @@ enum Command {
         run_settings: RunSettings,
         #[arg(long)]
         missing_only: bool,
+        #[arg(long, required = true, num_args = 1.., allow_hyphen_values = true, value_name = "COMMAND")]
+        reference_command: Vec<String>,
     },
     Check {
         #[arg(long)]
@@ -85,10 +87,14 @@ enum Command {
         json: Option<PathBuf>,
     },
     Bench {
-        #[arg(long, required_unless_present = "node", conflicts_with = "node")]
+        #[arg(
+            long,
+            required_unless_present = "reference_command",
+            conflicts_with = "reference_command"
+        )]
         bin: Option<PathBuf>,
-        #[arg(long)]
-        node: bool,
+        #[arg(long, num_args = 1.., allow_hyphen_values = true, value_name = "COMMAND")]
+        reference_command: Vec<String>,
         #[command(flatten)]
         selection: CaseSelection,
         #[arg(long, default_value_t = 500)]
@@ -115,12 +121,14 @@ async fn main() -> Result<ExitCode> {
             selection,
             run_settings,
             missing_only,
+            reference_command,
         } => {
             let mut cases = case::load_cases(&selection.cases_dir, &selection.names)?;
             if missing_only {
                 cases.retain(|case| case.definition.expected.is_none());
             }
-            record::record(cases, &run_settings.run_options()).await?;
+            let program = AppProgram::reference(reference_command)?;
+            record::record(program, cases, &run_settings.run_options()).await?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Check {
@@ -142,16 +150,16 @@ async fn main() -> Result<ExitCode> {
         }
         Command::Bench {
             bin,
-            node,
+            reference_command,
             selection,
             requests,
             concurrency,
             json,
         } => {
             let cases = case::load_cases(&selection.cases_dir, &selection.names)?;
-            let program = match (node, bin) {
-                (false, Some(binary)) => AppProgram::binary(&binary)?,
-                _ => AppProgram::node_original()?,
+            let program = match bin {
+                Some(binary) => AppProgram::binary(&binary)?,
+                None => AppProgram::reference(reference_command)?,
             };
             let settings = bench::BenchSettings {
                 requests,

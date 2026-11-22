@@ -1,9 +1,9 @@
 use crate::actions::Action;
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::borrow::Borrow;
@@ -14,17 +14,17 @@ fn mapped_property<'list>(
     list: Option<&'list Value>,
     list_name: &str,
     property: &str,
-) -> JsResult<Vec<&'list Value>> {
+) -> Result<Vec<&'list Value>> {
     match list {
         Some(Value::Array(items)) => items
             .iter()
-            .map(|item| Ok(js::read(Some(item), property)?.unwrap_or(&js::NULL)))
+            .map(|item| Ok(json_value::read(Some(item), property)?.unwrap_or(&json_value::NULL)))
             .collect(),
-        None => Err(JsError::reading_property_of_undefined("map")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("map")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'map')",
         )),
-        Some(_) => Err(JsError::type_error(format!(
+        Some(_) => Err(Error::type_mismatch(format!(
             "{list_name}.map is not a function"
         ))),
     }
@@ -35,17 +35,17 @@ static EMPTY_LIST: Value = Value::Array(Vec::new());
 fn configured_list<'settings>(settings: &'settings Value, key: &str) -> &'settings Value {
     settings
         .get(key)
-        .filter(|value| js::is_truthy(value))
+        .filter(|value| json_value::is_truthy(value))
         .unwrap_or(&EMPTY_LIST)
 }
 
 fn contains<Item: Borrow<Value>>(list: &[Item], candidate: &Value) -> bool {
     list.iter()
-        .any(|item| js::strict_equals(item.borrow(), candidate))
+        .any(|item| json_value::strict_equals(item.borrow(), candidate))
 }
 
 #[must_use]
-pub fn lodash_difference<Excluded: Borrow<Value>>(
+pub fn values_excluding<Excluded: Borrow<Value>>(
     values: &Value,
     excluded: &[Excluded],
 ) -> Vec<Value> {
@@ -60,7 +60,7 @@ pub fn lodash_difference<Excluded: Borrow<Value>>(
 }
 
 #[must_use]
-pub fn lodash_intersection(values: &[Value], others: &[Value]) -> Vec<Value> {
+pub fn unique_values_in_both(values: &[Value], others: &[Value]) -> Vec<Value> {
     let mut common: Vec<Value> = Vec::new();
     for value in values {
         if contains(others, value) && !contains(&common, value) {
@@ -70,21 +70,18 @@ pub fn lodash_intersection(values: &[Value], others: &[Value]) -> Vec<Value> {
     common
 }
 
-pub fn reviewers_without_author(
-    reviewers: &Value,
-    author_login: Option<&Value>,
-) -> JsResult<Value> {
+pub fn reviewers_without_author(reviewers: &Value, author_login: Option<&Value>) -> Result<Value> {
     match reviewers {
         Value::Array(items) => Ok(Value::Array(
             items
                 .iter()
                 .filter(|reviewer| {
-                    !author_login.is_some_and(|login| js::strict_equals(reviewer, login))
+                    !author_login.is_some_and(|login| json_value::strict_equals(reviewer, login))
                 })
                 .cloned()
                 .collect(),
         )),
-        _ => Err(JsError::type_error("reviewers.filter is not a function")),
+        _ => Err(Error::type_mismatch("reviewers.filter is not a function")),
     }
 }
 
@@ -101,48 +98,39 @@ impl Action for RequestReview {
         &SUPPORTED_EVENTS
     }
 
-    async fn before_validate(
-        &self,
-        _context: &Context,
-        _rule: &Value,
-        _rule_name: Option<&Value>,
-    ) -> JsResult<()> {
-        Ok(())
-    }
-
     async fn after_validate(
         &self,
         context: &Context,
         settings: &Value,
         _rule_name: Option<&Value>,
         _results: &Value,
-    ) -> JsResult<()> {
+    ) -> Result<()> {
         let payload = event_aware::get_payload(context);
         let requested_reviewers = mapped_property(
-            js::read(payload, "requested_reviewers")?,
+            json_value::read(payload, "requested_reviewers")?,
             "payload.requested_reviewers",
             "login",
         )?;
         let reviewers = configured_list(settings, "reviewers");
         let author_login = match reviewers {
             Value::Array(items) if !items.is_empty() => {
-                js::read(js::read(payload, "user")?, "login")?
+                json_value::read(json_value::read(payload, "user")?, "login")?
             }
             _ => None,
         };
         let reviewers = reviewers_without_author(reviewers, author_login)?;
-        let reviewers_to_request = lodash_difference(&reviewers, &requested_reviewers);
-        let pull_number = js::read(payload, "number")?.unwrap_or(&Value::Null);
+        let reviewers_to_request = values_excluding(&reviewers, &requested_reviewers);
+        let pull_number = json_value::read(payload, "number")?.unwrap_or(&Value::Null);
         let collaborators =
             api::list_collaborators(context, context.repo_params(json!({}))?).await?;
-        let collaborators_to_request = lodash_intersection(&reviewers_to_request, &collaborators);
+        let collaborators_to_request = unique_values_in_both(&reviewers_to_request, &collaborators);
         let requested_teams = mapped_property(
-            js::read(payload, "requested_teams")?,
+            json_value::read(payload, "requested_teams")?,
             "payload.requested_teams",
             "slug",
         )?;
         let teams_to_request =
-            lodash_difference(configured_list(settings, "teams"), &requested_teams);
+            values_excluding(configured_list(settings, "teams"), &requested_teams);
         if collaborators_to_request.is_empty() && teams_to_request.is_empty() {
             return Ok(());
         }
@@ -172,7 +160,7 @@ mod tests {
     #[test]
     fn already_requested_reviewers_are_not_requested_again() {
         assert_eq!(
-            lodash_difference(&json!(["shine2lay"]), &[json!("shine2lay")]),
+            values_excluding(&json!(["shine2lay"]), &[json!("shine2lay")]),
             [] as [serde_json::Value; 0]
         );
     }
@@ -180,11 +168,11 @@ mod tests {
     #[test]
     fn non_collaborators_are_not_counted_as_requestable() {
         assert_eq!(
-            lodash_intersection(&[json!("shine2lay")], &[]),
+            unique_values_in_both(&[json!("shine2lay")], &[]),
             [] as [serde_json::Value; 0]
         );
         assert_eq!(
-            lodash_intersection(&[json!("a"), json!("a"), json!("b")], &[json!("a")]),
+            unique_values_in_both(&[json!("a"), json!("a"), json!("b")], &[json!("a")]),
             vec![json!("a")]
         );
     }
@@ -192,11 +180,11 @@ mod tests {
     #[test]
     fn already_requested_teams_are_not_requested_again() {
         assert_eq!(
-            lodash_difference(&json!(["developers"]), &[json!("developers")]),
+            values_excluding(&json!(["developers"]), &[json!("developers")]),
             [] as [serde_json::Value; 0]
         );
         assert_eq!(
-            lodash_difference(&json!(["developers"]), &[json!("justice-league")]),
+            values_excluding(&json!(["developers"]), &[json!("justice-league")]),
             vec![json!("developers")]
         );
     }
@@ -204,7 +192,7 @@ mod tests {
     #[test]
     fn non_array_teams_setting_requests_no_team() {
         assert_eq!(
-            lodash_difference(&json!("developers"), &[] as &[Value]),
+            values_excluding(&json!("developers"), &[] as &[Value]),
             [] as [serde_json::Value; 0]
         );
     }

@@ -1,32 +1,33 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::results;
 use crate::validators::options_processor::unique_values;
 use serde_json::{Map, Value};
 
-fn split_team(team: &Value) -> JsResult<(String, String)> {
+fn split_team(team: &Value) -> Result<(String, String)> {
     let team_text = match team {
         Value::String(text) => text,
         Value::Null => {
-            return Err(JsError::type_error(
+            return Err(Error::type_mismatch(
                 "Cannot read properties of null (reading 'split')",
             ));
         }
-        _ => return Err(JsError::type_error("team.split is not a function")),
+        _ => return Err(Error::type_mismatch("team.split is not a function")),
     };
-    let parts: Vec<&str> = team_text.split('/').collect();
-    if parts.len() != 2 {
-        return Err(JsError::error(
+    match team_text.split_once('/') {
+        Some((organization, team_slug)) if !team_slug.contains('/') => {
+            let organization = organization.strip_prefix('@').unwrap_or(organization);
+            Ok((organization.to_string(), team_slug.to_string()))
+        }
+        _ => Err(Error::general(
             "each team id needs to be given in 'org/team_slug'",
-        ));
+        )),
     }
-    let organization = parts[0].strip_prefix('@').unwrap_or(parts[0]);
-    Ok((organization.to_string(), parts[1].to_string()))
 }
 
-pub async fn extract_team_members(context: &Context, teams: &[Value]) -> JsResult<Vec<Value>> {
+pub async fn extract_team_members(context: &Context, teams: &[Value]) -> Result<Vec<Value>> {
     let mut team_members = Vec::new();
     for team in teams {
         let (organization, team_slug) = split_team(team)?;
@@ -39,7 +40,7 @@ pub async fn extract_team_memberships(
     context: &Context,
     teams: &[Value],
     users: &[Value],
-) -> JsResult<Vec<Value>> {
+) -> Result<Vec<Value>> {
     let mut team_members = Vec::new();
     if teams.is_empty() {
         return Ok(team_members);
@@ -81,9 +82,9 @@ pub fn team_option_output(
 ) -> Value {
     let is_member = team_memberships
         .iter()
-        .any(|member| js::strict_equals(member, user_name));
-    let user_text = js::to_js_string(Some(user_name));
-    let team_text = js::to_js_string(Some(team_name));
+        .any(|member| json_value::strict_equals(member, user_name));
+    let user_text = json_value::to_display_string(Some(user_name));
+    let team_text = json_value::to_display_string(Some(team_name));
     let (status, description) = if is_member {
         (
             "pass",
@@ -96,7 +97,7 @@ pub fn team_option_output(
         )
     };
     let mut consolidation_context = Map::new();
-    if let Some(name) = js::get(&validator_context, "name") {
+    if let Some(name) = json_value::get(&validator_context, "name") {
         consolidation_context.insert("name".to_string(), name.clone());
     }
     let output = vec![results::construct_output_with_owned_validator(
@@ -114,16 +115,17 @@ pub async fn process_team_option(
     context: &Context,
     settings: &Value,
     payload: Option<&Value>,
-) -> JsResult<Value> {
-    let team_name = js::get(settings, "team").unwrap_or(&Value::Null);
-    let user_name = js::read(js::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
+) -> Result<Value> {
+    let team_name = json_value::get(settings, "team").unwrap_or(&Value::Null);
+    let user_name =
+        json_value::read(json_value::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
     let team_memberships = extract_team_memberships(
         context,
         std::slice::from_ref(team_name),
         std::slice::from_ref(user_name),
     )
     .await?;
-    // ponytail: Node puts the whole mergeable Context object into the output's validator field; only its serialisable event fields are kept here
+    // ponytail: only the serialisable event fields of the context are kept in the output's validator field
     Ok(team_option_output(
         context_as_validator(context),
         team_memberships,
@@ -149,7 +151,7 @@ mod tests {
             ("org".to_string(), "team1".to_string())
         );
         assert_eq!(
-            split_team(&json!("team1")).unwrap_err().message,
+            split_team(&json!("team1")).unwrap_err().message(),
             "each team id needs to be given in 'org/team_slug'"
         );
     }

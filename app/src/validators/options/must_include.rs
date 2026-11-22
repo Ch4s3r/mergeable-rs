@@ -1,6 +1,6 @@
-use crate::error::{JsError, JsResult};
-use crate::js;
-use crate::validators::options::lib::js_regex::JsRegex;
+use crate::error::{Error, Result};
+use crate::json_value;
+use crate::validators::options::lib::user_pattern::UserPattern;
 use crate::validators::options::lib::{self, OptionResult};
 use serde_json::Value;
 
@@ -10,23 +10,23 @@ const UNKNOWN_INPUT_TYPE_ERROR: &str =
 const KEY_NOT_FOUND_ERROR: &str =
     "Input type is an object and requires providing a 'key' for the 'must_include' option.";
 
-fn label_matches(regex: &JsRegex, label: &Value, key: Option<&Value>) -> JsResult<bool> {
+fn label_matches(regex: &UserPattern, label: &Value, key: Option<&Value>) -> Result<bool> {
     match label {
-        Value::String(text) => Ok(regex.test(text)),
-        _ if js::truthy(key) => {
-            let property = js::read(Some(label), &js::to_js_string(key))?;
-            Ok(regex.test(&js::to_js_string(property)))
+        Value::String(text) => Ok(regex.is_match(text)),
+        _ if json_value::truthy(key) => {
+            let property = json_value::read(Some(label), &json_value::to_display_string(key))?;
+            Ok(regex.is_match(&json_value::to_display_string(property)))
         }
-        _ => Err(JsError::error(KEY_NOT_FOUND_ERROR)),
+        _ => Err(Error::general(KEY_NOT_FOUND_ERROR)),
     }
 }
 
 fn every_label(
-    regex: &JsRegex,
+    regex: &UserPattern,
     labels: &[Value],
     key: Option<&Value>,
     expected: bool,
-) -> JsResult<bool> {
+) -> Result<bool> {
     for label in labels {
         if label_matches(regex, label, key)? != expected {
             return Ok(false);
@@ -35,7 +35,7 @@ fn every_label(
     Ok(true)
 }
 
-fn some_label(regex: &JsRegex, labels: &[Value], key: Option<&Value>) -> JsResult<bool> {
+fn some_label(regex: &UserPattern, labels: &[Value], key: Option<&Value>) -> Result<bool> {
     for label in labels {
         if label_matches(regex, label, key)? {
             return Ok(true);
@@ -45,30 +45,30 @@ fn some_label(regex: &JsRegex, labels: &[Value], key: Option<&Value>) -> JsResul
 }
 
 fn includes_pattern(
-    regex: &JsRegex,
+    regex: &UserPattern,
     input: &Value,
     key: Option<&Value>,
     all: bool,
-) -> JsResult<bool> {
+) -> Result<bool> {
     match input {
-        Value::String(text) => Ok(regex.test(text)),
+        Value::String(text) => Ok(regex.is_match(text)),
         Value::Array(labels) if all => every_label(regex, labels, key, true),
         Value::Array(labels) => some_label(regex, labels, key),
-        _ => Err(JsError::error(UNKNOWN_INPUT_TYPE_ERROR)),
+        _ => Err(Error::general(UNKNOWN_INPUT_TYPE_ERROR)),
     }
 }
 
-pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResult<OptionResult> {
-    let filter = js::get(rule, "must_include");
-    let regex = js::read(filter, "regex")?;
-    let key = js::read(filter, "key")?;
-    let message = js::read(filter, "message")?;
-    let Some(regex) = regex.filter(|present| js::is_truthy(present)) else {
-        return Err(JsError::error(REGEX_NOT_FOUND_ERROR));
+pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result<OptionResult> {
+    let filter = json_value::get(rule, "must_include");
+    let regex = json_value::read(filter, "regex")?;
+    let key = json_value::read(filter, "key")?;
+    let message = json_value::read(filter, "message")?;
+    let Some(regex) = regex.filter(|present| json_value::is_truthy(present)) else {
+        return Err(Error::general(REGEX_NOT_FOUND_ERROR));
     };
     let filter = filter.unwrap_or(&Value::Null);
     let regex_list = lib::concat_into_list(regex);
-    let all = js::truthy(js::get(filter, "all"));
+    let all = json_value::truthy(json_value::get(filter, "all"));
     let all_text = if all { "all" } else { "" };
     let joined_patterns = lib::join_list(regex_list, ", ");
     let validator_name = lib::validator_name(validator_context);
@@ -98,6 +98,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> JsResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validators::options::lib::OptionStatus;
     use serde_json::json;
 
     fn run(rule: &Value, input: &Value) -> OptionResult {
@@ -113,7 +114,7 @@ mod tests {
     fn passes_when_a_label_matches() {
         assert_eq!(
             run(&json!({"regex": "test"}), &json!(["A", "B", "the test"])).status,
-            "pass"
+            OptionStatus::Pass
         );
     }
 
@@ -123,7 +124,7 @@ mod tests {
             &json!({"regex": "test", "message": "failed Test"}),
             &json!(["A", "B"]),
         );
-        assert_eq!(result.status, "fail");
+        assert_eq!(result.status, OptionStatus::Fail);
         assert_eq!(result.description, json!("failed Test"));
     }
 
@@ -135,7 +136,7 @@ mod tests {
             &json!({"must_include": {"count": "test"}}),
         )
         .unwrap_err();
-        assert_eq!(error.message, REGEX_NOT_FOUND_ERROR);
+        assert_eq!(error.message(), REGEX_NOT_FOUND_ERROR);
     }
 
     #[test]
@@ -146,7 +147,7 @@ mod tests {
                 &json!(["A test", "B", "the test"])
             )
             .status,
-            "fail"
+            OptionStatus::Fail
         );
         assert_eq!(
             run(
@@ -154,7 +155,7 @@ mod tests {
                 &json!(["A test", "B test", "the test"])
             )
             .status,
-            "pass"
+            OptionStatus::Pass
         );
     }
 
@@ -166,7 +167,7 @@ mod tests {
                 &json!(["A", "B", "Test"])
             )
             .status,
-            "fail"
+            OptionStatus::Fail
         );
     }
 
@@ -178,13 +179,13 @@ mod tests {
                 &json!(["A", "B", "the test"])
             )
             .status,
-            "pass"
+            OptionStatus::Pass
         );
         let result = run(
             &json!({"regex": ["test", "another"], "message": "failed array Test"}),
             &json!(["E", "F"]),
         );
-        assert_eq!(result.status, "fail");
+        assert_eq!(result.status, OptionStatus::Fail);
         assert_eq!(result.description, json!("failed array Test"));
     }
 
@@ -196,7 +197,7 @@ mod tests {
                 &json!([{"name": "bug"}])
             )
             .status,
-            "pass"
+            OptionStatus::Pass
         );
         let error = process(
             &json!({"name": "label"}),
@@ -204,7 +205,7 @@ mod tests {
             &json!({"must_include": {"regex": "bug"}}),
         )
         .unwrap_err();
-        assert_eq!(error.message, KEY_NOT_FOUND_ERROR);
+        assert_eq!(error.message(), KEY_NOT_FOUND_ERROR);
     }
 
     #[test]
@@ -216,7 +217,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(
-            error.message,
+            error.message(),
             "Failed to create a regex expression with the provided regex: ("
         );
     }

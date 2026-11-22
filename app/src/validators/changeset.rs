@@ -1,8 +1,8 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
@@ -14,14 +14,14 @@ pub struct Changeset;
 pub fn files_with_selected_status(
     files: Vec<Value>,
     file_status_settings: &Value,
-) -> JsResult<Vec<Value>> {
-    let selected_statuses: Vec<String> = js::object_keys(Some(file_status_settings))?
+) -> Result<Vec<Value>> {
+    let selected_statuses: Vec<String> = json_value::object_keys(Some(file_status_settings))?
         .into_iter()
-        .filter(|status| js::truthy(js::get(file_status_settings, status)))
+        .filter(|status| json_value::truthy(json_value::get(file_status_settings, status)))
         .collect();
     let mut selected = Vec::new();
     for file in files {
-        let status = js::as_str(js::read(Some(&file), "status")?);
+        let status = json_value::as_str(json_value::read(Some(&file), "status")?);
         if status.is_some_and(|status| {
             selected_statuses
                 .iter()
@@ -33,16 +33,19 @@ pub fn files_with_selected_status(
     Ok(selected)
 }
 
-pub fn file_names(files: Vec<Value>) -> JsResult<Vec<Value>> {
+pub fn file_names(files: Vec<Value>) -> Result<Vec<Value>> {
     files
         .into_iter()
-        .map(|mut file| Ok(js::take(Some(&mut file), "filename")?.unwrap_or(Value::Null)))
+        .map(|mut file| Ok(json_value::take(Some(&mut file), "filename")?.unwrap_or(Value::Null)))
         .collect()
 }
 
-pub async fn evaluate(mut files: Vec<Value>, settings: &Value) -> JsResult<Value> {
+pub async fn evaluate(mut files: Vec<Value>, settings: &Value) -> Result<Value> {
     let mut remaining_settings = Cow::Borrowed(settings);
-    if let Some(file_status_settings) = settings.get("files").filter(|value| js::is_truthy(value)) {
+    if let Some(file_status_settings) = settings
+        .get("files")
+        .filter(|value| json_value::is_truthy(value))
+    {
         files = files_with_selected_status(files, file_status_settings)?;
         if let Value::Object(map) = remaining_settings.to_mut() {
             map.shift_remove("files");
@@ -62,8 +65,8 @@ impl Validator for Changeset {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "no_empty": {"enabled": "boolean", "message": "string"},
             "must_include": {"regex": ["string", "array"], "regex_flag": "string", "message": "string", "all": "boolean"},
             "must_exclude": {"regex": ["string", "array"], "regex_flag": "string", "message": "string", "all": "boolean"},
@@ -72,7 +75,7 @@ impl Validator for Changeset {
             "min": {"count": "number", "message": "string"},
             "max": {"count": "number", "message": "string"},
             "files": {"added": "boolean", "modified": "boolean", "removed": "boolean"},
-        }))
+        })
     }
 
     async fn validate(
@@ -80,9 +83,9 @@ impl Validator for Changeset {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let pull_number =
-            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -99,18 +102,18 @@ mod tests {
     #[test]
     fn only_files_with_enabled_statuses_are_considered() {
         let files = vec![
-            json!({"filename": "added-file.js", "status": "added"}),
+            json!({"filename": "added-file.rs", "status": "added"}),
             json!({"filename": "modified-file.py", "status": "modified"}),
-            json!({"filename": "deleted-file.ts", "status": "deleted"}),
+            json!({"filename": "deleted-file.go", "status": "deleted"}),
         ];
         let selected =
             files_with_selected_status(files, &json!({"added": true, "modified": false})).unwrap();
-        assert_eq!(file_names(selected).unwrap(), vec![json!("added-file.js")]);
+        assert_eq!(file_names(selected).unwrap(), vec![json!("added-file.rs")]);
     }
 
     #[test]
     fn no_enabled_status_selects_nothing() {
-        let files = vec![json!({"filename": "a.js", "status": "removed"})];
+        let files = vec![json!({"filename": "a.rs", "status": "removed"})];
         let selected = files_with_selected_status(files, &json!({"removed": false})).unwrap();
         assert_eq!(selected, [] as [serde_json::Value; 0]);
     }
@@ -128,28 +131,28 @@ mod tests {
 
     #[tokio::test]
     async fn must_exclude_fails_when_a_changed_file_matches() {
-        let settings = json!({"do": "changeset", "must_exclude": {"regex": "b.js"}});
+        let settings = json!({"do": "changeset", "must_exclude": {"regex": "b.rs"}});
         assert_eq!(
-            status_of(&["package.json", "a.js"], settings.clone()).await,
+            status_of(&["Cargo.toml", "a.rs"], settings.clone()).await,
             "pass"
         );
-        assert_eq!(status_of(&["package.json", "b.js"], settings).await, "fail");
+        assert_eq!(status_of(&["Cargo.toml", "b.rs"], settings).await, "fail");
     }
 
     #[tokio::test]
     async fn must_include_accepts_a_list_of_patterns() {
         let settings =
-            json!({"do": "changeset", "must_include": {"regex": ["a.js", "b.js", "c.md"]}});
+            json!({"do": "changeset", "must_include": {"regex": ["a.rs", "b.rs", "c.md"]}});
         assert_eq!(
-            status_of(&["yarn.lock", "a.js"], settings.clone()).await,
+            status_of(&["rust-toolchain.toml", "a.rs"], settings.clone()).await,
             "pass"
         );
         assert_eq!(
-            status_of(&["yarn.lock", "b.js"], settings.clone()).await,
+            status_of(&["rust-toolchain.toml", "b.rs"], settings.clone()).await,
             "pass"
         );
         assert_eq!(
-            status_of(&["yarn.lock", "package.json"], settings).await,
+            status_of(&["rust-toolchain.toml", "Cargo.toml"], settings).await,
             "fail"
         );
     }
@@ -158,7 +161,7 @@ mod tests {
     async fn ends_with_matches_lock_files() {
         let settings = json!({"do": "changeset", "ends_with": {"match": "lock"}});
         assert_eq!(
-            status_of(&["package-lock.json", "yarn.lock"], settings).await,
+            status_of(&["Cargo.lock", "rust-toolchain.toml"], settings).await,
             "pass"
         );
     }
@@ -171,7 +174,7 @@ mod tests {
             status_of(&["test.md", "another.md"], settings.clone()).await,
             "pass"
         );
-        assert_eq!(status_of(&["test.md", "not_md.js"], settings).await, "fail");
+        assert_eq!(status_of(&["test.md", "not_md.rs"], settings).await, "fail");
     }
 
     #[tokio::test]
@@ -179,7 +182,7 @@ mod tests {
         let settings =
             json!({"do": "changeset", "must_exclude": {"regex": "^\\w+\\.md$", "all": true}});
         assert_eq!(
-            status_of(&["test.js", "another.py"], settings.clone()).await,
+            status_of(&["test.rs", "another.py"], settings.clone()).await,
             "pass"
         );
         assert_eq!(
@@ -191,15 +194,15 @@ mod tests {
     #[tokio::test]
     async fn file_status_setting_limits_the_checked_files() {
         let files = vec![
-            json!({"filename": "added-file.js", "status": "added"}),
+            json!({"filename": "added-file.rs", "status": "added"}),
             json!({"filename": "modified-file.py", "status": "modified"}),
-            json!({"filename": "deleted-file.ts", "status": "deleted"}),
+            json!({"filename": "deleted-file.go", "status": "deleted"}),
         ];
         let settings = json!({
             "do": "changeset",
             "files": {"added": true, "modified": false},
-            "must_include": {"regex": "added-file.js"},
-            "must_exclude": {"regex": "(modified-file.py)|(deleted-file.ts)"},
+            "must_include": {"regex": "added-file.rs"},
+            "must_exclude": {"regex": "(modified-file.py)|(deleted-file.go)"},
         });
         assert_eq!(evaluate(files, &settings).await.unwrap()["status"], "pass");
     }

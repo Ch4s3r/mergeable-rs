@@ -3,7 +3,7 @@ name = "mergeable"
 version = "2.17.3"
 edition = "2024"
 license = "AGPL-3.0-only"
-description = "Mergeable GitHub App, ported from Node/Probot to Rust"
+description = "Mergeable GitHub App"
 publish = false
 
 [lib]

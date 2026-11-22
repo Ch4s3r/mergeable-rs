@@ -8,24 +8,28 @@ use tokio::process::{Child, Command};
 pub const WEBHOOK_SECRET: &str = "replay-secret";
 const DEFAULT_WEBHOOK_PATH: &str = "/api/github/webhooks";
 const TEST_PRIVATE_KEY: &str = include_str!("../test-key.pem");
-const PROBOT_RUN_SCRIPT: &str = "node_modules/probot/bin/probot-run.js";
 const PASSED_THROUGH_VARIABLES: [&str; 3] = ["PATH", "HOME", "TMPDIR"];
 
 #[derive(Debug, Clone)]
 pub enum AppProgram {
-    NodeOriginal { repository_root: PathBuf },
-    Binary { path: PathBuf },
+    Reference {
+        command_line: Vec<String>,
+        working_directory: PathBuf,
+    },
+    Binary {
+        path: PathBuf,
+    },
 }
 
 impl AppProgram {
-    pub fn node_original() -> Result<AppProgram> {
-        let repository_root = std::env::current_dir()?;
-        if !repository_root.join(PROBOT_RUN_SCRIPT).exists() {
-            bail!(
-                "{PROBOT_RUN_SCRIPT} not found: run replay from the repository root after npm install"
-            );
+    pub fn reference(command_line: Vec<String>) -> Result<AppProgram> {
+        if command_line.is_empty() {
+            bail!("the reference command line is empty");
         }
-        Ok(AppProgram::NodeOriginal { repository_root })
+        Ok(AppProgram::Reference {
+            command_line,
+            working_directory: std::env::current_dir()?,
+        })
     }
 
     pub fn binary(path: &Path) -> Result<AppProgram> {
@@ -37,19 +41,24 @@ impl AppProgram {
 
     pub fn label(&self) -> String {
         match self {
-            AppProgram::NodeOriginal { .. } => "node".to_owned(),
+            AppProgram::Reference { .. } => "reference".to_owned(),
             AppProgram::Binary { path } => path.display().to_string(),
         }
     }
 
     fn command(&self) -> Command {
         match self {
-            AppProgram::NodeOriginal { repository_root } => {
-                let mut command = Command::new("node");
-                command
-                    .arg(PROBOT_RUN_SCRIPT)
-                    .arg("./index.js")
-                    .current_dir(repository_root);
+            AppProgram::Reference {
+                command_line,
+                working_directory,
+            } => {
+                let (program, arguments) = command_line
+                    .split_first()
+                    .map_or(("", &[][..]), |(program, arguments)| {
+                        (program.as_str(), arguments)
+                    });
+                let mut command = Command::new(program);
+                command.args(arguments).current_dir(working_directory);
                 command
             }
             AppProgram::Binary { path } => Command::new(path),

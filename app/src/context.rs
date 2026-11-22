@@ -1,6 +1,6 @@
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::github::client::InstallationClient;
-use crate::js;
+use crate::json_value;
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 use std::ops::Deref;
@@ -67,33 +67,37 @@ impl Context {
 
     #[must_use]
     pub fn event_with_action(&self) -> String {
-        format!("{}.{}", self.event_name, js::to_js_string(self.action()))
+        format!(
+            "{}.{}",
+            self.event_name,
+            json_value::to_display_string(self.action())
+        )
     }
 
     #[must_use]
     pub fn event_label(&self) -> String {
-        if js::truthy(self.action()) {
+        if json_value::truthy(self.action()) {
             self.event_with_action()
         } else {
             self.event_name.clone()
         }
     }
 
-    pub fn repo(&self) -> JsResult<(String, String)> {
+    pub fn repo(&self) -> Result<(String, String)> {
         let repository = self
             .payload
             .get("repository")
             .filter(|repository| repository.is_object())
             .ok_or_else(|| {
-                JsError::error("context.repo() is not supported for this webhook event.")
+                Error::general("context.repo() is not supported for this webhook event.")
             })?;
         Ok((
-            js::read_string(repository, &["owner", "login"])?,
-            js::read_string(repository, &["name"])?,
+            json_value::read_string(repository, &["owner", "login"])?,
+            json_value::read_string(repository, &["name"])?,
         ))
     }
 
-    pub fn repo_params(&self, extra: Value) -> JsResult<Value> {
+    pub fn repo_params(&self, extra: Value) -> Result<Value> {
         let (owner, repo) = self.repo()?;
         let mut params = Map::new();
         params.insert("owner".to_string(), Value::String(owner));
@@ -106,12 +110,15 @@ impl Context {
 
     #[must_use]
     pub fn repository_full_name(&self) -> String {
-        js::to_js_string(js::get_path(&self.payload, &["repository", "full_name"]))
+        json_value::to_display_string(json_value::get_path(
+            &self.payload,
+            &["repository", "full_name"],
+        ))
     }
 
-    pub fn global_setting(&self, key: &str) -> JsResult<Option<&Value>> {
+    pub fn global_setting(&self, key: &str) -> Result<Option<&Value>> {
         match &self.global_settings {
-            None => Err(JsError::reading_property_of_undefined(key)),
+            None => Err(Error::missing_property(key)),
             Some(settings) => Ok(settings.get(key)),
         }
     }

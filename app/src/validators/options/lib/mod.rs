@@ -1,14 +1,32 @@
 pub mod and_or_processor;
-pub mod js_regex;
+pub mod user_pattern;
 
-use crate::error::{JsError, JsResult};
-use crate::js;
-use js_regex::{JsRegex, JsRegexFlags};
+use crate::error::{Error, Result};
+use crate::json_value;
 use serde_json::{Map, Value, json};
+use user_pattern::{PatternFlags, UserPattern};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionStatus {
+    Pass,
+    Fail,
+    Error,
+}
+
+impl OptionStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            OptionStatus::Pass => "pass",
+            OptionStatus::Fail => "fail",
+            OptionStatus::Error => "error",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptionResult {
-    pub status: &'static str,
+    pub status: OptionStatus,
     pub description: Value,
 }
 
@@ -20,12 +38,12 @@ impl OptionResult {
     ) -> Self {
         if is_mergeable {
             OptionResult {
-                status: "pass",
+                status: OptionStatus::Pass,
                 description: success_description.into(),
             }
         } else {
             OptionResult {
-                status: "fail",
+                status: OptionStatus::Fail,
                 description: failure_description.into(),
             }
         }
@@ -34,7 +52,10 @@ impl OptionResult {
     #[must_use]
     pub fn into_value(self) -> Value {
         let mut result = Map::new();
-        result.insert("status".to_string(), Value::String(self.status.to_string()));
+        result.insert(
+            "status".to_string(),
+            Value::String(self.status.as_str().to_string()),
+        );
         result.insert("description".to_string(), self.description);
         Value::Object(result)
     }
@@ -86,49 +107,49 @@ pub fn construct_error_output(
 
 #[must_use]
 pub fn validator_name(validator_context: &Value) -> String {
-    js::to_js_string(js::get(validator_context, "name"))
+    json_value::to_display_string(json_value::get(validator_context, "name"))
 }
 
 #[must_use]
 pub fn message_or_default(message: Option<&Value>, default_description: String) -> Value {
     match message {
-        Some(custom) if js::is_truthy(custom) => custom.clone(),
+        Some(custom) if json_value::is_truthy(custom) => custom.clone(),
         _ => Value::String(default_description),
     }
 }
 
 #[must_use]
 pub fn regex_flags(filter: &Value) -> String {
-    match js::get(filter, "regex_flag") {
-        Some(flag) if js::is_truthy(flag) => {
+    match json_value::get(filter, "regex_flag") {
+        Some(flag) if json_value::is_truthy(flag) => {
             if flag.as_str() == Some("none") {
                 String::new()
             } else {
-                js::to_js_string(Some(flag))
+                json_value::to_display_string(Some(flag))
             }
         }
         _ => "i".to_string(),
     }
 }
 
-pub fn compile_user_regex(regex: &Value, flags: &str) -> JsResult<JsRegex> {
-    let pattern = js::to_js_string(Some(regex));
-    JsRegex::new(&pattern, flags).map_err(|_| {
-        JsError::error(format!(
+pub fn compile_user_regex(regex: &Value, flags: &str) -> Result<UserPattern> {
+    let pattern = json_value::to_display_string(Some(regex));
+    UserPattern::new(&pattern, flags).map_err(|_| {
+        Error::general(format!(
             "Failed to create a regex expression with the provided regex: {pattern}"
         ))
     })
 }
 
 #[must_use]
-pub fn compile_constant_pattern(pattern: &str, flags: JsRegexFlags) -> Option<fancy_regex::Regex> {
-    let translated = js_regex::translate(pattern, flags).ok()?;
+pub fn compile_constant_pattern(pattern: &str, flags: PatternFlags) -> Option<fancy_regex::Regex> {
+    let translated = user_pattern::translate(pattern, flags).ok()?;
     fancy_regex::Regex::new(&translated).ok()
 }
 
 #[must_use]
 pub fn concat_into_list(value: &Value) -> &[Value] {
-    js::as_array_or_wrap(value)
+    json_value::as_array_or_wrap(value)
 }
 
 #[must_use]
@@ -137,7 +158,7 @@ pub fn join_list(items: &[Value], separator: &str) -> String {
         .iter()
         .map(|item| match item {
             Value::Null => String::new(),
-            other => js::to_js_string(Some(other)),
+            other => json_value::to_display_string(Some(other)),
         })
         .collect::<Vec<_>>()
         .join(separator)
@@ -149,7 +170,7 @@ pub fn utf16_length(text: &str) -> usize {
 }
 
 #[must_use]
-pub fn is_js_whitespace(character: char) -> bool {
+pub fn is_trimmable_whitespace(character: char) -> bool {
     matches!(
         character,
         '\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
@@ -163,8 +184,8 @@ pub fn is_js_whitespace(character: char) -> bool {
     )
 }
 
-pub fn js_trim(text: &str) -> &str {
-    text.trim_matches(is_js_whitespace)
+pub fn trim_whitespace(text: &str) -> &str {
+    text.trim_matches(is_trimmable_whitespace)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -179,30 +200,30 @@ pub struct NotSearchable;
 fn index_of(container: &Value, needle: &Value) -> Result<f64, NotSearchable> {
     match container {
         Value::String(text) => {
-            let needle_text = js::to_js_string(Some(needle));
+            let needle_text = json_value::to_display_string(Some(needle));
             Ok(text.find(&needle_text).map_or(-1.0, |byte_offset| {
-                js::number_from_length(utf16_length(&text[..byte_offset]))
+                json_value::number_from_length(utf16_length(&text[..byte_offset]))
             }))
         }
         Value::Array(items) => Ok(items
             .iter()
-            .position(|item| js::strict_equals(item, needle))
-            .map_or(-1.0, js::number_from_length)),
+            .position(|item| json_value::strict_equals(item, needle))
+            .map_or(-1.0, json_value::number_from_length)),
         _ => Err(NotSearchable),
     }
 }
 
 fn length_of(value: &Value) -> Option<f64> {
     match value {
-        Value::String(text) => Some(js::number_from_length(utf16_length(text))),
-        Value::Array(items) => Some(js::number_from_length(items.len())),
+        Value::String(text) => Some(json_value::number_from_length(utf16_length(text))),
+        Value::Array(items) => Some(json_value::number_from_length(items.len())),
         _ => None,
     }
 }
 
 #[expect(
     clippy::float_cmp,
-    reason = "exact comparison of JavaScript indexOf results, which are integral numbers"
+    reason = "exact comparison of index positions, which are integral numbers"
 )]
 fn has_affix(container: &Value, item: &Value, affix: Affix) -> Result<bool, NotSearchable> {
     let index = index_of(container, item)?;
@@ -262,7 +283,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ends_with_uses_the_first_occurrence_like_javascript_index_of() {
+    fn ends_with_uses_the_first_occurrence_of_the_suffix() {
         assert_eq!(
             input_has_affix(&json!("test test"), &json!("test"), Affix::Suffix),
             Ok(false)
@@ -294,8 +315,8 @@ mod tests {
     }
 
     #[test]
-    fn javascript_trim_removes_byte_order_mark_but_not_next_line() {
-        assert_eq!(js_trim("\u{FEFF} a \u{A0}"), "a");
-        assert_eq!(js_trim("\u{85}"), "\u{85}");
+    fn trim_removes_byte_order_mark_but_not_next_line() {
+        assert_eq!(trim_whitespace("\u{FEFF} a \u{A0}"), "a");
+        assert_eq!(trim_whitespace("\u{85}"), "\u{85}");
     }
 }

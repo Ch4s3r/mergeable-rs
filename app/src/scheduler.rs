@@ -1,21 +1,27 @@
 use crate::context::SharedPayload;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::github::app_auth::AppJwtClient;
 use crate::github::client::GithubApp;
-use crate::js;
+use crate::json_value;
 use crate::server;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-const NODE_TIMEOUT_MAX_MILLISECONDS: f64 = 2_147_483_647.0;
+const MAXIMUM_TIMER_MILLISECONDS: f64 = 2_147_483_647.0;
 const SCHEDULE_EVENT_NAME: &str = "schedule";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirstRun {
+    RandomlyDelayed,
+    Immediate,
+}
+
 pub struct SchedulerOptions {
-    pub delay: bool,
+    pub first_run: FirstRun,
     pub interval_milliseconds: f64,
     pub ignored_accounts: Vec<String>,
 }
@@ -25,7 +31,11 @@ impl SchedulerOptions {
     pub fn from_env(interval_milliseconds: f64) -> Self {
         let environment_text = |name: &str| std::env::var(name).unwrap_or_default();
         SchedulerOptions {
-            delay: environment_text("DISABLE_DELAY").is_empty(),
+            first_run: if environment_text("DISABLE_DELAY").is_empty() {
+                FirstRun::RandomlyDelayed
+            } else {
+                FirstRun::Immediate
+            },
             interval_milliseconds,
             ignored_accounts: parse_ignored_accounts(&environment_text("IGNORED_ACCOUNTS")),
         }
@@ -41,7 +51,7 @@ pub fn parse_ignored_accounts(ignored_accounts_text: &str) -> Vec<String> {
 }
 
 #[must_use]
-pub fn js_number(text: &str) -> f64 {
+pub fn parse_decimal_number(text: &str) -> f64 {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return 0.0;
@@ -60,8 +70,8 @@ pub fn js_number(text: &str) -> f64 {
 }
 
 #[must_use]
-pub fn node_timer_duration(milliseconds: f64) -> Duration {
-    let effective = if (1.0..=NODE_TIMEOUT_MAX_MILLISECONDS).contains(&milliseconds) {
+pub fn timer_duration(milliseconds: f64) -> Duration {
+    let effective = if (1.0..=MAXIMUM_TIMER_MILLISECONDS).contains(&milliseconds) {
         milliseconds
     } else {
         1.0
@@ -84,17 +94,17 @@ pub fn scheduled_event_payload(installation: &Value, repository: Value) -> Value
 pub fn is_ignored_installation(
     ignored_accounts: &[String],
     installation: Option<&Value>,
-) -> JsResult<bool> {
-    let account = js::read(installation, "account")?;
-    let login = js::read(account, "login")?;
+) -> Result<bool> {
+    let account = json_value::read(installation, "account")?;
+    let login = json_value::read(account, "login")?;
     let lowercase_login = match login {
         Some(Value::String(text)) => text.to_lowercase(),
         Some(Value::Null) | None => {
-            js::read(login, "toLowerCase")?;
+            json_value::read(login, "toLowerCase")?;
             String::new()
         }
         Some(_) => {
-            return Err(JsError::type_error(
+            return Err(Error::type_mismatch(
                 "installation.account.login.toLowerCase is not a function",
             ));
         }
@@ -103,7 +113,7 @@ pub fn is_ignored_installation(
 }
 
 fn repository_key(repository: &Value) -> String {
-    js::to_js_string(js::get(repository, "id"))
+    json_value::to_display_string(json_value::get(repository, "id"))
 }
 
 pub struct Scheduler {
@@ -132,14 +142,14 @@ impl Scheduler {
         tokio::spawn(async move {
             while let Some(installation) = queued_installations.recv().await {
                 if let Err(error) = worker.schedule_each_repository(Some(&installation)).await {
-                    tracing::error!(%error, "scheduler error");
+                    tracing::error!(%error, "scheduler.installation.failed");
                 }
             }
         });
         let setup = Arc::clone(&scheduler);
         tokio::spawn(async move {
             if let Err(error) = setup.setup().await {
-                tracing::error!(%error, "scheduler error");
+                tracing::error!(%error, "scheduler.setup.failed");
             }
         });
         scheduler
@@ -147,19 +157,15 @@ impl Scheduler {
 
     #[must_use]
     pub fn listens_to(event_name: &str, payload: &Value) -> bool {
-        let action = js::as_str(payload.get("action"));
+        let action = json_value::as_str(payload.get("action"));
         matches!(
             (event_name, action),
             ("installation", Some("created")) | ("installation_repositories", Some("added"))
         )
     }
 
-    pub async fn handle_webhook(
-        self: Arc<Self>,
-        event_name: &str,
-        payload: &Value,
-    ) -> JsResult<()> {
-        let installation = js::get(payload, "installation");
+    pub async fn handle_webhook(self: Arc<Self>, event_name: &str, payload: &Value) -> Result<()> {
+        let installation = json_value::get(payload, "installation");
         if event_name == "installation" {
             return self.schedule_each_repository(installation).await;
         }
@@ -169,7 +175,7 @@ impl Scheduler {
         Ok(())
     }
 
-    async fn setup(&self) -> JsResult<()> {
+    async fn setup(&self) -> Result<()> {
         let installations = self
             .app_client
             .paginate_as_app("/app/installations?per_page=100")
@@ -182,9 +188,9 @@ impl Scheduler {
         Ok(())
     }
 
-    fn accepts_installation(&self, installation: Option<&Value>) -> JsResult<bool> {
+    fn accepts_installation(&self, installation: Option<&Value>) -> Result<bool> {
         if is_ignored_installation(&self.options.ignored_accounts, installation)? {
-            tracing::info!(installation = ?installation, "installation is ignored");
+            tracing::info!(installation = ?installation, "scheduler.installation.ignored");
             return Ok(false);
         }
         Ok(true)
@@ -192,12 +198,12 @@ impl Scheduler {
 
     fn queue_installation(&self, installation: Value) {
         if self.installation_queue.send(installation).is_err() {
-            tracing::error!("scheduler queue closed");
+            tracing::error!("scheduler.queue.closed");
         }
     }
 
-    async fn schedule_each_repository(&self, installation: Option<&Value>) -> JsResult<()> {
-        let installation_id = js::read(installation, "id")?.and_then(Value::as_u64);
+    async fn schedule_each_repository(&self, installation: Option<&Value>) -> Result<()> {
+        let installation_id = json_value::read(installation, "id")?.and_then(Value::as_u64);
         let installation = installation.unwrap_or(&Value::Null);
         let client = self.github.installation(installation_id);
         let repositories = client
@@ -211,28 +217,28 @@ impl Scheduler {
 
     fn schedule(&self, installation: &Value, repository: Value) {
         let key = repository_key(&repository);
-        let Ok(mut intervals) = self.intervals.lock() else {
-            return;
-        };
+        let mut intervals = self
+            .intervals
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         if intervals.contains_key(&key) {
             return;
         }
         let interval_milliseconds = self.options.interval_milliseconds;
-        let delay_milliseconds = if self.options.delay {
-            interval_milliseconds * rand::random::<f64>()
-        } else {
-            0.0
+        let delay_milliseconds = match self.options.first_run {
+            FirstRun::RandomlyDelayed => interval_milliseconds * rand::random::<f64>(),
+            FirstRun::Immediate => 0.0,
         };
         tracing::debug!(
             repository = %repository,
             delay_milliseconds,
             interval_milliseconds,
-            "scheduling interval"
+            "scheduler.repository.scheduled"
         );
         let payload = SharedPayload::from(scheduled_event_payload(installation, repository));
         let github = Arc::clone(&self.github);
         let timer = tokio::spawn(async move {
-            tokio::time::sleep(node_timer_duration(delay_milliseconds)).await;
+            tokio::time::sleep(timer_duration(delay_milliseconds)).await;
             loop {
                 let receive_github = Arc::clone(&github);
                 let receive_payload = payload.clone();
@@ -245,22 +251,13 @@ impl Scheduler {
                     )
                     .await;
                     if let Err(error) = outcome {
-                        tracing::error!(%error, "scheduler error");
+                        tracing::error!(%error, "scheduler.run.failed");
                     }
                 });
-                tokio::time::sleep(node_timer_duration(interval_milliseconds)).await;
+                tokio::time::sleep(timer_duration(interval_milliseconds)).await;
             }
         });
         intervals.insert(key, timer);
-    }
-
-    pub fn stop(&self, repository: &Value) {
-        tracing::info!(repository = %repository, "canceling interval");
-        if let Ok(intervals) = self.intervals.lock()
-            && let Some(timer) = intervals.get(&repository_key(repository))
-        {
-            timer.abort();
-        }
     }
 }
 
@@ -307,7 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn installation_without_account_fails_like_javascript() {
+    fn installation_without_account_fails_with_a_missing_property_error() {
         let without_account = is_ignored_installation(&[], Some(&json!({"id": 1})));
         assert_eq!(
             without_account
@@ -351,19 +348,19 @@ mod tests {
     }
 
     #[test]
-    fn timer_delays_outside_the_node_range_become_one_millisecond() {
-        assert_eq!(node_timer_duration(0.0), Duration::from_millis(1));
-        assert_eq!(node_timer_duration(f64::NAN), Duration::from_millis(1));
-        assert_eq!(node_timer_duration(3_600_000.0), Duration::from_secs(3600));
-        assert_eq!(node_timer_duration(1e12), Duration::from_millis(1));
+    fn timer_delays_outside_the_supported_range_become_one_millisecond() {
+        assert_eq!(timer_duration(0.0), Duration::from_millis(1));
+        assert_eq!(timer_duration(f64::NAN), Duration::from_millis(1));
+        assert_eq!(timer_duration(3_600_000.0), Duration::from_secs(3600));
+        assert_eq!(timer_duration(1e12), Duration::from_millis(1));
     }
 
     #[test]
-    fn interval_text_is_converted_like_javascript_number() {
-        assert_eq!(js_number("3600"), 3600.0);
-        assert_eq!(js_number(" 0.5 "), 0.5);
-        assert_eq!(js_number(""), 0.0);
-        assert!(js_number("abc").is_nan());
-        assert!(js_number("inf").is_nan());
+    fn interval_text_is_parsed_as_a_decimal_number() {
+        assert_eq!(parse_decimal_number("3600"), 3600.0);
+        assert_eq!(parse_decimal_number(" 0.5 "), 0.5);
+        assert_eq!(parse_decimal_number(""), 0.0);
+        assert!(parse_decimal_number("abc").is_nan());
+        assert!(parse_decimal_number("inf").is_nan());
     }
 }

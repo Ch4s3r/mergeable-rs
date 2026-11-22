@@ -1,5 +1,5 @@
 pub mod brace_expansion;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use fancy_regex::Regex;
 use serde_json::Value;
 use std::fmt::Write as _;
@@ -7,7 +7,7 @@ use std::sync::{Arc, LazyLock};
 
 const COMPILED_GLOB_CACHE_CAPACITY: u64 = 4096;
 
-static COMPILED_GLOBS: LazyLock<moka::sync::Cache<(String, bool), Arc<Minimatch>>> =
+static COMPILED_GLOBS: LazyLock<moka::sync::Cache<(String, DotEntries), Arc<CompiledGlob>>> =
     LazyLock::new(|| moka::sync::Cache::new(COMPILED_GLOB_CACHE_CAPACITY));
 
 const QUESTION_MARK: &str = "[^/]";
@@ -33,46 +33,65 @@ struct PatternList {
     regex_end: usize,
 }
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "mirrors the option and state flags of the JavaScript minimatch object"
-)]
-struct Minimatch {
-    dot: bool,
-    negate: bool,
-    comment: bool,
-    empty: bool,
-    set: Vec<Vec<PatternPart>>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DotEntries {
+    Excluded,
+    Included,
 }
 
-pub fn minimatch(file_path: &Value, pattern: &Value, dot: bool) -> JsResult<bool> {
+impl DotEntries {
+    fn admits(self, segment: &str) -> bool {
+        segment != "."
+            && segment != ".."
+            && (self == DotEntries::Included || !segment.starts_with('.'))
+    }
+}
+
+enum CompiledGlob {
+    Comment,
+    Empty,
+    Patterns(PatternSet),
+}
+
+struct PatternSet {
+    dot_entries: DotEntries,
+    negated: bool,
+    alternatives: Vec<Vec<PatternPart>>,
+}
+
+#[derive(Clone, Copy)]
+struct SegmentParser {
+    dot_entries: DotEntries,
+}
+
+pub fn matches_value(file_path: &Value, pattern: &Value, dot_entries: DotEntries) -> Result<bool> {
     let Value::String(pattern_text) = pattern else {
-        return Err(JsError::type_error("invalid pattern"));
+        return Err(Error::type_mismatch("invalid pattern"));
     };
     assert_pattern_length(pattern_text)?;
     if pattern_text.starts_with('#') {
         return Ok(false);
     }
-    compiled_glob(pattern_text, dot).matches(file_path)
+    compiled_glob(pattern_text, dot_entries).matches(file_path)
 }
 
-pub fn matches(file_path: &str, pattern: &str, dot: bool) -> JsResult<bool> {
+pub fn matches(file_path: &str, pattern: &str, dot_entries: DotEntries) -> Result<bool> {
     assert_pattern_length(pattern)?;
     if pattern.starts_with('#') {
         return Ok(false);
     }
-    Ok(compiled_glob(pattern, dot).matches_path(file_path))
+    Ok(compiled_glob(pattern, dot_entries).matches_path(file_path))
 }
 
-fn compiled_glob(pattern: &str, dot: bool) -> Arc<Minimatch> {
-    COMPILED_GLOBS.get_with((pattern.to_string(), dot), || {
-        Arc::new(Minimatch::new(pattern, dot))
+fn compiled_glob(pattern: &str, dot_entries: DotEntries) -> Arc<CompiledGlob> {
+    COMPILED_GLOBS.get_with((pattern.to_string(), dot_entries), || {
+        Arc::new(CompiledGlob::new(pattern, dot_entries))
     })
 }
 
-fn assert_pattern_length(pattern: &str) -> JsResult<()> {
+fn assert_pattern_length(pattern: &str) -> Result<()> {
     if pattern.encode_utf16().count() > MAX_PATTERN_LENGTH {
-        Err(JsError::type_error("pattern is too long"))
+        Err(Error::type_mismatch("pattern is too long"))
     } else {
         Ok(())
     }
@@ -158,7 +177,7 @@ fn translate_class_body(body: &str) -> String {
     translated
 }
 
-fn javascript_source_to_rust(source: &str) -> Option<String> {
+fn translate_regex_source(source: &str) -> Option<String> {
     let mut translated = String::new();
     let mut characters = source.chars();
     let mut class_body: Option<String> = None;
@@ -200,7 +219,7 @@ fn javascript_source_to_rust(source: &str) -> Option<String> {
 }
 
 fn compile(source: &str) -> Option<Regex> {
-    Regex::new(&javascript_source_to_rust(source)?).ok()
+    Regex::new(&translate_regex_source(source)?).ok()
 }
 
 fn is_valid_class(contents: &str) -> bool {
@@ -247,55 +266,69 @@ fn remove_first_close_paren(text: &str) -> String {
     }
 }
 
-impl Minimatch {
-    fn new(raw_pattern: &str, dot: bool) -> Self {
-        let mut matcher = Minimatch {
-            dot,
-            negate: false,
-            comment: false,
-            empty: false,
-            set: Vec::new(),
-        };
-        matcher.make(crate::lodash::js_trim(raw_pattern));
-        matcher
-    }
-
-    fn make(&mut self, pattern: &str) {
+impl CompiledGlob {
+    fn new(raw_pattern: &str, dot_entries: DotEntries) -> Self {
+        let pattern = crate::json_value::trim_whitespace_and_byte_order_mark(raw_pattern);
         if pattern.starts_with('#') {
-            self.comment = true;
-            return;
+            return CompiledGlob::Comment;
         }
         if pattern.is_empty() {
-            self.empty = true;
-            return;
+            return CompiledGlob::Empty;
         }
         let negation_count = pattern
             .chars()
             .take_while(|character| *character == '!')
             .count();
-        self.negate = negation_count % 2 == 1;
         let pattern = &pattern[negation_count..];
-        let brace_set = if has_brace_set(pattern) {
+        let expanded_patterns = if has_brace_set(pattern) {
             brace_expansion::expand_top(pattern)
         } else {
             vec![pattern.to_string()]
         };
-        for expanded in brace_set {
-            let mut parts = Vec::new();
-            let mut compiled_all = true;
-            for segment in split_on_slashes(&expanded) {
-                match self.parse_part(segment) {
-                    Some(part) => parts.push(part),
-                    None => compiled_all = false,
-                }
+        let parser = SegmentParser { dot_entries };
+        let alternatives = expanded_patterns
+            .iter()
+            .filter_map(|expanded| {
+                split_on_slashes(expanded)
+                    .into_iter()
+                    .map(|segment| parser.parse_part(segment))
+                    .collect::<Option<Vec<_>>>()
+            })
+            .collect();
+        CompiledGlob::Patterns(PatternSet {
+            dot_entries,
+            negated: negation_count % 2 == 1,
+            alternatives,
+        })
+    }
+
+    fn matches(&self, file_path: &Value) -> Result<bool> {
+        match (self, file_path) {
+            (CompiledGlob::Comment, _) => Ok(false),
+            (CompiledGlob::Empty, _) => Ok(file_path.as_str() == Some("")),
+            (CompiledGlob::Patterns(patterns), Value::String(path_text)) => {
+                Ok(patterns.matches_path(path_text))
             }
-            if compiled_all {
-                self.set.push(parts);
+            (CompiledGlob::Patterns(_), Value::Null) => Err(Error::type_mismatch(
+                "Cannot read properties of null (reading 'split')",
+            )),
+            (CompiledGlob::Patterns(_), _) => {
+                Err(Error::type_mismatch("f.split is not a function"))
             }
         }
     }
 
-    fn parse_part(&self, pattern: &str) -> Option<PatternPart> {
+    fn matches_path(&self, path_text: &str) -> bool {
+        match self {
+            CompiledGlob::Comment => false,
+            CompiledGlob::Empty => path_text.is_empty(),
+            CompiledGlob::Patterns(patterns) => patterns.matches_path(path_text),
+        }
+    }
+}
+
+impl SegmentParser {
+    fn parse_part(self, pattern: &str) -> Option<PatternPart> {
         if pattern == "**" {
             return Some(PatternPart::Globstar);
         }
@@ -310,7 +343,7 @@ impl Minimatch {
         Some(PatternPart::Compiled(compiled))
     }
 
-    fn parse_class_remainder(&self, pattern: &str) -> Option<ParsedSegment> {
+    fn parse_class_remainder(self, pattern: &str) -> Option<ParsedSegment> {
         if pattern.is_empty() || pattern == "**" {
             return Some(ParsedSegment {
                 source: "undefined".to_string(),
@@ -322,9 +355,9 @@ impl Minimatch {
 
     #[expect(
         clippy::too_many_lines,
-        reason = "single-pass glob parser ported from minimatch; splitting the state machine would obscure it"
+        reason = "single-pass glob parser; splitting the state machine would obscure it"
     )]
-    fn parse(&self, pattern: &str, is_sub_parse: bool) -> Option<ParsedSegment> {
+    fn parse(self, pattern: &str, is_sub_parse: bool) -> Option<ParsedSegment> {
         let characters: Vec<char> = pattern.chars().collect();
         let mut regex_source = String::new();
         let mut has_magic = false;
@@ -337,7 +370,7 @@ impl Minimatch {
         let mut class_start: Option<usize> = None;
         let pattern_start = if characters.first() == Some(&'.') {
             ""
-        } else if self.dot {
+        } else if self.dot_entries == DotEntries::Included {
             r"(?!(?:^|\/)\.{1,2}(?:$|\/))"
         } else {
             r"(?!\.)"
@@ -551,36 +584,16 @@ impl Minimatch {
             has_magic,
         })
     }
+}
 
-    fn matches(&self, file_path: &Value) -> JsResult<bool> {
-        if self.comment {
-            return Ok(false);
-        }
-        if self.empty {
-            return Ok(file_path.as_str() == Some(""));
-        }
-        match file_path {
-            Value::String(path_text) => Ok(self.matches_path(path_text)),
-            Value::Null => Err(JsError::type_error(
-                "Cannot read properties of null (reading 'split')",
-            )),
-            _ => Err(JsError::type_error("f.split is not a function")),
-        }
-    }
-
+impl PatternSet {
     fn matches_path(&self, path_text: &str) -> bool {
-        if self.comment {
-            return false;
-        }
-        if self.empty {
-            return path_text.is_empty();
-        }
         let file_segments = split_on_slashes(path_text);
-        let any_pattern_matches = self
-            .set
+        let any_alternative_matches = self
+            .alternatives
             .iter()
             .any(|pattern| self.match_one(&file_segments, pattern));
-        any_pattern_matches != self.negate
+        any_alternative_matches != self.negated
     }
 
     fn match_one(&self, file: &[&str], pattern: &[PatternPart]) -> bool {
@@ -592,22 +605,16 @@ impl Minimatch {
                 PatternPart::Globstar => {
                     let rest_of_pattern = pattern_index + 1;
                     if rest_of_pattern == pattern.len() {
-                        return file[file_index..].iter().all(|remaining| {
-                            *remaining != "."
-                                && *remaining != ".."
-                                && (self.dot || !remaining.starts_with('.'))
-                        });
+                        return file[file_index..]
+                            .iter()
+                            .all(|remaining| self.dot_entries.admits(remaining));
                     }
                     let mut swallow_index = file_index;
                     while swallow_index < file.len() {
                         if self.match_one(&file[swallow_index..], &pattern[rest_of_pattern..]) {
                             return true;
                         }
-                        let swallowed = file[swallow_index];
-                        if swallowed == "."
-                            || swallowed == ".."
-                            || (!self.dot && swallowed.starts_with('.'))
-                        {
+                        if !self.dot_entries.admits(file[swallow_index]) {
                             break;
                         }
                         swallow_index += 1;
@@ -640,16 +647,18 @@ impl Minimatch {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
-    const MINIMATCH_CORPUS: &str = include_str!("../../tests/fixtures/minimatch.json");
+    const GLOB_CORPUS: &str = include_str!("../../tests/fixtures/globs.json");
 
     #[test]
-    fn every_corpus_glob_matches_like_minimatch_three() {
-        let corpus: Vec<Value> = serde_json::from_str(MINIMATCH_CORPUS).unwrap();
+    fn every_corpus_glob_matches_as_recorded() {
+        let corpus: Vec<Value> = serde_json::from_str(GLOB_CORPUS).unwrap();
         let mismatches: Vec<&Value> = corpus
             .iter()
             .filter(|entry| {
-                let outcome = minimatch(&entry["file"], &entry["pattern"], false);
+                let outcome =
+                    matches_value(&entry["file"], &entry["pattern"], DotEntries::Excluded);
                 match (entry.get("matches").and_then(Value::as_bool), &outcome) {
                     (Some(expected), Ok(actual)) => expected != *actual,
                     (None, Err(error)) => {
@@ -666,14 +675,13 @@ mod tests {
             mismatches
         );
     }
-    use super::*;
 
     fn glob(file_path: &str, pattern: &str) -> bool {
-        matches(file_path, pattern, false).unwrap_or(false)
+        matches(file_path, pattern, DotEntries::Excluded).unwrap_or(false)
     }
 
     fn glob_with_dot(file_path: &str, pattern: &str) -> bool {
-        matches(file_path, pattern, true).unwrap_or(false)
+        matches(file_path, pattern, DotEntries::Included).unwrap_or(false)
     }
 
     #[test]
@@ -686,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn negation_comments_extglobs_and_braces_follow_minimatch() {
+    fn negation_comments_extglobs_and_braces_are_supported() {
         assert!(glob("bug", "!feat*"));
         assert!(!glob("#x", "#x"));
         assert!(glob("aab", "+(a)b"));
@@ -714,7 +722,7 @@ mod tests {
     }
 
     #[test]
-    fn unterminated_and_odd_character_classes_follow_minimatch() {
+    fn unterminated_and_odd_character_classes_are_handled() {
         assert!(glob("x[undefined", "*["));
         assert!(glob("[x]", "[[]x]"));
         assert!(glob("a", "[!]"));
@@ -729,8 +737,13 @@ mod tests {
     }
 
     #[test]
-    fn non_string_patterns_are_rejected_like_minimatch() {
-        let error = minimatch(&Value::String("a".to_string()), &Value::Null, false).unwrap_err();
+    fn non_string_patterns_are_rejected() {
+        let error = matches_value(
+            &Value::String("a".to_string()),
+            &Value::Null,
+            DotEntries::Excluded,
+        )
+        .unwrap_err();
         assert_eq!(error.to_string(), "TypeError: invalid pattern");
     }
 }

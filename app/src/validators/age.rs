@@ -1,8 +1,7 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
-use crate::js;
-use crate::lodash;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use crate::validators::Validator;
@@ -15,9 +14,9 @@ const MILLISECONDS_PER_DAY: f64 = 86_400_000.0;
 pub struct Age;
 
 #[must_use]
-pub fn parse_moment_milliseconds(time_to_compare: Option<&Value>, now: DateTime<Utc>) -> f64 {
+pub fn compared_time_milliseconds(time_to_compare: Option<&Value>, now: DateTime<Utc>) -> f64 {
     match time_to_compare {
-        None => js::number_from_timestamp_milliseconds(now.timestamp_millis()),
+        None => json_value::number_from_timestamp_milliseconds(now.timestamp_millis()),
         Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
         Some(Value::String(text)) => parse_date_text(text).unwrap_or(f64::NAN),
         Some(_) => f64::NAN,
@@ -26,7 +25,7 @@ pub fn parse_moment_milliseconds(time_to_compare: Option<&Value>, now: DateTime<
 
 fn parse_date_text(text: &str) -> Option<f64> {
     if let Ok(parsed) = DateTime::parse_from_rfc3339(text) {
-        return Some(js::number_from_timestamp_milliseconds(
+        return Some(json_value::number_from_timestamp_milliseconds(
             parsed.timestamp_millis(),
         ));
     }
@@ -35,7 +34,7 @@ fn parse_date_text(text: &str) -> Option<f64> {
             .and_hms_opt(0, 0, 0)
             .map(|midnight| chrono::Local.from_local_datetime(&midnight))
             .and_then(chrono::offset::LocalResult::single)
-            .map(|local| js::number_from_timestamp_milliseconds(local.timestamp_millis()));
+            .map(|local| json_value::number_from_timestamp_milliseconds(local.timestamp_millis()));
     }
     for format in [
         "%Y-%m-%dT%H:%M:%S%.f",
@@ -47,26 +46,29 @@ fn parse_date_text(text: &str) -> Option<f64> {
             return chrono::Local
                 .from_local_datetime(&naive)
                 .single()
-                .map(|local| js::number_from_timestamp_milliseconds(local.timestamp_millis()));
+                .map(|local| {
+                    json_value::number_from_timestamp_milliseconds(local.timestamp_millis())
+                });
         }
     }
     DateTime::parse_from_rfc2822(text)
         .ok()
-        .map(|parsed| js::number_from_timestamp_milliseconds(parsed.timestamp_millis()))
+        .map(|parsed| json_value::number_from_timestamp_milliseconds(parsed.timestamp_millis()))
 }
 
 #[must_use]
 pub fn check_age(now: DateTime<Utc>, time_to_compare: Option<&Value>, settings: &Value) -> Value {
-    let elapsed_milliseconds = js::number_from_timestamp_milliseconds(now.timestamp_millis())
-        - parse_moment_milliseconds(time_to_compare, now);
+    let elapsed_milliseconds =
+        json_value::number_from_timestamp_milliseconds(now.timestamp_millis())
+            - compared_time_milliseconds(time_to_compare, now);
     let elapsed_days = elapsed_milliseconds / MILLISECONDS_PER_DAY;
-    let is_mergeable = elapsed_days >= lodash::to_number(settings.get("days"));
+    let is_mergeable = elapsed_days >= json_value::to_number(settings.get("days"));
     let description = if is_mergeable {
         Value::String("Your PR is old enough to merge".to_string())
     } else {
         match settings
             .get("message")
-            .filter(|message| js::is_truthy(message))
+            .filter(|message| json_value::is_truthy(message))
         {
             Some(message) => message.clone(),
             None => Value::String("Your PR is not old enough to be merged yet".to_string()),
@@ -85,27 +87,19 @@ pub fn check_age(now: DateTime<Utc>, time_to_compare: Option<&Value>, settings: 
     })
 }
 
-pub fn evaluate(now: DateTime<Utc>, payload: Option<&Value>, settings: &Value) -> JsResult<Value> {
+pub fn evaluate(now: DateTime<Utc>, payload: Option<&Value>, settings: &Value) -> Result<Value> {
     let mut output = Vec::new();
-    if let Some(created_at_settings) = settings
-        .get("created_at")
-        .filter(|value| js::is_truthy(value))
-    {
-        output.push(check_age(
-            now,
-            js::read(payload, "created_at")?,
-            created_at_settings,
-        ));
-    }
-    if let Some(updated_at_settings) = settings
-        .get("updated_at")
-        .filter(|value| js::is_truthy(value))
-    {
-        output.push(check_age(
-            now,
-            js::read(payload, "updated_at")?,
-            updated_at_settings,
-        ));
+    for timestamp_field in ["created_at", "updated_at"] {
+        if let Some(age_settings) = settings
+            .get(timestamp_field)
+            .filter(|value| json_value::is_truthy(value))
+        {
+            output.push(check_age(
+                now,
+                json_value::read(payload, timestamp_field)?,
+                age_settings,
+            ));
+        }
     }
     Ok(results::consolidate_result(output, &json!({"name": "age"})))
 }
@@ -120,11 +114,11 @@ impl Validator for Age {
         &["pull_request.*", "pull_request_review.*", "issue_comment.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "updated_at": {"days": "number", "message": "string"},
             "created_at": {"days": "number", "message": "string"},
-        }))
+        })
     }
 
     async fn validate(
@@ -132,7 +126,7 @@ impl Validator for Age {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         evaluate(Utc::now(), event_aware::get_payload(context), settings)
     }
 }

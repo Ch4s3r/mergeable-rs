@@ -1,90 +1,91 @@
 use crate::configuration;
 use crate::context::Context;
-use crate::error::JsResult;
-use crate::flex;
+use crate::error::{Error, Result};
 use crate::github::api;
-use crate::js;
+use crate::json_value;
 use crate::metadata;
 use crate::registry::Registry;
+use crate::workflow;
 use futures::future::join_all;
 use serde_json::Value;
 
-pub async fn run_all(context: &mut Context) -> JsResult<()> {
+pub async fn run_all(context: &mut Context) -> Result<()> {
     check_rerun(context).await?;
     milestoned(context).await?;
     push(context).await
 }
 
-async fn check_rerun(context: &mut Context) -> JsResult<()> {
-    if !(context.event_name == "check_run" && js::as_str(context.action()) == Some("rerequested")) {
+async fn check_rerun(context: &mut Context) -> Result<()> {
+    if !(context.event_name == "check_run"
+        && json_value::as_str(context.action()) == Some("rerequested"))
+    {
         return Ok(());
     }
     let Some(check_run) = context
         .payload
         .get("check_run")
-        .filter(|check_run| js::is_truthy(check_run))
+        .filter(|check_run| json_value::is_truthy(check_run))
     else {
         return Ok(());
     };
-    if !js::truthy(check_run.get("output")) {
+    if !json_value::truthy(check_run.get("output")) {
         return Ok(());
     }
-    let meta = match js::read_path(check_run, &["output", "text"])? {
+    let rerun_metadata = match json_value::read_path(check_run, &["output", "text"])? {
         Some(Value::String(text)) => metadata::deserialize(text)?,
-        Some(other) => metadata::deserialize(&js::to_js_string(Some(other)))?,
+        Some(other) => metadata::deserialize(&json_value::to_display_string(Some(other)))?,
         None => {
-            return Err(crate::error::JsError::reading_property_of_undefined(
-                "indexOf",
-            ));
+            return Err(Error::missing_property("indexOf"));
         }
     };
     let check_run_id = check_run.get("id").unwrap_or(&Value::Null);
-    let meta_id = meta.get("id").unwrap_or(&Value::Null);
-    if !js::strict_equals(check_run_id, meta_id) {
+    let metadata_id = rerun_metadata.get("id").unwrap_or(&Value::Null);
+    if !json_value::strict_equals(check_run_id, metadata_id) {
         tracing::warn!(
             check_run = %check_run,
-            meta = %meta,
-            "check run ids in payload do not match, potential injection"
+            metadata = %rerun_metadata,
+            "check_run.rerun.id_mismatch"
         );
         return Ok(());
     }
-    let first_pull_request = match js::read(Some(check_run), "pull_requests")? {
+    let first_pull_request = match json_value::read(Some(check_run), "pull_requests")? {
         Some(Value::Array(items)) => match items.first() {
             Some(first) => first,
             None => return Ok(()),
         },
         _ => {
-            return Err(crate::error::JsError::reading_property_of_undefined(
-                "length",
-            ));
+            return Err(Error::missing_property("length"));
         }
     };
-    let pull_number = js::read(Some(first_pull_request), "number")?.unwrap_or(&Value::Null);
+    let pull_number = json_value::read(Some(first_pull_request), "number")?.unwrap_or(&Value::Null);
     let pull_request = api::get_pull_request(context, pull_number).await?;
     if let Value::Object(payload) = context.payload.to_mut() {
-        match meta.get("action") {
+        match rerun_metadata.get("action") {
             Some(action) => payload.insert("action".to_string(), action.clone()),
             None => payload.shift_remove("action"),
         };
         payload.insert("pull_request".to_string(), pull_request.data);
     }
-    context.event_name = js::to_js_string(meta.get("eventName"));
+    context.event_name = json_value::to_display_string(rerun_metadata.get("eventName"));
     Ok(())
 }
 
-async fn milestoned(context: &mut Context) -> JsResult<()> {
+async fn milestoned(context: &mut Context) -> Result<()> {
     let is_milestone_action = matches!(
-        js::as_str(context.action()),
+        json_value::as_str(context.action()),
         Some("milestoned" | "demilestoned")
     );
     if !(context.event_name == "issues" && is_milestone_action) {
         return Ok(());
     }
-    if !js::truthy(js::read_path(&context.payload, &["issue", "pull_request"])?) {
+    if !json_value::truthy(json_value::read_path(
+        &context.payload,
+        &["issue", "pull_request"],
+    )?) {
         return Ok(());
     }
     let issue_number =
-        js::read_path(&context.payload, &["issue", "number"])?.unwrap_or(&Value::Null);
+        json_value::read_path(&context.payload, &["issue", "number"])?.unwrap_or(&Value::Null);
     let response = api::get_pull_request(context, issue_number).await?;
     let mut pull_request = response.data;
     if let Value::Object(fields) = &mut pull_request {
@@ -100,14 +101,14 @@ async fn milestoned(context: &mut Context) -> JsResult<()> {
     Ok(())
 }
 
-async fn push(context: &mut Context) -> JsResult<()> {
+async fn push(context: &mut Context) -> Result<()> {
     if context.event_name != "push" {
         return Ok(());
     }
     let Some(head_commit) = context
         .payload
         .get("head_commit")
-        .filter(|commit| js::is_truthy(commit))
+        .filter(|commit| json_value::is_truthy(commit))
     else {
         return Ok(());
     };
@@ -116,14 +117,14 @@ async fn push(context: &mut Context) -> JsResult<()> {
         _ => "mergeable.yml".to_string(),
     };
     let config_file = Value::String(format!(".github/{config_path}"));
-    let changed = js::includes(head_commit.get("added"), &config_file)?
-        || js::includes(head_commit.get("modified"), &config_file)?;
+    let changed = json_value::includes(head_commit.get("added"), &config_file)?
+        || json_value::includes(head_commit.get("modified"), &config_file)?;
     if !changed {
         return Ok(());
     }
-    let configuration = configuration::instance_with_context(context).await;
+    let configuration = configuration::load(context).await;
     if configuration.has_errors() {
-        flex::log_and_process_config_errors(context, &configuration).await?;
+        workflow::report_configuration_errors(context, &configuration).await?;
         return Ok(());
     }
     let registry = Registry::default();
@@ -144,11 +145,11 @@ async fn push(context: &mut Context) -> JsResult<()> {
         }
         let registry = &registry;
         let configuration = &configuration;
-        async move { flex::process_workflow(&rerun_context, registry, configuration).await }
+        async move { workflow::process(&rerun_context, registry, configuration).await }
     });
     join_all(pending)
         .await
         .into_iter()
-        .collect::<JsResult<Vec<()>>>()
+        .collect::<Result<Vec<()>>>()
         .map(|_| ())
 }

@@ -49,7 +49,7 @@ static REQUIRE_STACK: std::sync::LazyLock<Option<Regex>> =
 static STACK_FRAMES: std::sync::LazyLock<Option<Regex>> =
     std::sync::LazyLock::new(|| Regex::new(r"(?:\n {4}at [^\n]*)+").ok());
 
-pub fn without_javascript_stack_traces(text: &str) -> String {
+pub fn without_stack_traces(text: &str) -> String {
     let mut stripped = text.to_owned();
     for pattern in [&*REQUIRE_STACK, &*STACK_FRAMES].into_iter().flatten() {
         stripped = pattern.replace_all(&stripped, "").into_owned();
@@ -59,7 +59,7 @@ pub fn without_javascript_stack_traces(text: &str) -> String {
 
 pub fn with_sorted_keys(value: &Value) -> Value {
     match value {
-        Value::String(text) => Value::String(without_javascript_stack_traces(text)),
+        Value::String(text) => Value::String(without_stack_traces(text)),
         Value::Array(items) => Value::Array(items.iter().map(with_sorted_keys).collect()),
         Value::Object(fields) => {
             let mut keys: Vec<&String> = fields.keys().collect();
@@ -97,10 +97,10 @@ mod tests {
     }
 
     #[test]
-    fn javascript_stack_traces_are_ignored_when_comparing() {
-        let node = json!({"text": "Error: Cannot find module './validators/x'\nRequire stack:\n- /a/lib/register.js\n- /a/index.js***\nmore"});
-        let rust = json!({"text": "Error: Cannot find module './validators/x'***\nmore"});
-        assert_eq!(canonical_text(&node), canonical_text(&rust));
+    fn stack_traces_are_ignored_when_comparing() {
+        let recorded = json!({"text": "Error: Cannot find module './validators/x'\nRequire stack:\n- /a/lib/register.js\n- /a/index.js***\nmore"});
+        let replayed = json!({"text": "Error: Cannot find module './validators/x'***\nmore"});
+        assert_eq!(canonical_text(&recorded), canonical_text(&replayed));
         let with_frames = json!("TypeError: boom\n    at a (/x.js:1:2)\n    at b (/y.js:3:4)\n```");
         assert_eq!(
             canonical_text(&with_frames),

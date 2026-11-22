@@ -1,9 +1,10 @@
 use super::{Dialect, YamlError};
-use crate::js;
+use crate::error::ErrorKind;
+use crate::json_value;
 use serde_json::{Map, Number, Value};
 use std::collections::HashMap;
 
-// ponytail: alias bombs are cut off at a fixed value count, where Node would run out of memory or string length
+// ponytail: alias bombs are cut off at a fixed value count instead of exhausting memory
 const MAXIMUM_CONVERTED_VALUES: usize = 1_000_000;
 const MILLISECONDS_PER_DAY: i64 = 86_400_000;
 const WEEKDAY_NAMES: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -12,7 +13,7 @@ const MONTH_NAMES: [&str; 12] = [
 ];
 
 #[derive(Clone, Debug)]
-pub(super) enum JsValue {
+pub(super) enum HeapValue {
     Null,
     Bool(bool),
     Number(f64),
@@ -23,12 +24,12 @@ pub(super) enum JsValue {
     Object(usize),
 }
 
-impl JsValue {
+impl HeapValue {
     pub(super) fn is_null(&self) -> bool {
         matches!(self, Self::Null)
     }
 
-    pub(super) fn is_js_object(&self) -> bool {
+    pub(super) fn is_object_like(&self) -> bool {
         matches!(
             self,
             Self::Date(_) | Self::Binary(_) | Self::Array(_) | Self::Object(_)
@@ -37,17 +38,17 @@ impl JsValue {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct JsObject {
-    entries: Vec<(String, JsValue)>,
+pub(super) struct HeapObject {
+    entries: Vec<(String, HeapValue)>,
     positions: HashMap<String, usize>,
 }
 
-impl JsObject {
+impl HeapObject {
     pub(super) fn has_own(&self, key: &str) -> bool {
         self.positions.contains_key(key)
     }
 
-    pub(super) fn set(&mut self, key: String, value: JsValue) {
+    pub(super) fn set(&mut self, key: String, value: HeapValue) {
         if let Some(&position) = self.positions.get(&key) {
             if let Some(entry) = self.entries.get_mut(position) {
                 entry.1 = value;
@@ -62,8 +63,8 @@ impl JsObject {
         self.entries.len()
     }
 
-    pub(super) fn entries_in_enumeration_order(&self) -> Vec<(String, JsValue)> {
-        let mut index_entries: Vec<(u32, &(String, JsValue))> = self
+    pub(super) fn entries_in_enumeration_order(&self) -> Vec<(String, HeapValue)> {
+        let mut index_entries: Vec<(u32, &(String, HeapValue))> = self
             .entries
             .iter()
             .filter_map(|entry| array_index(&entry.0).map(|index| (index, entry)))
@@ -81,7 +82,7 @@ impl JsObject {
             .collect()
     }
 
-    pub(super) fn values(&self) -> impl Iterator<Item = &JsValue> {
+    pub(super) fn values(&self) -> impl Iterator<Item = &HeapValue> {
         self.entries.iter().map(|(_, value)| value)
     }
 }
@@ -104,64 +105,64 @@ fn array_index(key: &str) -> Option<u32> {
 
 #[derive(Debug, Default)]
 pub(super) struct Heap {
-    pub(super) arrays: Vec<Vec<JsValue>>,
-    pub(super) objects: Vec<JsObject>,
+    pub(super) arrays: Vec<Vec<HeapValue>>,
+    pub(super) objects: Vec<HeapObject>,
 }
 
 impl Heap {
-    pub(super) fn new_array(&mut self, items: Vec<JsValue>) -> usize {
+    pub(super) fn new_array(&mut self, items: Vec<HeapValue>) -> usize {
         self.arrays.push(items);
         self.arrays.len() - 1
     }
 
     pub(super) fn new_object(&mut self) -> usize {
-        self.objects.push(JsObject::default());
+        self.objects.push(HeapObject::default());
         self.objects.len() - 1
     }
 
-    pub(super) fn own_enumerable_entries(&self, value: &JsValue) -> Vec<(String, JsValue)> {
+    pub(super) fn own_enumerable_entries(&self, value: &HeapValue) -> Vec<(String, HeapValue)> {
         match value {
-            JsValue::Object(id) => self.objects[*id].entries_in_enumeration_order(),
-            JsValue::Array(id) => self.arrays[*id]
+            HeapValue::Object(id) => self.objects[*id].entries_in_enumeration_order(),
+            HeapValue::Array(id) => self.arrays[*id]
                 .iter()
                 .enumerate()
                 .map(|(index, item)| (index.to_string(), item.clone()))
                 .collect(),
-            JsValue::Binary(bytes) => bytes
+            HeapValue::Binary(bytes) => bytes
                 .iter()
                 .enumerate()
-                .map(|(index, byte)| (index.to_string(), JsValue::Number(f64::from(*byte))))
+                .map(|(index, byte)| (index.to_string(), HeapValue::Number(f64::from(*byte))))
                 .collect(),
             _ => Vec::new(),
         }
     }
 
-    pub(super) fn to_js_string(&self, value: &JsValue, dialect: Dialect) -> String {
+    pub(super) fn to_display_string(&self, value: &HeapValue, dialect: Dialect) -> String {
         let mut arrays_being_joined = Vec::new();
-        self.to_js_string_guarded(value, dialect, &mut arrays_being_joined)
+        self.to_display_string_guarded(value, dialect, &mut arrays_being_joined)
     }
 
-    fn to_js_string_guarded(
+    fn to_display_string_guarded(
         &self,
-        value: &JsValue,
+        value: &HeapValue,
         dialect: Dialect,
         arrays_being_joined: &mut Vec<usize>,
     ) -> String {
         match value {
-            JsValue::Null => "null".to_string(),
-            JsValue::Bool(flag) => flag.to_string(),
-            JsValue::Number(number) => js::float_to_string(*number),
-            JsValue::String(text) => text.clone(),
-            JsValue::Date(time) => date_to_string(*time),
-            JsValue::Binary(bytes) => match dialect {
-                Dialect::JsYaml3 => String::from_utf8_lossy(bytes).into_owned(),
-                Dialect::JsYaml4 => bytes
+            HeapValue::Null => "null".to_string(),
+            HeapValue::Bool(flag) => flag.to_string(),
+            HeapValue::Number(number) => json_value::float_to_string(*number),
+            HeapValue::String(text) => text.clone(),
+            HeapValue::Date(time) => date_to_string(*time),
+            HeapValue::Binary(bytes) => match dialect {
+                Dialect::Lenient => String::from_utf8_lossy(bytes).into_owned(),
+                Dialect::Strict => bytes
                     .iter()
                     .map(u8::to_string)
                     .collect::<Vec<_>>()
                     .join(","),
             },
-            JsValue::Array(id) => {
+            HeapValue::Array(id) => {
                 if arrays_being_joined.contains(id) {
                     return String::new();
                 }
@@ -169,15 +170,17 @@ impl Heap {
                 let joined = self.arrays[*id]
                     .iter()
                     .map(|item| match item {
-                        JsValue::Null => String::new(),
-                        other => self.to_js_string_guarded(other, dialect, arrays_being_joined),
+                        HeapValue::Null => String::new(),
+                        other => {
+                            self.to_display_string_guarded(other, dialect, arrays_being_joined)
+                        }
                     })
                     .collect::<Vec<_>>()
                     .join(",");
                 arrays_being_joined.pop();
                 joined
             }
-            JsValue::Object(_) => "[object Object]".to_string(),
+            HeapValue::Object(_) => "[object Object]".to_string(),
         }
     }
 }
@@ -223,7 +226,7 @@ struct DateParts {
 
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "a valid JavaScript time value is an integral number of milliseconds within 8.64e15"
+    reason = "a valid time value is an integral number of milliseconds within 8.64e15"
 )]
 fn date_parts(time: f64) -> Option<DateParts> {
     if !time.is_finite() {
@@ -268,7 +271,7 @@ fn name_at(names: &[&'static str], index: i64) -> &'static str {
         .unwrap_or_default()
 }
 
-// ponytail: Date#toString is rendered in UTC; Node renders the process time zone (the corpus runs with TZ=UTC)
+// ponytail: dates are rendered as text in UTC regardless of the process time zone (the corpus was recorded with TZ=UTC)
 fn date_to_string(time: f64) -> String {
     let Some(parts) = date_parts(time) else {
         return "Invalid Date".to_string();
@@ -291,7 +294,7 @@ fn date_to_string(time: f64) -> String {
 
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "integral numbers below 9e15 are exact JavaScript integers"
+    reason = "integral numbers below 9e15 are represented exactly in both f64 and i64"
 )]
 fn number_to_json(number: f64) -> Value {
     if !number.is_finite() {
@@ -311,7 +314,11 @@ struct JsonConversion<'heap> {
     objects_in_progress: Vec<usize>,
 }
 
-pub(super) fn to_json(value: &JsValue, heap: &Heap, dialect: Dialect) -> Result<Value, YamlError> {
+pub(super) fn to_json(
+    value: &HeapValue,
+    heap: &Heap,
+    dialect: Dialect,
+) -> Result<Value, YamlError> {
     let mut conversion = JsonConversion {
         heap,
         dialect,
@@ -323,22 +330,22 @@ pub(super) fn to_json(value: &JsValue, heap: &Heap, dialect: Dialect) -> Result<
 }
 
 impl JsonConversion<'_> {
-    fn convert(&mut self, value: &JsValue) -> Result<Value, YamlError> {
+    fn convert(&mut self, value: &HeapValue) -> Result<Value, YamlError> {
         self.converted_values += 1;
         if self.converted_values > MAXIMUM_CONVERTED_VALUES {
             return Err(YamlError {
-                name: "RangeError",
+                kind: ErrorKind::OutOfRange,
                 message: "Invalid string length".to_string(),
             });
         }
         Ok(match value {
-            JsValue::Null => Value::Null,
-            JsValue::Bool(flag) => Value::Bool(*flag),
-            JsValue::Number(number) => number_to_json(*number),
-            JsValue::String(text) => Value::String(text.clone()),
-            JsValue::Date(time) => iso_string(*time).map_or(Value::Null, Value::String),
-            JsValue::Binary(bytes) => match self.dialect {
-                Dialect::JsYaml3 => {
+            HeapValue::Null => Value::Null,
+            HeapValue::Bool(flag) => Value::Bool(*flag),
+            HeapValue::Number(number) => number_to_json(*number),
+            HeapValue::String(text) => Value::String(text.clone()),
+            HeapValue::Date(time) => iso_string(*time).map_or(Value::Null, Value::String),
+            HeapValue::Binary(bytes) => match self.dialect {
+                Dialect::Lenient => {
                     let mut buffer = Map::new();
                     buffer.insert("type".to_string(), Value::String("Buffer".to_string()));
                     buffer.insert(
@@ -347,7 +354,7 @@ impl JsonConversion<'_> {
                     );
                     Value::Object(buffer)
                 }
-                Dialect::JsYaml4 => Value::Object(
+                Dialect::Strict => Value::Object(
                     bytes
                         .iter()
                         .enumerate()
@@ -355,7 +362,7 @@ impl JsonConversion<'_> {
                         .collect(),
                 ),
             },
-            JsValue::Array(id) => {
+            HeapValue::Array(id) => {
                 if self.arrays_in_progress.contains(id) {
                     return Err(circular_structure_error());
                 }
@@ -367,7 +374,7 @@ impl JsonConversion<'_> {
                 self.arrays_in_progress.pop();
                 Value::Array(items)
             }
-            JsValue::Object(id) => {
+            HeapValue::Object(id) => {
                 if self.objects_in_progress.contains(id) {
                     return Err(circular_structure_error());
                 }
@@ -386,7 +393,7 @@ impl JsonConversion<'_> {
 
 fn circular_structure_error() -> YamlError {
     YamlError {
-        name: "TypeError",
+        kind: ErrorKind::TypeMismatch,
         message: "Converting circular structure to JSON".to_string(),
     }
 }

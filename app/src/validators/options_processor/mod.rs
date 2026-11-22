@@ -6,25 +6,25 @@ pub mod owners;
 pub mod requested_reviewers;
 pub mod teams;
 
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{Error, Result};
+use crate::json_value;
 use serde_json::Value;
 
-pub fn map_logins(list: Option<&Value>, list_expression: &str) -> JsResult<Vec<Value>> {
+pub fn map_logins(list: Option<&Value>, list_expression: &str) -> Result<Vec<Value>> {
     match list {
         Some(Value::Array(users)) => users
             .iter()
             .map(|user| {
-                Ok(js::read(Some(user), "login")?
+                Ok(json_value::read(Some(user), "login")?
                     .cloned()
                     .unwrap_or(Value::Null))
             })
             .collect(),
-        None => Err(JsError::reading_property_of_undefined("map")),
-        Some(Value::Null) => Err(JsError::type_error(
+        None => Err(Error::missing_property("map")),
+        Some(Value::Null) => Err(Error::type_mismatch(
             "Cannot read properties of null (reading 'map')",
         )),
-        Some(_) => Err(JsError::type_error(format!(
+        Some(_) => Err(Error::type_mismatch(format!(
             "{list_expression}.map is not a function"
         ))),
     }

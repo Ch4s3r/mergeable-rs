@@ -1,12 +1,12 @@
 use crate::app_config::AppConfig;
 use crate::context::{Context, SharedPayload};
-use crate::error::{JsError, JsResult};
-use crate::flex;
+use crate::error::{Error, Result};
 use crate::github::app_auth::AppJwtClient;
 use crate::github::client::{GithubApp, InstallationClient};
-use crate::js;
+use crate::json_value;
 use crate::metrics::{self, Metrics};
 use crate::scheduler::Scheduler;
+use crate::workflow;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::{Path, Request, State};
@@ -22,6 +22,7 @@ use serde_json::{Map, Value, json};
 use sha2::Sha256;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tracing::Instrument;
 
 const STILL_PROCESSING_AFTER: Duration = Duration::from_secs(9);
 
@@ -30,12 +31,12 @@ pub struct ServerState {
     pub github: Arc<GithubApp>,
     pub app_client: Arc<AppJwtClient>,
     pub scheduler: Option<Arc<Scheduler>>,
-    pub webhook_secret: Arc<String>,
+    pub webhook_secret: Arc<str>,
     pub metrics: Option<Arc<Metrics>>,
 }
 
 pub fn router(config: &AppConfig, state: ServerState) -> Router {
-    let mut fall_through_routes: Router<ServerState> = Router::new().fallback(express_not_found);
+    let mut fall_through_routes: Router<ServerState> = Router::new().fallback(not_found_page);
     if let Some(registry) = state
         .metrics
         .clone()
@@ -57,7 +58,7 @@ pub fn router(config: &AppConfig, state: ServerState) -> Router {
         .route("/ping", get(|| async { "PONG" }))
         .route("/probot", get(landing_page))
         .route("/", get(redirect_to_landing_page));
-    if config.ratelimit_endpoint_enabled {
+    if config.rate_limit_endpoint_enabled {
         router = router.route(
             "/github-ratelimit/{installation_id}",
             get(github_rate_limit),
@@ -88,7 +89,7 @@ fn escape_html(text: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-async fn express_not_found(request: Request) -> Response {
+async fn not_found_page(request: Request) -> Response {
     let resource = request
         .uri()
         .path_and_query()
@@ -146,7 +147,7 @@ async fn render_metrics(State(state): State<ServerState>) -> impl IntoResponse {
 }
 
 fn json_response(value: Option<&Value>) -> Response {
-    let body = value.map(js::stringify).unwrap_or_default();
+    let body = value.map(json_value::stringify).unwrap_or_default();
     (
         [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
         body,
@@ -157,11 +158,11 @@ fn json_response(value: Option<&Value>) -> Response {
 pub async fn rate_limit_core(
     app_client: &AppJwtClient,
     installation_id: &str,
-) -> JsResult<Option<Value>> {
+) -> Result<Option<Value>> {
     let mut data = app_client
         .rate_limit_as_installation(installation_id)
         .await?;
-    js::take_path(&mut data, &["resources", "core"])
+    json_value::take_path(&mut data, &["resources", "core"])
 }
 
 async fn github_rate_limit(
@@ -175,7 +176,7 @@ async fn github_rate_limit(
         Ok(core) => json_response(core.as_ref()),
         Err(error) => json_response(Some(&json!(format!(
             "installation error: {}",
-            error.message
+            error.message()
         )))),
     }
 }
@@ -184,9 +185,17 @@ fn json_error(status: StatusCode, message: &str) -> Response {
     (
         status,
         [(header::CONTENT_TYPE, "application/json")],
-        js::stringify(&json!({"error": message})),
+        json_value::stringify(&json!({"error": message})),
     )
         .into_response()
+}
+
+fn hmac_matches<Signature: Mac + KeyInit>(secret: &str, body: &[u8], expected: &[u8]) -> bool {
+    let Ok(mut mac) = <Signature as KeyInit>::new_from_slice(secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(body);
+    mac.verify_slice(expected).is_ok()
 }
 
 #[must_use]
@@ -204,17 +213,9 @@ pub fn signature_matches(secret: &str, body: &[u8], signature_header: &str) -> b
         return false;
     };
     if uses_sha256 {
-        let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
-            return false;
-        };
-        mac.update(body);
-        mac.verify_slice(&expected).is_ok()
+        hmac_matches::<Hmac<Sha256>>(secret, body, &expected)
     } else {
-        let Ok(mut mac) = Hmac::<sha1::Sha1>::new_from_slice(secret.as_bytes()) else {
-            return false;
-        };
-        mac.update(body);
-        mac.verify_slice(&expected).is_ok()
+        hmac_matches::<Hmac<sha1::Sha1>>(secret, body, &expected)
     }
 }
 
@@ -235,7 +236,7 @@ async fn receive_webhook(
         return (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             [(header::CONTENT_TYPE, "application/json"), (header::ACCEPT, "application/json")],
-            js::stringify(&json!({"error": "Unsupported \"Content-Type\" header value. Must be \"application/json\""})),
+            json_value::stringify(&json!({"error": "Unsupported \"Content-Type\" header value. Must be \"application/json\""})),
         )
             .into_response();
     }
@@ -273,7 +274,7 @@ async fn receive_webhook(
         Ok(Ok(Ok(()))) => (StatusCode::OK, "ok\n").into_response(),
         Ok(Ok(Err(error))) => {
             let status = error
-                .status
+                .status()
                 .and_then(|code| StatusCode::from_u16(code).ok())
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             json_error(status, &error.to_string())
@@ -285,26 +286,26 @@ async fn receive_webhook(
     }
 }
 
-fn repository_full_names(payload: &Value, field: &str) -> JsResult<Value> {
-    let repositories = js::get(payload, field);
-    js::read(repositories, "map")?;
+fn repository_full_names(payload: &Value, field: &str) -> Result<Value> {
+    let repositories = json_value::get(payload, field);
+    json_value::read(repositories, "map")?;
     let Some(Value::Array(items)) = repositories else {
-        return Err(JsError::type_error(format!(
+        return Err(Error::type_mismatch(format!(
             "context.payload.{field}.map is not a function"
         )));
     };
     let names = items
         .iter()
         .map(|repository| {
-            Ok(js::read(Some(repository), "full_name")?
+            Ok(json_value::read(Some(repository), "full_name")?
                 .cloned()
                 .unwrap_or(Value::Null))
         })
-        .collect::<JsResult<Vec<Value>>>()?;
+        .collect::<Result<Vec<Value>>>()?;
     Ok(Value::Array(names))
 }
 
-fn log_event_received(context: &Context) -> JsResult<()> {
+fn log_event_received(context: &Context) -> Result<()> {
     let event = context.event_label();
     let mut entry = Map::new();
     entry.insert("logType".to_string(), json!("event_received"));
@@ -314,7 +315,7 @@ fn log_event_received(context: &Context) -> JsResult<()> {
     entry.insert("event".to_string(), json!(event));
     let payload = &context.payload;
     if event.contains("installation") {
-        let installation = js::get(payload, "installation");
+        let installation = json_value::get(payload, "installation");
         let (added, removed) = if event == "installation" {
             (repository_full_names(payload, "repositories")?, json!([]))
         } else if event == "installation_repositories" {
@@ -325,11 +326,11 @@ fn log_event_received(context: &Context) -> JsResult<()> {
         } else {
             (json!([]), json!([]))
         };
-        let installation_id = js::read(installation, "id")?.cloned();
-        let account = js::read(installation, "account")?;
-        let account_login = js::read(account, "login")?.cloned();
-        let account_type = js::read(account, "type")?.cloned();
-        let sender_login = js::read(js::get(payload, "sender"), "login")?.cloned();
+        let installation_id = json_value::read(installation, "id")?.cloned();
+        let account = json_value::read(installation, "account")?;
+        let account_login = json_value::read(account, "login")?.cloned();
+        let account_type = json_value::read(account, "type")?.cloned();
+        let sender_login = json_value::read(json_value::get(payload, "sender"), "login")?.cloned();
         let mut insert_defined = |key: &str, value: Option<Value>| {
             if let Some(present) = value {
                 entry.insert(key.to_string(), present);
@@ -350,27 +351,33 @@ fn log_event_received(context: &Context) -> JsResult<()> {
             ("url", "html_url"),
             ("isPrivate", "private"),
         ] {
-            if let Some(value) = js::read(Some(repository), field)? {
+            if let Some(value) = json_value::read(Some(repository), field)? {
                 entry.insert(key.to_string(), value.clone());
             }
         }
     }
-    tracing::info!(details = %serde_json::Value::Object(entry), "event received");
+    let details = Value::Object(entry);
+    tracing::info!(%details, "event.received");
     Ok(())
 }
 
 fn event_client(github: &Arc<GithubApp>, event_name: &str, payload: &Value) -> InstallationClient {
-    let installation_id =
-        js::get_path(payload, &["installation", "id"]).filter(|id| js::is_truthy(id));
-    let action = payload.get("action").filter(|action| js::is_truthy(action));
+    let installation_id = json_value::get_path(payload, &["installation", "id"])
+        .filter(|id| json_value::is_truthy(id));
+    let action = payload
+        .get("action")
+        .filter(|action| json_value::is_truthy(action));
     let full_event_name = match action {
-        Some(action) => format!("{event_name}.{}", js::to_js_string(Some(action))),
+        Some(action) => format!(
+            "{event_name}.{}",
+            json_value::to_display_string(Some(action))
+        ),
         None => event_name.to_string(),
     };
     let access_revoked = event_name == "installation"
         && matches!(
             action
-                .map(|action| js::to_js_string(Some(action)))
+                .map(|action| json_value::to_display_string(Some(action)))
                 .as_deref(),
             Some("suspend" | "deleted")
         );
@@ -380,7 +387,7 @@ fn event_client(github: &Arc<GithubApp>, event_name: &str, payload: &Value) -> I
         )),
         Some(id) if access_revoked => github.unauthenticated(format!(
             "Handling a \"{full_event_name}\" event: The app's access has been revoked from @octokit (id: {})",
-            js::to_js_string(Some(id))
+            json_value::to_display_string(Some(id))
         )),
         Some(id) => github.installation(id.as_u64()),
     }
@@ -391,11 +398,17 @@ pub async fn run_mergeable(
     delivery_id: String,
     event_name: String,
     payload: SharedPayload,
-) -> JsResult<()> {
+) -> Result<()> {
     let client = event_client(&github, &event_name, &payload);
     let context = Context::new(delivery_id, event_name, payload, client);
-    log_event_received(&context)?;
-    flex::execute_mergeable(context).await
+    let span = tracing::info_span!(
+        "event",
+        event_id = %context.event_id,
+        event = %context.event_label(),
+        repository = %context.repository_full_name(),
+    );
+    span.in_scope(|| log_event_received(&context))?;
+    workflow::execute(context).instrument(span).await
 }
 
 pub async fn handle_event(
@@ -403,8 +416,8 @@ pub async fn handle_event(
     delivery_id: String,
     event_name: String,
     payload: SharedPayload,
-) -> JsResult<()> {
-    let mut handlers: FuturesUnordered<BoxFuture<'static, JsResult<()>>> = FuturesUnordered::new();
+) -> Result<()> {
+    let mut handlers: FuturesUnordered<BoxFuture<'static, Result<()>>> = FuturesUnordered::new();
     if let Some(scheduler) = state.scheduler.clone()
         && Scheduler::listens_to(&event_name, &payload)
     {

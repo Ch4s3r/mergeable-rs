@@ -1,8 +1,8 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware;
 use crate::filters::{self, Filter};
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::options_processor::teams;
 use async_trait::async_trait;
@@ -21,14 +21,14 @@ impl Filter for Author {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "must_include": {"regex": "string", "regex_flag": "string", "message": "string"},
             "must_exclude": {"regex": "string", "regex_flag": "string", "message": "string"},
             "team": "string",
             "one_of": "array",
             "none_of": "array",
-        }))
+        })
     }
 
     async fn filter(
@@ -36,12 +36,12 @@ impl Filter for Author {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
-        let payload = event_aware::get_payload(context)
-            .ok_or_else(|| JsError::reading_property_of_undefined("user"))?;
+    ) -> Result<Value> {
+        let payload =
+            event_aware::get_payload(context).ok_or_else(|| Error::missing_property("user"))?;
         let mut remaining_settings = Cow::Borrowed(settings);
 
-        if js::truthy(settings.get("team")) {
+        if json_value::truthy(settings.get("team")) {
             let result = teams::process_team_option(context, settings, Some(payload)).await?;
             if result.get("status").and_then(Value::as_str) != Some("pass") {
                 return Ok(result);
@@ -51,7 +51,8 @@ impl Filter for Author {
             }
         }
 
-        let login = js::read(js::read(Some(payload), "user")?, "login")?.unwrap_or(&Value::Null);
+        let login = json_value::read(json_value::read(Some(payload), "user")?, "login")?
+            .unwrap_or(&Value::Null);
         filters::process_options(self, context, login, &remaining_settings).await
     }
 }

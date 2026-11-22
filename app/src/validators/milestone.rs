@@ -1,7 +1,7 @@
 use crate::context::Context;
-use crate::error::JsResult;
+use crate::error::Result;
 use crate::event_aware;
-use crate::js;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::validators::options_processor::deep_validation;
 use crate::validators::{self, Validator};
@@ -20,15 +20,15 @@ impl Validator for Milestone {
         &["pull_request.*", "pull_request_review.*", "issues.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "no_empty": {"enabled": "boolean", "message": "string"},
             "jira": {"regex": "string", "regex_flag": "string", "message": "string"},
             "must_include": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "must_exclude": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "begins_with": {"match": ["string", "array"], "message": "string"},
             "ends_with": {"match": ["string", "array"], "message": "string"}
-        }))
+        })
     }
 
     async fn validate(
@@ -36,20 +36,20 @@ impl Validator for Milestone {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let payload = event_aware::get_payload(context);
         let empty_title = Value::String(String::new());
-        let milestone_title = match js::read(payload, "milestone")? {
-            Some(milestone) if js::is_truthy(milestone) => {
-                js::get(milestone, "title").unwrap_or(&Value::Null)
+        let milestone_title = match json_value::read(payload, "milestone")? {
+            Some(milestone) if json_value::is_truthy(milestone) => {
+                json_value::get(milestone, "title").unwrap_or(&Value::Null)
             }
             _ => &empty_title,
         };
         let mut output = validators::process_options(settings, milestone_title, None).await?;
 
-        if js::as_str(output.get("status")) == Some("fail") {
+        if json_value::as_str(output.get("status")) == Some("fail") {
             let closed_issues =
-                deep_validation::check_if_closes_an_issue(js::read(payload, "body")?);
+                deep_validation::check_if_closes_an_issue(json_value::read(payload, "body")?);
             if !closed_issues.is_empty() {
                 let milestones = deep_validation::check_if_issue_have_property(
                     context,
@@ -58,7 +58,8 @@ impl Validator for Milestone {
                 )
                 .await?;
                 for issue_milestone in &milestones {
-                    let issue_title = js::get(issue_milestone, "title").unwrap_or(&Value::Null);
+                    let issue_title =
+                        json_value::get(issue_milestone, "title").unwrap_or(&Value::Null);
                     output = validators::process_options(settings, issue_title, None).await?;
                 }
             }

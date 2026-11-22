@@ -1,9 +1,9 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
+use crate::error::{Error, Result};
 use crate::event_aware;
 use crate::github::api;
-use crate::js;
-use crate::minimatch;
+use crate::glob;
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use crate::validators::{self, Validator};
@@ -19,28 +19,28 @@ fn validator_context() -> Value {
     json!({"name": "contents"})
 }
 
-fn matches_ignored_patterns(file_name: &Value, patterns_to_ignore: &Value) -> JsResult<bool> {
+fn matches_ignored_patterns(file_name: &Value, patterns_to_ignore: &Value) -> Result<bool> {
     let Value::Array(patterns) = patterns_to_ignore else {
-        return Err(JsError::type_error(
+        return Err(Error::type_mismatch(
             "patternsToIgnore.some is not a function",
         ));
     };
     for pattern in patterns {
-        if minimatch::minimatch(file_name, pattern, false)? {
+        if glob::matches_value(file_name, pattern, glob::DotEntries::Excluded)? {
             return Ok(true);
         }
     }
     Ok(false)
 }
 
-pub fn changed_file_names(files: Vec<Value>, patterns_to_ignore: &Value) -> JsResult<Vec<Value>> {
+pub fn changed_file_names(files: Vec<Value>, patterns_to_ignore: &Value) -> Result<Vec<Value>> {
     let mut changed = Vec::new();
     for mut file in files {
-        let file_name = js::take(Some(&mut file), "filename")?.unwrap_or(Value::Null);
+        let file_name = json_value::take(Some(&mut file), "filename")?.unwrap_or(Value::Null);
         if matches_ignored_patterns(&file_name, patterns_to_ignore)? {
             continue;
         }
-        let status = js::as_str(file.get("status"));
+        let status = json_value::as_str(file.get("status"));
         if status == Some("modified") || status == Some("added") {
             changed.push(file_name);
         }
@@ -77,14 +77,14 @@ impl Validator for Contents {
         &["pull_request.*", "pull_request_review.*"]
     }
 
-    fn supported_settings(&self) -> Option<Value> {
-        Some(json!({
+    fn supported_settings(&self) -> Value {
+        json!({
             "files": {"pr_diff": "boolean", "ignore": "array"},
             "must_include": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "must_exclude": {"regex": ["string", "array"], "regex_flag": "string", "message": "string"},
             "begins_with": {"match": ["string", "array"], "message": "string"},
             "ends_with": {"match": ["string", "array"], "message": "string"},
-        }))
+        })
     }
 
     async fn validate(
@@ -92,13 +92,16 @@ impl Validator for Contents {
         context: &Context,
         settings: &Value,
         _registry: &Registry,
-    ) -> JsResult<Value> {
+    ) -> Result<Value> {
         let default_patterns_to_ignore = json!([".github/mergeable.yml"]);
         let mut patterns_to_ignore = &default_patterns_to_ignore;
         let mut parse_option = Cow::Borrowed(settings);
-        if let Some(file_options) = settings.get("files").filter(|value| js::is_truthy(value)) {
-            if let Some(ignore) =
-                js::read(Some(file_options), "ignore")?.filter(|value| js::is_truthy(value))
+        if let Some(file_options) = settings
+            .get("files")
+            .filter(|value| json_value::is_truthy(value))
+        {
+            if let Some(ignore) = json_value::read(Some(file_options), "ignore")?
+                .filter(|value| json_value::is_truthy(value))
             {
                 patterns_to_ignore = ignore;
             }
@@ -108,7 +111,7 @@ impl Validator for Contents {
         }
 
         let pull_number =
-            js::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -118,10 +121,11 @@ impl Validator for Contents {
 
         let mut failed_files = Vec::new();
         for file in &changed_files {
-            let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
-                .unwrap_or(&Value::Null);
+            let head_sha =
+                json_value::read_path(&context.payload, &["pull_request", "head", "sha"])?
+                    .unwrap_or(&Value::Null);
             let params = context.repo_params(json!({"path": file, "ref": head_sha}))?;
-            let file_name = js::to_js_string(Some(file));
+            let file_name = json_value::to_display_string(Some(file));
             let Some(file_content) = api::get_content(context, params).await? else {
                 failed_files.push(format!("{file_name} (Not Found)"));
                 continue;
@@ -153,47 +157,47 @@ mod tests {
 
     #[test]
     fn mergeable_config_is_ignored_by_default() {
-        let files = pull_request_files(&[".github/mergeable.yml", "package.json"]);
+        let files = pull_request_files(&[".github/mergeable.yml", "Cargo.toml"]);
         let changed = changed_file_names(files, &json!([".github/mergeable.yml"])).unwrap();
-        assert_eq!(changed, vec![json!("package.json")]);
+        assert_eq!(changed, vec![json!("Cargo.toml")]);
     }
 
     #[test]
     fn ignore_option_replaces_the_default_patterns() {
-        let files = pull_request_files(&["package.json", "src/a.js"]);
-        let changed = changed_file_names(files, &json!(["package.json"])).unwrap();
-        assert_eq!(changed, vec![json!("src/a.js")]);
+        let files = pull_request_files(&["Cargo.toml", "src/a.rs"]);
+        let changed = changed_file_names(files, &json!(["Cargo.toml"])).unwrap();
+        assert_eq!(changed, vec![json!("src/a.rs")]);
     }
 
     #[test]
     fn removed_files_are_not_checked() {
         let files = vec![
-            json!({"filename": "gone.js", "status": "removed"}),
-            json!({"filename": "new.js", "status": "added"}),
+            json!({"filename": "gone.rs", "status": "removed"}),
+            json!({"filename": "new.rs", "status": "added"}),
         ];
         assert_eq!(
             changed_file_names(files, &json!([])).unwrap(),
-            vec![json!("new.js")]
+            vec![json!("new.rs")]
         );
     }
 
     #[test]
     fn failed_and_missing_files_are_listed_in_the_description() {
         let result = summarize(
-            vec![json!("package.json"), json!("a.js")],
-            &["package.json (Not Found)".to_string(), "a.js".to_string()],
+            vec![json!("Cargo.toml"), json!("a.rs")],
+            &["Cargo.toml (Not Found)".to_string(), "a.rs".to_string()],
             &json!({"do": "contents"}),
         );
         assert_eq!(result["status"], "fail");
         assert_eq!(
             result["validations"][0]["description"],
-            "Failed files : 'package.json (Not Found),a.js'"
+            "Failed files : 'Cargo.toml (Not Found),a.rs'"
         );
     }
 
     #[test]
     fn no_failed_files_passes() {
-        let result = summarize(vec![json!("package.json")], &[], &json!({"do": "contents"}));
+        let result = summarize(vec![json!("Cargo.toml")], &[], &json!({"do": "contents"}));
         assert_eq!(
             result["validations"][0]["description"],
             DEFAULT_SUCCESS_MESSAGE

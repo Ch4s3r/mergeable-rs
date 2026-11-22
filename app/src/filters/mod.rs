@@ -1,6 +1,6 @@
 use crate::context::Context;
-use crate::error::{JsError, JsResult};
-use crate::js;
+use crate::error::{ErrorKind, Result};
+use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
 use async_trait::async_trait;
@@ -23,7 +23,7 @@ pub mod repository;
 pub trait Filter: Send + Sync {
     fn name(&self) -> &'static str;
     fn supported_events(&self) -> &'static [&'static str];
-    fn supported_settings(&self) -> Option<Value>;
+    fn supported_settings(&self) -> Value;
     fn supported_options(&self) -> Option<&'static [&'static str]> {
         None
     }
@@ -35,7 +35,7 @@ pub trait Filter: Send + Sync {
         context: &Context,
         settings: &Value,
         registry: &Registry,
-    ) -> JsResult<Value>;
+    ) -> Result<Value>;
 }
 
 #[must_use]
@@ -62,16 +62,14 @@ pub async fn process_filter(
     context: &Context,
     settings: &Value,
     registry: &Registry,
-) -> JsResult<Value> {
-    let supported_settings = filter
-        .supported_settings()
-        .ok_or_else(|| JsError::error("Class extending filters must provide supported Settings"))?;
+) -> Result<Value> {
+    let supported_settings = filter.supported_settings();
     tracing::info!(
         event_id = %context.event_id,
         repo = %context.repository_full_name(),
         filter = filter.name(),
         settings = %settings,
-        "filter_process"
+        "filter.process.started"
     );
     if filter.checks_settings() {
         match crate::validators::validate_settings(
@@ -81,13 +79,13 @@ pub async fn process_filter(
             &[],
         ) {
             Ok(()) => {}
-            Err(error) if error.is_named("UnSupportedSettingError") => {
+            Err(error) if error.kind() == ErrorKind::UnsupportedSetting => {
                 let filter_context = json!({"name": filter.name()});
                 let output = vec![results::construct_filter_error(
                     &filter_context,
-                    Value::String(js::stringify(&supported_settings)),
+                    Value::String(json_value::stringify(&supported_settings)),
                     settings,
-                    &error.name,
+                    error.kind().name(),
                     Some(Value::String(error.to_string())),
                 )];
                 return Ok(results::consolidate_filter_result(output, &filter_context));
@@ -103,7 +101,7 @@ pub async fn process_options(
     context: &Context,
     input: &Value,
     settings: &Value,
-) -> JsResult<Value> {
+) -> Result<Value> {
     let mut filter_context = Map::new();
     filter_context.insert(
         "name".to_string(),
