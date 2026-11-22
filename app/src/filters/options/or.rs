@@ -1,6 +1,6 @@
 use crate::context::Context;
 use crate::error::Result;
-use crate::validators::options::lib::OptionResult;
+use crate::validators::options::output::OptionResult;
 use serde_json::Value;
 
 pub async fn process(
@@ -8,8 +8,6 @@ pub async fn process(
     filter_context: &Value,
     input: &Value,
     rule: &Value,
-) -> Result<Value> {
-    crate::validators::options::or::process(filter_context, input, rule)
-        .await
-        .map(OptionResult::into_value)
+) -> Result<OptionResult> {
+    crate::validators::options::or::process(filter_context, input, rule).await
 }

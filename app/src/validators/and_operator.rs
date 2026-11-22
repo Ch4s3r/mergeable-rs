@@ -1,8 +1,9 @@
 use crate::context::Context;
 use crate::error::Result;
 use crate::registry::Registry;
+use crate::results::Connective;
 use crate::validators::Validator;
-use crate::validators::lib::logical_connective::{self, LogicalOperator};
+use crate::validators::logical_connective;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
@@ -32,12 +33,7 @@ impl Validator for And {
         settings: &Value,
         registry: &Registry,
     ) -> Result<Value> {
-        logical_connective::process(
-            context,
-            settings.get("validate"),
-            registry,
-            LogicalOperator::And,
-        )
-        .await
+        logical_connective::process(context, settings.get("validate"), registry, Connective::And)
+            .await
     }
 }

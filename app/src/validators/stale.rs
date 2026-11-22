@@ -3,6 +3,7 @@ use crate::error::{Error, ErrorKind, Result};
 use crate::github::api;
 use crate::json_value;
 use crate::registry::Registry;
+use crate::results::Status;
 use crate::validators::Validator;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
@@ -222,20 +223,16 @@ pub fn schedule_result(items: Value, input: &Value, settings: &Value) -> Result<
             issues.push(item);
         }
     }
-    let status = if !issues.is_empty() || !pulls.is_empty() {
-        "pass"
-    } else {
-        "fail"
-    };
+    let status = Status::from_check(!issues.is_empty() || !pulls.is_empty());
     let mut schedule = Map::new();
     schedule.insert("issues".to_string(), Value::Array(issues));
     schedule.insert("pulls".to_string(), Value::Array(pulls));
     let mut result = Map::new();
-    result.insert("status".to_string(), Value::String(status.to_string()));
+    result.insert("status".to_string(), status.into());
     result.insert("name".to_string(), Value::String("stale".to_string()));
     result.insert(
         "validations".to_string(),
-        construct_stale_output(status, input, settings),
+        construct_stale_output(status.as_str(), input, settings),
     );
     result.insert("schedule".to_string(), Value::Object(schedule));
     Ok(Value::Object(result))
@@ -285,8 +282,14 @@ impl Validator for Stale {
         let days = days_setting(settings);
         let types = requested_types(settings);
         let timestamp = search_timestamp(Utc::now(), json_value::to_number(Some(&days)))?;
-        let (owner, repository) = context.repo()?;
-        let query = search_query(&owner, &repository, settings, &types, &timestamp)?;
+        let repository = context.repository_name()?;
+        let query = search_query(
+            &repository.owner,
+            &repository.name,
+            settings,
+            &types,
+            &timestamp,
+        )?;
         let items = api::search_issues_and_pull_requests(
             context,
             json!({"q": query, "sort": "updated", "order": "desc", "per_page": MAX_ISSUES}),

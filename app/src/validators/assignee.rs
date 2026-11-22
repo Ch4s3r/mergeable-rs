@@ -38,7 +38,7 @@ impl Validator for Assignee {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let assignees = json_value::read(event_aware::get_payload(context), "assignees")?;
+        let assignees = json_value::read(event_aware::payload(context), "assignees")?;
         let logins = map_logins(assignees, "assignees")?;
         validators::process_options(settings, &Value::Array(logins), None).await
     }

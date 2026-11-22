@@ -66,6 +66,37 @@ impl From<Status> for Value {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Connective {
+    And,
+    Or,
+    Not,
+}
+
+impl Connective {
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Connective::And => "And",
+            Connective::Or => "Or",
+            Connective::Not => "Not",
+        }
+    }
+
+    #[must_use]
+    pub fn combined_status(self, statuses: &[Option<Status>]) -> Option<Status> {
+        let any = |wanted: Status| statuses.contains(&Some(wanted));
+        match self {
+            _ if any(Status::Error) && self != Connective::Not => Some(Status::Error),
+            Connective::And => Some(Status::from_check(!any(Status::Fail))),
+            Connective::Or => Some(Status::from_check(any(Status::Pass))),
+            Connective::Not => statuses.first().copied().flatten().map(Status::negated),
+        }
+    }
+}
+
+const INFO_STATUS: &str = "info";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidationSummary {
     pub status: Status,
@@ -87,7 +118,7 @@ pub fn construct_output(
     validator_context: &Value,
     input: Value,
     settings: &Value,
-    status: &str,
+    status: Status,
     description: Value,
     error: Option<Value>,
 ) -> Value {
@@ -106,18 +137,47 @@ pub fn construct_output_with_owned_validator(
     validator_context: Value,
     input: Value,
     settings: &Value,
-    status: &str,
+    status: Status,
     description: Value,
     error: Option<Value>,
 ) -> Value {
+    validator_output(
+        validator_context,
+        status.as_str(),
+        description,
+        output_details(input, settings, error),
+    )
+}
+
+#[must_use]
+pub fn construct_info_output(
+    validator_context: &Value,
+    input: Value,
+    settings: &Value,
+    description: Value,
+) -> Value {
+    validator_output(
+        validator_context.clone(),
+        INFO_STATUS,
+        description,
+        output_details(input, settings, None),
+    )
+}
+
+fn validator_output(
+    validator_context: Value,
+    status_label: &'static str,
+    description: Value,
+    details: Value,
+) -> Value {
     let mut output = Map::new();
     output.insert("validator".to_string(), validator_context);
-    output.insert("status".to_string(), Value::String(status.to_string()));
-    output.insert("description".to_string(), description);
     output.insert(
-        "details".to_string(),
-        output_details(input, settings, error),
+        "status".to_string(),
+        Value::String(status_label.to_string()),
     );
+    output.insert("description".to_string(), description);
+    output.insert("details".to_string(), details);
     Value::Object(output)
 }
 
@@ -133,7 +193,7 @@ pub fn construct_error_output(
         validator_context,
         input,
         settings,
-        "error",
+        Status::Error,
         Value::String(description.to_string()),
         error,
     )
@@ -164,12 +224,12 @@ fn construct_filter_output(
     filter_context: &Value,
     input: Value,
     settings: &Value,
-    status: &str,
+    status: Status,
     description: Value,
     error: Option<Value>,
 ) -> Value {
     let mut output = Map::new();
-    output.insert("status".to_string(), Value::String(status.to_string()));
+    output.insert("status".to_string(), status.into());
     output.insert("description".to_string(), description);
     output.insert(
         "details".to_string(),
@@ -191,7 +251,7 @@ pub fn construct_filter_error(
         filter_context,
         input,
         settings,
-        "error",
+        Status::Error,
         Value::String(description.to_string()),
         error,
     )

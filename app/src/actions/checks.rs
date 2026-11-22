@@ -80,7 +80,7 @@ pub async fn create_checks(context: &Context, payload: Value) -> Result<Value> {
     } else if context.event_name == "issue_comment" {
         let issue_number =
             json_value::read_path(&context.payload, &["issue", "number"])?.unwrap_or(&Value::Null);
-        let mut pull_request = api::get_pull_request(context, issue_number).await?.data;
+        let mut pull_request = api::fetch_pull_request(context, issue_number).await?.data;
         (
             json_value::take_path(&mut pull_request, &["head", "ref"])?,
             json_value::take_path(&mut pull_request, &["head", "sha"])?,
@@ -167,8 +167,8 @@ impl Checks {
         context: &Context,
     ) -> Result<Value> {
         let mut output = Map::new();
-        let payload = event_aware::get_payload(context);
-        let event = event_aware::get_event_attributes(context);
+        let payload = event_aware::payload(context);
+        let event = event_aware::event_attributes(context);
         let keys = json_value::object_keys(Some(payload_settings))?;
         let template_data = template::template_data(payload, validation_report);
         for key in keys {

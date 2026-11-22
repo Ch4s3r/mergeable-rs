@@ -54,9 +54,9 @@ fn apply_version_one_defaults(settings: &mut Value) {
 }
 
 async fn fetch_settings_file(context: &Context) -> Result<Value> {
-    let (owner, repo) = context.repo()?;
+    let repository = context.repository_name()?;
     let settings_path = settings_path();
-    let cache_key = format!("{owner}/{repo}/settings");
+    let cache_key = format!("{repository}/settings");
     if use_settings_cache()
         && let Some(cached) = SETTINGS_CACHE.get(&cache_key).await
         && json_value::is_truthy(&cached)
@@ -64,15 +64,15 @@ async fn fetch_settings_file(context: &Context) -> Result<Value> {
         return Ok(cached);
     }
     let file_path = format!(".github/{settings_path}");
-    let mut settings_file_content = api::get_content(
+    let mut settings_file_content = api::fetch_content(
         context,
-        json!({"owner": owner, "repo": ".github", "path": file_path}),
+        json!({"owner": &repository.owner, "repo": ".github", "path": file_path}),
     )
     .await?;
     if settings_file_content.is_none() {
-        settings_file_content = api::get_content(
+        settings_file_content = api::fetch_content(
             context,
-            json!({"owner": owner, "repo": repo, "path": file_path}),
+            json!({"owner": &repository.owner, "repo": &repository.name, "path": file_path}),
         )
         .await?;
     }
@@ -120,7 +120,7 @@ pub async fn load(context: &Context) -> Value {
     match fetch_settings_file(context).await {
         Ok(settings) => settings_from_file(settings),
         Err(error) => {
-            tracing::warn!(event_id = %context.event_id, %error, "settings.load.failed");
+            tracing::warn!(%error, "settings.load.failed");
             json!({})
         }
     }

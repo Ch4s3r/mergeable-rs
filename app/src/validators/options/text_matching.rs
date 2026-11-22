@@ -1,122 +1,7 @@
-pub mod and_or_processor;
-pub mod user_pattern;
-
 use crate::error::{Error, Result};
 use crate::json_value;
-use serde_json::{Map, Value, json};
-use user_pattern::{PatternFlags, UserPattern};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OptionStatus {
-    Pass,
-    Fail,
-    Error,
-}
-
-impl OptionStatus {
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            OptionStatus::Pass => "pass",
-            OptionStatus::Fail => "fail",
-            OptionStatus::Error => "error",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct OptionResult {
-    pub status: OptionStatus,
-    pub description: Value,
-}
-
-impl OptionResult {
-    pub fn decided(
-        is_mergeable: bool,
-        success_description: impl Into<Value>,
-        failure_description: impl Into<Value>,
-    ) -> Self {
-        if is_mergeable {
-            OptionResult {
-                status: OptionStatus::Pass,
-                description: success_description.into(),
-            }
-        } else {
-            OptionResult {
-                status: OptionStatus::Fail,
-                description: failure_description.into(),
-            }
-        }
-    }
-
-    #[must_use]
-    pub fn into_value(self) -> Value {
-        let mut result = Map::new();
-        result.insert(
-            "status".to_string(),
-            Value::String(self.status.as_str().to_string()),
-        );
-        result.insert("description".to_string(), self.description);
-        Value::Object(result)
-    }
-}
-
-#[must_use]
-pub fn construct_output(
-    validator_context: &Value,
-    input: Option<&Value>,
-    settings: Option<&Value>,
-    status: &str,
-    description: &Value,
-    error: Option<Value>,
-) -> Value {
-    let mut details = Map::new();
-    if let Some(present_input) = input {
-        details.insert("input".to_string(), present_input.clone());
-    }
-    if let Some(present_settings) = settings {
-        details.insert("settings".to_string(), present_settings.clone());
-    }
-    if let Some(present_error) = error {
-        details.insert("error".to_string(), present_error);
-    }
-    json!({
-        "validator": validator_context,
-        "status": status,
-        "description": description,
-        "details": Value::Object(details),
-    })
-}
-
-#[must_use]
-pub fn construct_error_output(
-    validator_context: &Value,
-    input: Option<&Value>,
-    settings: Option<&Value>,
-    description: &str,
-) -> Value {
-    construct_output(
-        validator_context,
-        input,
-        settings,
-        "error",
-        &Value::String(description.to_string()),
-        None,
-    )
-}
-
-#[must_use]
-pub fn validator_name(validator_context: &Value) -> String {
-    json_value::to_display_string(json_value::get(validator_context, "name"))
-}
-
-#[must_use]
-pub fn message_or_default(message: Option<&Value>, default_description: String) -> Value {
-    match message {
-        Some(custom) if json_value::is_truthy(custom) => custom.clone(),
-        _ => Value::String(default_description),
-    }
-}
+use crate::validators::options::user_pattern::{self, PatternFlags, UserPattern};
+use serde_json::Value;
 
 #[must_use]
 pub fn regex_flags(filter: &Value) -> String {
@@ -281,6 +166,7 @@ pub fn input_has_affix(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn ends_with_uses_the_first_occurrence_of_the_suffix() {

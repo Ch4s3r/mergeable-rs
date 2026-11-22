@@ -69,7 +69,7 @@ pub fn normalize_status_code(status: u16) -> &'static str {
 
 fn header_number(headers: &HeaderMap, name: &str) -> f64 {
     crate::github::client::header_text(headers, name)
-        .map_or(f64::NAN, crate::scheduler::parse_decimal_number)
+        .map_or(f64::NAN, crate::json_value::parse_decimal_number)
 }
 
 pub struct Metrics {

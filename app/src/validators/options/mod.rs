@@ -1,8 +1,8 @@
 pub mod and;
+pub mod and_or_processor;
 pub mod begins_with;
 pub mod ends_with;
 pub mod jira;
-pub mod lib;
 pub mod max;
 pub mod min;
 pub mod must_exclude;
@@ -11,13 +11,16 @@ pub mod no_empty;
 pub mod none_of;
 pub mod one_of;
 pub mod or;
+pub mod output;
 pub mod required;
+pub mod text_matching;
+pub mod user_pattern;
 
 use crate::error::{Error, Result};
 use crate::json_value;
 use crate::results;
 use futures::future::join_all;
-use lib::OptionResult;
+use output::OptionResult;
 use serde_json::{Map, Value};
 
 fn is_option_supported(validator_context: &Value, key: &str) -> Result<bool> {
@@ -131,7 +134,7 @@ fn output_for(
             validator_context,
             input.clone(),
             setting,
-            result.status.as_str(),
+            result.status,
             result.description,
             None,
         ),
@@ -186,7 +189,7 @@ pub async fn process(
             if !is_supported {
                 let description = format!(
                     "The '{key}' option is not supported for '{}' validator, please see README for all available options",
-                    lib::validator_name(validator_context)
+                    output::validator_name(validator_context)
                 );
                 error_outputs.push(results::construct_error_output(
                     validator_context,

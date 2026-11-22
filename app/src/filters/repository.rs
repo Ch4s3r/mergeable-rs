@@ -1,7 +1,7 @@
 use crate::context::Context;
 use crate::error::Result;
 use crate::filters::Filter;
-use crate::filters::options::lib::{consolidate_results, construct_output};
+use crate::filters::options::output::{consolidate_results, construct_output};
 use crate::filters::options_processor::{name, topics, visibility};
 use crate::json_value;
 use crate::registry::Registry;
@@ -92,8 +92,8 @@ impl Filter for Repository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filters::lib::test_context::{PullRequest, pull_request_context};
     use crate::filters::process_filter;
+    use crate::filters::test_context::{PullRequest, pull_request_context};
 
     fn status_of(result: &Value) -> &str {
         result

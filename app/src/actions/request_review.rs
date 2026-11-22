@@ -105,7 +105,7 @@ impl Action for RequestReview {
         _rule_name: Option<&Value>,
         _results: &Value,
     ) -> Result<()> {
-        let payload = event_aware::get_payload(context);
+        let payload = event_aware::payload(context);
         let requested_reviewers = mapped_property(
             json_value::read(payload, "requested_reviewers")?,
             "payload.requested_reviewers",

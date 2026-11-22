@@ -5,7 +5,7 @@ use crate::github::api;
 use crate::glob;
 use crate::json_value;
 use crate::registry::Registry;
-use crate::results;
+use crate::results::{self, Status};
 use crate::validators::Validator;
 use crate::value_lists;
 use async_trait::async_trait;
@@ -113,7 +113,7 @@ pub fn evaluate(files: Vec<Value>, settings: &Value) -> Result<Value> {
         &Value::String(VALIDATOR_NAME.to_string()),
         Value::Array(modified_files),
         settings,
-        if is_mergeable { "pass" } else { "fail" },
+        Status::from_check(is_mergeable),
         if is_mergeable {
             Value::String(DEFAULT_SUCCESS_MESSAGE.to_string())
         } else {
@@ -152,7 +152,7 @@ impl Validator for Dependent {
         _registry: &Registry,
     ) -> Result<Value> {
         let pull_number =
-            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,

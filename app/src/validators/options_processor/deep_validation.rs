@@ -2,8 +2,8 @@ use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::github::api;
 use crate::json_value;
-use crate::validators::options::lib::compile_constant_pattern;
-use crate::validators::options::lib::user_pattern::PatternFlags;
+use crate::validators::options::text_matching::compile_constant_pattern;
+use crate::validators::options::user_pattern::PatternFlags;
 use serde_json::Value;
 use std::sync::LazyLock;
 
@@ -39,7 +39,7 @@ pub async fn check_if_issue_have_property(
 ) -> Result<Vec<Value>> {
     let mut output = Vec::new();
     for issue_number in issues {
-        let mut issue = api::get_issue(context, &Value::String(issue_number.clone()))
+        let mut issue = api::fetch_issue(context, &Value::String(issue_number.clone()))
             .await?
             .ok_or_else(|| Error::missing_property("data"))?;
         if let Some(value) = issue

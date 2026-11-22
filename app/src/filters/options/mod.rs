@@ -1,16 +1,17 @@
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::json_value;
+use crate::validators::options::output::OptionResult;
 use serde_json::{Map, Value};
 
 pub mod and;
 pub mod boolean;
-pub mod lib;
 pub mod must_exclude;
 pub mod must_include;
 pub mod none_of;
 pub mod one_of;
 pub mod or;
+pub mod output;
 
 async fn run_option(
     key: &str,
@@ -18,7 +19,7 @@ async fn run_option(
     filter_context: &Value,
     input: &Value,
     rule: &Value,
-) -> Result<Value> {
+) -> Result<OptionResult> {
     match key {
         "and" => and::process(context, filter_context, input, rule).await,
         "boolean" => boolean::process(context, filter_context, input, rule),
@@ -62,7 +63,7 @@ pub async fn process(
             let rule = Value::Object(rule_fields);
             if is_option_unsupported(filter_context, &key) {
                 let filter_name = json_value::to_display_string(filter_context.get("name"));
-                output.push(lib::construct_error(
+                output.push(output::construct_error(
                     filter_context,
                     input.clone(),
                     &rule,
@@ -72,14 +73,14 @@ pub async fn process(
                 continue;
             }
             match run_option(&key, context, filter_context, input, &rule).await {
-                Ok(result) => output.push(lib::construct_output(
+                Ok(result) => output.push(output::construct_output(
                     filter_context,
                     input.clone(),
                     rule,
-                    result,
+                    result.into_value(),
                     None,
                 )),
-                Err(error) => output.push(lib::construct_error(
+                Err(error) => output.push(output::construct_error(
                     filter_context,
                     input.clone(),
                     &rule,
@@ -89,5 +90,5 @@ pub async fn process(
             }
         }
     }
-    Ok(lib::consolidate_results(output, filter_context))
+    Ok(output::consolidate_results(output, filter_context))
 }

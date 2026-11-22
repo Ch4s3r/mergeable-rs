@@ -4,6 +4,7 @@ use crate::event_aware;
 use crate::filters::{self, Filter};
 use crate::json_value;
 use crate::registry::Registry;
+use crate::results::Status;
 use crate::validators::options_processor::teams;
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -38,12 +39,12 @@ impl Filter for Author {
         _registry: &Registry,
     ) -> Result<Value> {
         let payload =
-            event_aware::get_payload(context).ok_or_else(|| Error::missing_property("user"))?;
+            event_aware::payload(context).ok_or_else(|| Error::missing_property("user"))?;
         let mut remaining_settings = Cow::Borrowed(settings);
 
         if json_value::truthy(settings.get("team")) {
             let result = teams::process_team_option(context, settings, Some(payload)).await?;
-            if result.get("status").and_then(Value::as_str) != Some("pass") {
+            if Status::of(&result) != Some(Status::Pass) {
                 return Ok(result);
             }
             if let Value::Object(fields) = remaining_settings.to_mut() {
@@ -60,8 +61,8 @@ impl Filter for Author {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filters::lib::test_context::{PullRequest, pull_request_context};
     use crate::filters::process_filter;
+    use crate::filters::test_context::{PullRequest, pull_request_context};
 
     const AUTHOR_NAME: &str = "mergeabletestauthorname";
     const OTHER_AUTHOR_NAME: &str = "someone-else";

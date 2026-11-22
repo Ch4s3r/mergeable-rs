@@ -3,7 +3,7 @@ use crate::error::Result;
 use crate::event_aware;
 use crate::json_value;
 use crate::registry::Registry;
-use crate::results;
+use crate::results::{self, Status};
 use crate::validators::Validator;
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, TimeZone, Utc};
@@ -81,7 +81,7 @@ pub fn check_age(now: DateTime<Utc>, time_to_compare: Option<&Value>, settings: 
     details.insert("settings".to_string(), settings.clone());
     json!({
         "validator": {"name": "age"},
-        "status": if is_mergeable { "pass" } else { "fail" },
+        "status": Status::from_check(is_mergeable).as_str(),
         "description": description,
         "details": Value::Object(details),
     })
@@ -127,7 +127,7 @@ impl Validator for Age {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        evaluate(Utc::now(), event_aware::get_payload(context), settings)
+        evaluate(Utc::now(), event_aware::payload(context), settings)
     }
 }
 

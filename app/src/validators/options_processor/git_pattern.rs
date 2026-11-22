@@ -1,6 +1,6 @@
 use crate::error::{Error, ErrorKind, Result};
-use crate::validators::options::lib::is_trimmable_whitespace;
-use crate::validators::options::lib::user_pattern::UserPattern;
+use crate::validators::options::text_matching::is_trimmable_whitespace;
+use crate::validators::options::user_pattern::UserPattern;
 
 fn compile_case_insensitive(pattern: &str) -> Result<UserPattern> {
     UserPattern::new(pattern, "i").map_err(|_| {

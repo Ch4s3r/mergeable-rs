@@ -4,6 +4,7 @@ use crate::event_aware;
 use crate::github::api;
 use crate::json_value;
 use crate::registry::Registry;
+use crate::results::Status;
 use crate::validators::options_processor::list_processor;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
@@ -92,7 +93,7 @@ async fn filter_by_comment_author<'comment>(
         let login = json_value::read(json_value::read(Some(comment), "user")?, "login")?
             .unwrap_or(&Value::Null);
         let result = validators::process_options(&filter.author_option, login, None).await?;
-        if result.get("status").and_then(Value::as_str) != Some("fail") {
+        if Status::of(&result) != Some(Status::Fail) {
             kept.push(comment);
         }
     }
@@ -147,7 +148,7 @@ impl Validator for LastComment {
         }
 
         let issue_number =
-            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
         let listed_comments;
         let comments = if context.event_name == "issue_comment" {
             let comment = context

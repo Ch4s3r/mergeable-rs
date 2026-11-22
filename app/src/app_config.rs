@@ -70,7 +70,7 @@ fn scheduler_interval_milliseconds(run_mode: RunMode) -> Option<f64> {
         RunMode::Production => variable("MERGEABLE_SCHEDULER_INTERVAL")
             .unwrap_or_else(|| DEFAULT_SCHEDULER_INTERVAL_SECONDS.to_string()),
     };
-    Some(crate::scheduler::parse_decimal_number(&interval_seconds) * 1000.0)
+    Some(crate::json_value::parse_decimal_number(&interval_seconds) * 1000.0)
 }
 
 impl AppConfig {

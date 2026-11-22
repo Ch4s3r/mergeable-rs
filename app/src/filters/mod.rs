@@ -7,9 +7,11 @@ use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
-pub mod lib;
+pub mod logical_connective;
 pub mod options;
 pub mod options_processor;
+#[cfg(test)]
+pub mod test_context;
 
 pub mod and_operator;
 pub mod author;
@@ -65,8 +67,6 @@ pub async fn process_filter(
 ) -> Result<Value> {
     let supported_settings = filter.supported_settings();
     tracing::info!(
-        event_id = %context.event_id,
-        repo = %context.repository_full_name(),
         filter = filter.name(),
         settings = %settings,
         "filter.process.started"

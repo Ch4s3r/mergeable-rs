@@ -3,8 +3,8 @@ use crate::context::Context;
 use crate::error::{Error, ErrorKind, Result};
 use crate::event_aware;
 use crate::json_value;
-use crate::validators::options::lib::compile_constant_pattern;
-use crate::validators::options::lib::user_pattern::PatternFlags;
+use crate::validators::options::text_matching::compile_constant_pattern;
+use crate::validators::options::user_pattern::PatternFlags;
 use crate::validators::options_processor::teams;
 use futures::future::join_all;
 use serde_json::Value;
@@ -25,8 +25,8 @@ fn lowercase_member(member: &Value) -> Result<Value> {
 
 pub async fn process(list: &Value, context: &Context) -> Result<Vec<Value>> {
     let elements = json_value::as_array_or_wrap(list);
-    let payload = event_aware::get_payload(context);
-    let event = event_aware::get_event_attributes(context);
+    let payload = event_aware::payload(context);
+    let event = event_aware::event_attributes(context);
     let team_regex = TEAM_REGEX
         .as_ref()
         .ok_or_else(|| Error::general("invalid team pattern"))?;

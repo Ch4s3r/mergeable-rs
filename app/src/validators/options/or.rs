@@ -1,6 +1,6 @@
 use crate::error::Result;
-use crate::validators::options::lib::OptionResult;
-use crate::validators::options::lib::and_or_processor::{self, Connective};
+use crate::validators::options::and_or_processor::{self, Connective};
+use crate::validators::options::output::OptionResult;
 use serde_json::Value;
 
 pub async fn process(
@@ -14,7 +14,7 @@ pub async fn process(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
     fn option_context() -> Value {
@@ -30,7 +30,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 
@@ -46,7 +46,7 @@ mod tests {
             .await
             .unwrap()
             .status,
-            OptionStatus::Fail
+            Status::Fail
         );
     }
 
@@ -71,7 +71,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            OptionStatus::Error
+            Status::Error
         );
         let unknown_option =
             json!({"or": [{"must_inclde": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
@@ -80,7 +80,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            OptionStatus::Error
+            Status::Error
         );
     }
 
@@ -92,7 +92,7 @@ mod tests {
                 .await
                 .unwrap()
                 .status,
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 

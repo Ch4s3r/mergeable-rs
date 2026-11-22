@@ -1,8 +1,8 @@
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::results::Status;
-use serde_json::{Value, json};
+use crate::validators::options::output::OptionResult;
+use serde_json::Value;
 
 const MATCH_NOT_FOUND_ERROR: &str = "Failed to run the test because 'match' is not provided for 'boolean' option. Please check README for more information about configuration";
 const UNKNOWN_INPUT_TYPE_ERROR: &str = "Input type invalid, expected strings \"true\" or \"false\", or boolean literal `true` or `false` as input";
@@ -12,11 +12,11 @@ pub fn process(
     filter_context: &Value,
     input: &Value,
     rule: &Value,
-) -> Result<Value> {
+) -> Result<OptionResult> {
     match_boolean(filter_context, input, rule)
 }
 
-pub fn match_boolean(filter_context: &Value, input: &Value, rule: &Value) -> Result<Value> {
+pub fn match_boolean(filter_context: &Value, input: &Value, rule: &Value) -> Result<OptionResult> {
     let boolean_option = json_value::read(Some(rule), "boolean")?;
     let expected = match json_value::read(boolean_option, "match")? {
         None | Some(Value::Null) => return Err(Error::general(MATCH_NOT_FOUND_ERROR)),
@@ -36,28 +36,31 @@ pub fn match_boolean(filter_context: &Value, input: &Value, rule: &Value) -> Res
     };
     let success_description = Value::String(format!("The {filter_name} is {expected_text}"));
     let is_mergeable = json_value::to_display_string(Some(input)) == expected_text;
-    Ok(json!({
-        "status": Status::from_check(is_mergeable).as_str(),
-        "description": if is_mergeable { success_description } else { failure_description },
-    }))
+    Ok(OptionResult::decided(
+        is_mergeable,
+        success_description,
+        failure_description,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::results::Status;
+    use serde_json::json;
 
     fn payload_filter() -> Value {
         json!({"name": "payload", "supportedOptions": ["boolean", "must_exclude", "must_include"]})
     }
 
-    fn status_for(expected: &Value, input: &Value) -> String {
+    fn status_for(expected: &Value, input: &Value) -> &'static str {
         let result = match_boolean(
             &payload_filter(),
             input,
             &json!({"boolean": {"match": expected}}),
         )
         .unwrap();
-        json_value::to_display_string(result.get("status"))
+        result.status.as_str()
     }
 
     #[test]
@@ -88,7 +91,10 @@ mod tests {
         .unwrap();
         assert_eq!(
             result,
-            json!({"status": "fail", "description": "The payload must be true"})
+            OptionResult {
+                status: Status::Fail,
+                description: json!("The payload must be true"),
+            }
         );
     }
 

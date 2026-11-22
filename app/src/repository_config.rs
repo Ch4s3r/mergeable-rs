@@ -25,7 +25,7 @@ fn config_loader_error(message: &str) -> Error {
     Error::general(format!("[@probot/octokit-plugin-config] {message}"))
 }
 
-async fn get_config_file(
+async fn fetch_config_file(
     context: &Context,
     owner: &str,
     repo: &str,
@@ -145,19 +145,19 @@ fn last_url(files: &[ConfigFile]) -> &str {
     files.last().map_or("", |file| file.url.as_str())
 }
 
-async fn get_config_files(
+async fn fetch_config_files(
     context: &Context,
     owner: &str,
     repo: &str,
     path: &str,
 ) -> Result<Vec<ConfigFile>> {
-    let requested = get_config_file(context, owner, repo, path, None).await?;
+    let requested = fetch_config_file(context, owner, repo, path, None).await?;
     let mut files = vec![requested];
     if files[0].config.is_none() {
         if repo == ".github" {
             return Ok(files);
         }
-        files.push(get_config_file(context, owner, ".github", path, None).await?);
+        files.push(fetch_config_file(context, owner, ".github", path, None).await?);
     }
     let Some(extends_value) = files.last_mut().and_then(take_extends) else {
         return Ok(files);
@@ -165,7 +165,7 @@ async fn get_config_files(
     let mut target = extends_to_target(owner, path, last_url(&files), &extends_value)?;
     loop {
         let mut extended =
-            get_config_file(context, &target.owner, &target.repo, &target.path, None).await?;
+            fetch_config_file(context, &target.owner, &target.repo, &target.path, None).await?;
         let next_extends = take_extends(&mut extended);
         files.push(extended);
         let Some(extends_value) = next_extends else {
@@ -215,9 +215,9 @@ pub async fn load(
     file_name: &str,
     default_config: Option<Value>,
 ) -> Result<Option<Value>> {
-    let (owner, repo) = context.repo()?;
+    let repository = context.repository_name()?;
     let path = format!(".github/{}", file_name.trim_start_matches('/'));
-    let files = get_config_files(context, &owner, &repo, &path).await?;
+    let files = fetch_config_files(context, &repository.owner, &repository.name, &path).await?;
     let has_default = default_config.as_ref().is_some_and(json_value::is_truthy);
     if !has_default && files.iter().all(|file| file.config.is_none()) {
         return Ok(None);

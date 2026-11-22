@@ -1,6 +1,7 @@
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::validators::options::lib::{self, OptionResult};
+use crate::validators::options::output::{self, OptionResult};
+use crate::validators::options::text_matching;
 use serde_json::Value;
 
 const REGEX_NOT_FOUND_ERROR: &str = "Failed to run the test because 'regex' is not provided for 'jira' option. Please check README for more information about configuration";
@@ -77,10 +78,10 @@ pub async fn process(
     let Some(regex) = regex.filter(|present| json_value::is_truthy(present)) else {
         return Err(Error::general(REGEX_NOT_FOUND_ERROR));
     };
-    let failure_description = lib::message_or_default(message, FAILURE_DESCRIPTION.to_string());
-    let flags = lib::regex_flags(filter.unwrap_or(&Value::Null));
+    let failure_description = output::message_or_default(message, FAILURE_DESCRIPTION.to_string());
+    let flags = text_matching::regex_flags(filter.unwrap_or(&Value::Null));
     let ticket_id = {
-        let compiled = lib::compile_user_regex(regex, &flags)?;
+        let compiled = text_matching::compile_user_regex(regex, &flags)?;
         compiled.first_match(&json_value::to_display_string(Some(input)))
     };
     let is_mergeable = match ticket_id {
@@ -97,7 +98,7 @@ pub async fn process(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
     #[tokio::test]
@@ -121,7 +122,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.status, OptionStatus::Fail);
+        assert_eq!(result.status, Status::Fail);
         assert_eq!(result.description, json!(FAILURE_DESCRIPTION));
     }
 

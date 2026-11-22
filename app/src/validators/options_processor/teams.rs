@@ -2,7 +2,7 @@ use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::github::api;
 use crate::json_value;
-use crate::results;
+use crate::results::{self, Status};
 use crate::validators::options_processor::unique_values;
 use serde_json::{Map, Value};
 
@@ -48,7 +48,8 @@ pub async fn extract_team_memberships(
     for user in users {
         for team in teams {
             let (organization, team_slug) = split_team(team)?;
-            if api::get_membership_for_user_in_org(context, &organization, &team_slug, user).await?
+            if api::fetch_membership_for_user_in_org(context, &organization, &team_slug, user)
+                .await?
             {
                 team_members.push(user.clone());
             }
@@ -85,16 +86,11 @@ pub fn team_option_output(
         .any(|member| json_value::strict_equals(member, user_name));
     let user_text = json_value::to_display_string(Some(user_name));
     let team_text = json_value::to_display_string(Some(team_name));
-    let (status, description) = if is_member {
-        (
-            "pass",
-            format!("'{user_text}' is part of the '{team_text}' team'"),
-        )
+    let status = Status::from_check(is_member);
+    let description = if is_member {
+        format!("'{user_text}' is part of the '{team_text}' team'")
     } else {
-        (
-            "fail",
-            format!("'{user_text}' is not part of the '{team_text}' team'"),
-        )
+        format!("'{user_text}' is not part of the '{team_text}' team'")
     };
     let mut consolidation_context = Map::new();
     if let Some(name) = json_value::get(&validator_context, "name") {

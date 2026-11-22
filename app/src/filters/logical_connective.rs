@@ -1,47 +1,11 @@
 use crate::context::Context;
 use crate::error::{Error, Result};
-use crate::filters::options::lib::{consolidate_results, construct_error};
+use crate::filters::options::output::{consolidate_results, construct_error};
 use crate::json_value;
 use crate::registry::Registry;
-use crate::results::Status;
+use crate::results::{Connective, Status};
 use crate::workflow;
 use serde_json::{Map, Value, json};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Connective {
-    And,
-    Or,
-    Not,
-}
-
-impl Connective {
-    #[must_use]
-    pub fn name(self) -> &'static str {
-        match self {
-            Connective::And => "And",
-            Connective::Or => "Or",
-            Connective::Not => "Not",
-        }
-    }
-
-    fn combined_status(self, statuses: &[Option<Status>]) -> Option<Status> {
-        let any = |wanted: Status| statuses.contains(&Some(wanted));
-        match self {
-            _ if any(Status::Error) && self != Connective::Not => Some(Status::Error),
-            Connective::And => Some(if any(Status::Fail) {
-                Status::Fail
-            } else {
-                Status::Pass
-            }),
-            Connective::Or => Some(if any(Status::Pass) {
-                Status::Pass
-            } else {
-                Status::Fail
-            }),
-            Connective::Not => statuses.first().copied().flatten().map(Status::negated),
-        }
-    }
-}
 
 const OPTION_MISSING_ERROR_MESSAGE: &str = "Failed to filter because the 'filter' option is missing or empty. Please check the documentation.";
 
@@ -142,9 +106,9 @@ pub async fn process(
 #[cfg(test)]
 mod tests {
     use crate::filters::and_operator::And;
-    use crate::filters::lib::test_context::{PullRequest, pull_request_context};
     use crate::filters::not_operator::Not;
     use crate::filters::or_operator::Or;
+    use crate::filters::test_context::{PullRequest, pull_request_context};
     use crate::filters::{Filter, process_filter};
     use crate::registry::Registry;
     use serde_json::{Value, json};

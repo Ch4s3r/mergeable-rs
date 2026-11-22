@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::validators::options::lib::{self, OptionResult};
+use crate::validators::options::output::{self, OptionResult};
 use serde_json::Value;
 
 const COUNT_NOT_FOUND_ERROR: &str = "Failed to run the test because 'count' is not provided for 'min' option. Please check README for more information about configuration";
@@ -20,9 +20,9 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
     };
     let count_limit = count_number.as_f64().unwrap_or(f64::NAN);
     let count_text = json_value::number_to_string(count_number);
-    let validator_name = lib::validator_name(validator_context);
+    let validator_name = output::validator_name(validator_context);
     let success_description = format!("{validator_name} does have a minimum of '{count_text}'");
-    let failure_description = lib::message_or_default(
+    let failure_description = output::message_or_default(
         message,
         format!("{validator_name} count is less than \"{count_text}\""),
     );
@@ -40,7 +40,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
     #[test]
@@ -50,13 +50,13 @@ mod tests {
             process(&json!({"name": "label"}), &json!(["A", "B", "C"]), &rule)
                 .unwrap()
                 .status,
-            OptionStatus::Pass
+            Status::Pass
         );
         assert_eq!(
             process(&json!({"name": "label"}), &json!(["A", "B"]), &rule)
                 .unwrap()
                 .status,
-            OptionStatus::Fail
+            Status::Fail
         );
     }
 

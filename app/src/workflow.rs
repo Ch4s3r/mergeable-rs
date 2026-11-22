@@ -25,8 +25,6 @@ pub async fn execute(mut context: Context) -> Result<()> {
     }
     if std::env::var("LOG_CONFIG").is_ok_and(|value| !value.is_empty()) {
         tracing::info!(
-            event_id = %context.event_id,
-            repo = %context.repository_full_name(),
             settings = %configuration.settings,
             "configuration.loaded"
         );
@@ -78,9 +76,6 @@ pub async fn report_configuration_errors(
         )
     };
     tracing::info!(
-        event_id = %context.event_id,
-        repo = %context.repository_full_name(),
-        %event,
         problem,
         errors = ?configuration.errors,
         "configuration.rejected"
@@ -121,7 +116,7 @@ fn spawn_cancelled_check(context: &Context, title: &str, summary: &str, name: Op
     }
     payload["completed_at"] = Value::String(checks::current_timestamp());
     let task_context = context.clone();
-    spawn_detached(context, "workflow/cancelled_check", async move {
+    spawn_detached("workflow/cancelled_check", async move {
         checks::run(&task_context, payload).await
     });
 }
@@ -290,7 +285,6 @@ async fn applicable_rules<'rules>(
     registry: &Registry,
     configuration: &'rules Configuration,
 ) -> Result<Vec<&'rules Value>> {
-    let event_name = context.event_with_action();
     let mut applicable = Vec::new();
     for rule in rule_entries(Some(&configuration.settings))? {
         if !rule_applies_to_event(rule.get("when"), context)? {
@@ -299,9 +293,6 @@ async fn applicable_rules<'rules>(
         match filter_results(context, registry, rule).await {
             Err(error) => {
                 tracing::error!(
-                    event_id = %context.event_id,
-                    repo = %context.repository_full_name(),
-                    event = %event_name,
                     %error,
                     "workflow.filter.failed"
                 );
@@ -350,9 +341,6 @@ pub async fn process(
             Ok(outputs) => outputs,
             Err(error) => {
                 tracing::error!(
-                    event_id = %context.event_id,
-                    repo = %context.repository_full_name(),
-                    event = %event_name,
                     %error,
                     "workflow.validator.failed"
                 );
@@ -367,9 +355,6 @@ pub async fn process(
         match action_outcome {
             Err(error) => {
                 tracing::error!(
-                    event_id = %context.event_id,
-                    repo = %context.repository_full_name(),
-                    event = %event_name,
                     %error,
                     "workflow.action.failed"
                 );
@@ -378,7 +363,7 @@ pub async fn process(
                         "####  :x: Error Occurred while executing an Action \n\n If you believe this is an unexpected error, please report it on our issue tracker: https://github.com/mergeability/mergeable/issues/new \n##### Error Details \n-------------------- \n{error}"
                     );
                     let task_context = context.clone();
-                    spawn_detached(context, "workflow/error_comment", async move {
+                    spawn_detached("workflow/error_comment", async move {
                         comment::handle_error(&task_context, &body).await
                     });
                 }

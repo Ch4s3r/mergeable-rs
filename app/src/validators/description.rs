@@ -41,7 +41,7 @@ impl Validator for Description {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let body = json_value::read(event_aware::get_payload(context), "body")?;
+        let body = json_value::read(event_aware::payload(context), "body")?;
         let empty_description = Value::String(String::new());
         let description = match body {
             Some(present) if json_value::is_truthy(present) => present,

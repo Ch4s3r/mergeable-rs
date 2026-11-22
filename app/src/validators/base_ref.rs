@@ -4,7 +4,7 @@ use crate::event_aware;
 use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
-use crate::validators::options::lib::construct_output;
+use crate::validators::options::output::construct_output;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
 use futures::future::join_all;
@@ -32,7 +32,7 @@ async fn validate_pull_requests(
             &validator_context,
             None,
             Some(settings),
-            "fail",
+            results::Status::Fail,
             &Value::String("No pull requests associated with event".to_string()),
             None,
         ));
@@ -125,7 +125,7 @@ impl Validator for BaseRef {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let payload = event_aware::get_payload(context);
+        let payload = event_aware::payload(context);
         let mut validation_settings = Cow::Borrowed(settings);
         let media_type = match settings.get("mediaType") {
             Some(_) => match validation_settings.to_mut() {

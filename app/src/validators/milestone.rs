@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::event_aware;
 use crate::json_value;
 use crate::registry::Registry;
+use crate::results::Status;
 use crate::validators::options_processor::deep_validation;
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
@@ -37,7 +38,7 @@ impl Validator for Milestone {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let payload = event_aware::get_payload(context);
+        let payload = event_aware::payload(context);
         let empty_title = Value::String(String::new());
         let milestone_title = match json_value::read(payload, "milestone")? {
             Some(milestone) if json_value::is_truthy(milestone) => {
@@ -47,7 +48,7 @@ impl Validator for Milestone {
         };
         let mut output = validators::process_options(settings, milestone_title, None).await?;
 
-        if json_value::as_str(output.get("status")) == Some("fail") {
+        if Status::of(&output) == Some(Status::Fail) {
             let closed_issues =
                 deep_validation::check_if_closes_an_issue(json_value::read(payload, "body")?);
             if !closed_issues.is_empty() {

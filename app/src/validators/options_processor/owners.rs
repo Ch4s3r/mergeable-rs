@@ -40,7 +40,7 @@ fn extract_user_ids(owners: &[String]) -> Result<Vec<String>> {
 }
 
 async fn retrieve_codeowners(context: &Context) -> Result<Option<String>> {
-    let (owner, repo) = context.repo()?;
+    let repository = context.repository_name()?;
     if context.event_name == "pull_request" || context.event_name == "pull_request_review" {
         let pull_number = json_value::read_path(&context.payload, &["pull_request", "number"])?
             .unwrap_or(&Value::Null);
@@ -61,12 +61,11 @@ async fn retrieve_codeowners(context: &Context) -> Result<Option<String>> {
             let head_sha =
                 json_value::read_path(&context.payload, &["pull_request", "head", "sha"])?
                     .unwrap_or(&Value::Null);
-            let call_parameters =
-                json!({"owner": owner, "repo": repo, "path": OWNER_FILE_PATH, "ref": head_sha});
-            return api::get_content(context, call_parameters).await;
+            let call_parameters = json!({"owner": &repository.owner, "repo": &repository.name, "path": OWNER_FILE_PATH, "ref": head_sha});
+            return api::fetch_content(context, call_parameters).await;
         }
     }
-    api::get_content(
+    api::fetch_content(
         context,
         context.repo_params(json!({"path": OWNER_FILE_PATH}))?,
     )

@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::validators::options::lib::OptionResult;
+use crate::validators::options::output::OptionResult;
 use serde_json::Value;
 
 const UNKNOWN_INPUT_TYPE_ERROR: &str = "Input type invalid, expected string as input";
@@ -26,17 +26,17 @@ pub fn process(_validator_context: &Value, input: &Value, rule: &Value) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
     #[test]
     fn lowercased_input_is_looked_up_in_the_list() {
         let rule = json!({"none_of": ["alice", "bob"]});
         let listed = process(&json!({"name": "author"}), &json!("Alice"), &rule).unwrap();
-        assert_eq!(listed.status, OptionStatus::Fail);
+        assert_eq!(listed.status, Status::Fail);
         assert_eq!(listed.description, json!("'Alice' is in the none_of list'"));
         let unlisted = process(&json!({"name": "author"}), &json!("carol"), &rule).unwrap();
-        assert_eq!(unlisted.status, OptionStatus::Pass);
+        assert_eq!(unlisted.status, Status::Pass);
         assert_eq!(
             unlisted.description,
             json!("'carol' is not in the none_of list'")

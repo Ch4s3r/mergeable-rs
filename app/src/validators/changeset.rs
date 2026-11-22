@@ -85,7 +85,7 @@ impl Validator for Changeset {
         _registry: &Registry,
     ) -> Result<Value> {
         let pull_number =
-            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,

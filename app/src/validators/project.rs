@@ -4,9 +4,9 @@ use crate::event_aware;
 use crate::github::api;
 use crate::json_value;
 use crate::registry::Registry;
-use crate::results;
+use crate::results::{self, Status};
 use crate::validators::Validator;
-use crate::validators::options::lib::user_pattern::UserPattern;
+use crate::validators::options::user_pattern::UserPattern;
 use crate::validators::options_processor::deep_validation;
 use async_trait::async_trait;
 use futures::future::join_all;
@@ -157,7 +157,7 @@ impl Validator for Project {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let pull_request = event_aware::get_payload(context);
+        let pull_request = event_aware::payload(context);
         let must_include = settings.get("must_include");
         let project_name = if json_value::truthy(must_include) {
             must_include.and_then(|option| json_value::get(option, "regex"))
@@ -204,7 +204,7 @@ impl Validator for Project {
             &validator_context,
             project_names(projects),
             settings,
-            if is_mergeable { "pass" } else { "fail" },
+            Status::from_check(is_mergeable),
             if is_mergeable {
                 Value::String(DEFAULT_SUCCESS_MESSAGE.to_string())
             } else {

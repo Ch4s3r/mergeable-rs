@@ -51,25 +51,6 @@ pub fn parse_ignored_accounts(ignored_accounts_text: &str) -> Vec<String> {
 }
 
 #[must_use]
-pub fn parse_decimal_number(text: &str) -> f64 {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return 0.0;
-    }
-    match trimmed {
-        "Infinity" | "+Infinity" => f64::INFINITY,
-        "-Infinity" => f64::NEG_INFINITY,
-        _ if trimmed.chars().any(|character| {
-            character.is_ascii_alphabetic() && !matches!(character, 'e' | 'E')
-        }) =>
-        {
-            f64::NAN
-        }
-        _ => trimmed.parse::<f64>().unwrap_or(f64::NAN),
-    }
-}
-
-#[must_use]
 pub fn timer_duration(milliseconds: f64) -> Duration {
     let effective = if (1.0..=MAXIMUM_TIMER_MILLISECONDS).contains(&milliseconds) {
         milliseconds
@@ -353,14 +334,5 @@ mod tests {
         assert_eq!(timer_duration(f64::NAN), Duration::from_millis(1));
         assert_eq!(timer_duration(3_600_000.0), Duration::from_secs(3600));
         assert_eq!(timer_duration(1e12), Duration::from_millis(1));
-    }
-
-    #[test]
-    fn interval_text_is_parsed_as_a_decimal_number() {
-        assert_eq!(parse_decimal_number("3600"), 3600.0);
-        assert_eq!(parse_decimal_number(" 0.5 "), 0.5);
-        assert_eq!(parse_decimal_number(""), 0.0);
-        assert!(parse_decimal_number("abc").is_nan());
-        assert!(parse_decimal_number("inf").is_nan());
     }
 }

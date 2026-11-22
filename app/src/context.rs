@@ -3,6 +3,7 @@ use crate::github::client::InstallationClient;
 use crate::json_value;
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
+use std::fmt;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -32,6 +33,18 @@ impl From<Value> for SharedPayload {
 impl Serialize for SharedPayload {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         self.0.serialize(serializer)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryName {
+    pub owner: String,
+    pub name: String,
+}
+
+impl fmt::Display for RepositoryName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}/{}", self.owner, self.name)
     }
 }
 
@@ -83,7 +96,7 @@ impl Context {
         }
     }
 
-    pub fn repo(&self) -> Result<(String, String)> {
+    pub fn repository_name(&self) -> Result<RepositoryName> {
         let repository = self
             .payload
             .get("repository")
@@ -91,17 +104,17 @@ impl Context {
             .ok_or_else(|| {
                 Error::general("context.repo() is not supported for this webhook event.")
             })?;
-        Ok((
-            json_value::read_string(repository, &["owner", "login"])?,
-            json_value::read_string(repository, &["name"])?,
-        ))
+        Ok(RepositoryName {
+            owner: json_value::read_string(repository, &["owner", "login"])?,
+            name: json_value::read_string(repository, &["name"])?,
+        })
     }
 
     pub fn repo_params(&self, extra: Value) -> Result<Value> {
-        let (owner, repo) = self.repo()?;
+        let RepositoryName { owner, name } = self.repository_name()?;
         let mut params = Map::new();
         params.insert("owner".to_string(), Value::String(owner));
-        params.insert("repo".to_string(), Value::String(repo));
+        params.insert("repo".to_string(), Value::String(name));
         if let Value::Object(extra_fields) = extra {
             params.extend(extra_fields);
         }

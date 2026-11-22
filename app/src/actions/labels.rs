@@ -124,8 +124,8 @@ fn labels_to_keep(current: Vec<Value>, patterns: Option<&Value>) -> Result<Vec<V
     }
 }
 
-fn log_detached_failure(context: &Context, error: &Error) {
-    tracing::error!(event_id = %context.event_id, %error, "labels action failed");
+fn log_detached_failure(error: &Error) {
+    tracing::error!(%error, "action.labels.failed");
 }
 
 async fn delete_matching_labels(
@@ -143,13 +143,13 @@ async fn delete_matching_labels(
         match listed.and_then(|current| labels_to_keep(current, patterns)) {
             Ok(kept) => {
                 let task_context = context.clone();
-                spawn_detached(context, "action/labels", async move {
+                spawn_detached("action/labels", async move {
                     api::set_labels(&task_context, &issue_number, &Value::Array(kept))
                         .await
                         .map(|_| ())
                 });
             }
-            Err(error) => log_detached_failure(context, &error),
+            Err(error) => log_detached_failure(&error),
         }
     }
 }
@@ -208,7 +208,7 @@ impl Action for Labels {
                 let task_context = context.clone();
                 let labels = Arc::clone(&shared_labels);
                 let replaces = mode == LabelMode::Replace;
-                spawn_detached(context, "action/labels", async move {
+                spawn_detached("action/labels", async move {
                     let response = if replaces {
                         api::set_labels(&task_context, &issue_number, &labels).await
                     } else {

@@ -8,6 +8,7 @@ use crate::results::Status;
 use crate::yaml;
 use serde_json::{Map, Value, json};
 use std::sync::LazyLock;
+use tracing::Instrument;
 
 mod v1_config;
 
@@ -335,16 +336,16 @@ pub async fn reset_cache(context: &Context) -> Result<()> {
     if !added && !json_value::includes(head_commit.get("modified"), &config_file)? {
         return Ok(());
     }
-    let (owner, repo) = context.repo()?;
-    if repo == ".github" {
-        let owner_prefix = format!("{owner}/");
+    let repository = context.repository_name()?;
+    if repository.name == ".github" {
+        let owner_prefix = format!("{}/", repository.owner);
         for key in CONFIG_CACHE.keys().await {
             if key.starts_with(&owner_prefix) {
                 CONFIG_CACHE.delete(&key).await;
             }
         }
     } else {
-        CONFIG_CACHE.delete(&format!("{owner}/{repo}")).await;
+        CONFIG_CACHE.delete(&repository.to_string()).await;
     }
     Ok(())
 }
@@ -355,7 +356,7 @@ fn parse_yaml(text: Option<&str>) -> Result<Option<Value>, FetchError> {
 }
 
 async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
-    let (owner, repo) = context.repo()?;
+    let repository = context.repository_name()?;
     let use_pull_request_config =
         context.global_setting("use_config_from_pull_request")? != Some(&Value::Bool(false));
     if use_pull_request_config
@@ -393,9 +394,9 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
                     json_value::read_path(&context.payload, &["pull_request", "head", "sha"])?
                         .cloned()
                         .unwrap_or(Value::Null);
-                let changed_config_content = api::get_content(
+                let changed_config_content = api::fetch_content(
                     context,
-                    json!({"owner": owner, "repo": repo, "path": FILE_NAME, "ref": head_sha}),
+                    json!({"owner": &repository.owner, "repo": &repository.name, "path": FILE_NAME, "ref": head_sha}),
                 )
                 .await?;
                 return Ok(parse_yaml(changed_config_content.as_deref())?.unwrap_or(Value::Null));
@@ -404,14 +405,17 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     }
     let config_path = config_path(context)?;
     let use_cache = context.global_setting("use_config_cache")? == Some(&Value::Bool(true));
-    let cache_key = format!("{owner}/{repo}");
+    let cache_key = repository.to_string();
     if use_cache {
         let reset_context = context.clone();
-        tokio::spawn(async move {
-            if let Err(error) = reset_cache(&reset_context).await {
-                tracing::warn!(event_id = %reset_context.event_id, %error, "configuration.cache_reset.failed");
+        tokio::spawn(
+            async move {
+                if let Err(error) = reset_cache(&reset_context).await {
+                    tracing::warn!(%error, "configuration.cache_reset.failed");
+                }
             }
-        });
+            .in_current_span(),
+        );
         if let Some(cached) = CONFIG_CACHE.get(&cache_key).await
             && json_value::is_truthy(&cached)
         {
@@ -420,9 +424,9 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     }
     let mut org_config = None;
     if context.global_setting("use_org_as_default_config")? == Some(&Value::Bool(true)) {
-        let org_config_content = api::get_content(
+        let org_config_content = api::fetch_content(
             context,
-            json!({"owner": owner, "repo": ".github", "path": format!(".github/{config_path}")}),
+            json!({"owner": &repository.owner, "repo": ".github", "path": format!(".github/{config_path}")}),
         )
         .await?;
         org_config = parse_yaml(org_config_content.as_deref())?;

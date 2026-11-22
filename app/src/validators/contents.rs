@@ -5,7 +5,7 @@ use crate::github::api;
 use crate::glob;
 use crate::json_value;
 use crate::registry::Registry;
-use crate::results;
+use crate::results::{self, Status};
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
 use serde_json::{Value, json};
@@ -60,7 +60,7 @@ pub fn summarize(changed_files: Vec<Value>, failed_files: &[String], settings: &
         &validator_context(),
         Value::Array(changed_files),
         settings,
-        if is_mergeable { "pass" } else { "fail" },
+        Status::from_check(is_mergeable),
         Value::String(description),
         None,
     );
@@ -111,7 +111,7 @@ impl Validator for Contents {
         }
 
         let pull_number =
-            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
         let files = api::list_files(
             context,
             context.repo_params(json!({"pull_number": pull_number}))?,
@@ -126,17 +126,17 @@ impl Validator for Contents {
                     .unwrap_or(&Value::Null);
             let params = context.repo_params(json!({"path": file, "ref": head_sha}))?;
             let file_name = json_value::to_display_string(Some(file));
-            let Some(file_content) = api::get_content(context, params).await? else {
+            let Some(file_content) = api::fetch_content(context, params).await? else {
                 failed_files.push(format!("{file_name} (Not Found)"));
                 continue;
             };
             let processed =
                 validators::process_options(&parse_option, &Value::String(file_content), None)
                     .await?;
-            match processed.get("status").and_then(Value::as_str) {
-                Some("error") => return Ok(processed),
-                Some("fail") => failed_files.push(file_name),
-                _ => {}
+            match Status::of(&processed) {
+                Some(Status::Error) => return Ok(processed),
+                Some(Status::Fail) => failed_files.push(file_name),
+                Some(Status::Pass) | None => {}
             }
         }
 

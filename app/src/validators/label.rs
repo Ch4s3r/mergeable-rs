@@ -45,7 +45,7 @@ impl Validator for Label {
         _registry: &Registry,
     ) -> Result<Value> {
         let issue_number =
-            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
         let labels = api::list_labels_on_issue(context, issue_number).await?;
         validators::process_options(settings, &Value::Array(labels), None).await
     }

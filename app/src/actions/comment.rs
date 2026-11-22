@@ -53,7 +53,7 @@ async fn delete_old_comments(context: &Context, old_comments: &[Value]) -> Resul
 }
 
 pub async fn remove_error_comments(context: &Context) -> Result<()> {
-    let Some(payload) = event_aware::get_payload(context) else {
+    let Some(payload) = event_aware::payload(context) else {
         return Ok(());
     };
     let issue_number = json_value::read(Some(payload), "number")?.unwrap_or(&Value::Null);
@@ -72,7 +72,7 @@ pub async fn remove_error_comments(context: &Context) -> Result<()> {
 
 pub async fn handle_error(context: &Context, body: &str) -> Result<()> {
     let issue_number =
-        json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+        json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
     remove_error_comments(context).await?;
     api::create_comment(context, issue_number, Value::String(body.to_string()))
         .await
@@ -100,7 +100,7 @@ impl Action for Comment {
         validation_report: &Value,
     ) -> Result<()> {
         let commentables = actionables(context, validation_report);
-        let event = event_aware::get_event_attributes(context);
+        let event = event_aware::event_attributes(context);
         let leave_old_comment = json_value::truthy(settings.get("leave_old_comment"));
         for issue in commentables {
             let issue_number = json_value::read(Some(&*issue), "number")?
@@ -120,7 +120,7 @@ impl Action for Comment {
                 fetch_comments_by_mergeable(context, &issue_number).await
             };
             let task_context = context.clone();
-            spawn_detached(context, "action/comment", async move {
+            spawn_detached("action/comment", async move {
                 delete_old_comments(&task_context, &old_comments?).await?;
                 api::create_comment(&task_context, &issue_number, Value::String(body))
                     .await

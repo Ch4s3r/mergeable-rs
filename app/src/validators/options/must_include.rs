@@ -1,7 +1,8 @@
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::validators::options::lib::user_pattern::UserPattern;
-use crate::validators::options::lib::{self, OptionResult};
+use crate::validators::options::output::{self, OptionResult};
+use crate::validators::options::text_matching;
+use crate::validators::options::user_pattern::UserPattern;
 use serde_json::Value;
 
 const REGEX_NOT_FOUND_ERROR: &str = "Failed to run the test because 'regex' is not provided for 'must_include' option. Please check README for more information about configuration";
@@ -67,22 +68,22 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
         return Err(Error::general(REGEX_NOT_FOUND_ERROR));
     };
     let filter = filter.unwrap_or(&Value::Null);
-    let regex_list = lib::concat_into_list(regex);
+    let regex_list = text_matching::concat_into_list(regex);
     let all = json_value::truthy(json_value::get(filter, "all"));
     let all_text = if all { "all" } else { "" };
-    let joined_patterns = lib::join_list(regex_list, ", ");
-    let validator_name = lib::validator_name(validator_context);
+    let joined_patterns = text_matching::join_list(regex_list, ", ");
+    let validator_name = output::validator_name(validator_context);
     let success_description =
         format!("{validator_name} {all_text}must include '{joined_patterns}'");
-    let failure_description = lib::message_or_default(
+    let failure_description = output::message_or_default(
         message,
         format!("{validator_name} {all_text}does not include \"{joined_patterns}\""),
     );
-    let flags = lib::regex_flags(filter);
+    let flags = text_matching::regex_flags(filter);
 
     let mut is_mergeable = false;
     for pattern in regex_list {
-        let compiled = lib::compile_user_regex(pattern, &flags)?;
+        let compiled = text_matching::compile_user_regex(pattern, &flags)?;
         if includes_pattern(&compiled, input, key, all)? {
             is_mergeable = true;
             break;
@@ -98,7 +99,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
     fn run(rule: &Value, input: &Value) -> OptionResult {
@@ -114,7 +115,7 @@ mod tests {
     fn passes_when_a_label_matches() {
         assert_eq!(
             run(&json!({"regex": "test"}), &json!(["A", "B", "the test"])).status,
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 
@@ -124,7 +125,7 @@ mod tests {
             &json!({"regex": "test", "message": "failed Test"}),
             &json!(["A", "B"]),
         );
-        assert_eq!(result.status, OptionStatus::Fail);
+        assert_eq!(result.status, Status::Fail);
         assert_eq!(result.description, json!("failed Test"));
     }
 
@@ -147,7 +148,7 @@ mod tests {
                 &json!(["A test", "B", "the test"])
             )
             .status,
-            OptionStatus::Fail
+            Status::Fail
         );
         assert_eq!(
             run(
@@ -155,7 +156,7 @@ mod tests {
                 &json!(["A test", "B test", "the test"])
             )
             .status,
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 
@@ -167,7 +168,7 @@ mod tests {
                 &json!(["A", "B", "Test"])
             )
             .status,
-            OptionStatus::Fail
+            Status::Fail
         );
     }
 
@@ -179,13 +180,13 @@ mod tests {
                 &json!(["A", "B", "the test"])
             )
             .status,
-            OptionStatus::Pass
+            Status::Pass
         );
         let result = run(
             &json!({"regex": ["test", "another"], "message": "failed array Test"}),
             &json!(["E", "F"]),
         );
-        assert_eq!(result.status, OptionStatus::Fail);
+        assert_eq!(result.status, Status::Fail);
         assert_eq!(result.description, json!("failed array Test"));
     }
 
@@ -197,7 +198,7 @@ mod tests {
                 &json!([{"name": "bug"}])
             )
             .status,
-            OptionStatus::Pass
+            Status::Pass
         );
         let error = process(
             &json!({"name": "label"}),

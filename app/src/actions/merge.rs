@@ -18,18 +18,63 @@ pub const SUPPORTED_EVENTS: [&str; 5] = [
     "check_suite.*",
     "issue_comment.*",
 ];
-const MERGE_METHOD_OPTIONS: [&str; 3] = ["merge", "rebase", "squash"];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeMethod {
+    Merge,
+    Rebase,
+    Squash,
+}
+
+impl MergeMethod {
+    const ALL: [MergeMethod; 3] = [MergeMethod::Merge, MergeMethod::Rebase, MergeMethod::Squash];
+
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MergeMethod::Merge => "merge",
+            MergeMethod::Rebase => "rebase",
+            MergeMethod::Squash => "squash",
+        }
+    }
+
+    fn from_setting(configured: Option<&Value>) -> Result<Self> {
+        if !json_value::truthy(configured) {
+            return Ok(MergeMethod::Merge);
+        }
+        configured
+            .and_then(Value::as_str)
+            .and_then(|method| {
+                MergeMethod::ALL
+                    .into_iter()
+                    .find(|candidate| candidate.as_str() == method)
+            })
+            .ok_or_else(|| {
+                let supported: Vec<&str> = MergeMethod::ALL
+                    .into_iter()
+                    .map(MergeMethod::as_str)
+                    .collect();
+                Error::unsupported_setting(format!(
+                    "Unknown Merge method, supported options are {}",
+                    supported.join(", ")
+                ))
+            })
+    }
+}
 
 pub fn merge_parameters(
     pull_number: &Value,
-    merge_method: &Value,
+    merge_method: MergeMethod,
     commit_title: Option<&Value>,
     commit_message: Option<&Value>,
     pull_request: &Value,
 ) -> Result<Value> {
     let mut parameters = Map::new();
     parameters.insert("pull_number".to_string(), pull_number.clone());
-    parameters.insert("merge_method".to_string(), merge_method.clone());
+    parameters.insert(
+        "merge_method".to_string(),
+        Value::String(merge_method.as_str().to_string()),
+    );
     if let Some(title_template) = commit_title {
         parameters.insert(
             "commit_title".to_string(),
@@ -49,7 +94,7 @@ pub fn merge_parameters(
 }
 
 struct MergeSettings {
-    merge_method: Value,
+    merge_method: MergeMethod,
     commit_title: Option<Value>,
     commit_message: Option<Value>,
 }
@@ -59,7 +104,7 @@ async fn merge_unmerged_pull_request(
     pull_number: Value,
     merge_settings: Arc<MergeSettings>,
 ) -> Result<()> {
-    let pull_request = api::get_pull_request(&context, &pull_number).await?.data;
+    let pull_request = api::fetch_pull_request(&context, &pull_number).await?.data;
     let is_blocked = json_value::as_str(json_value::read(Some(&pull_request), "mergeable_state")?)
         == Some("blocked");
     let is_open =
@@ -69,7 +114,7 @@ async fn merge_unmerged_pull_request(
     }
     let parameters = merge_parameters(
         &pull_number,
-        &merge_settings.merge_method,
+        merge_settings.merge_method,
         merge_settings.commit_title.as_ref(),
         merge_settings.commit_message.as_ref(),
         &pull_request,
@@ -80,25 +125,8 @@ async fn merge_unmerged_pull_request(
         .map(|_| ())
 }
 
-fn log_detached_failure(context: &Context, error: &Error) {
-    tracing::error!(event_id = %context.event_id, %error, "merge action failed");
-}
-
-fn validated_merge_method(settings: &Value) -> Result<Value> {
-    let configured = settings.get("merge_method");
-    if !json_value::truthy(configured) {
-        return Ok(Value::String("merge".to_string()));
-    }
-    let is_supported = configured
-        .and_then(Value::as_str)
-        .is_some_and(|method| MERGE_METHOD_OPTIONS.contains(&method));
-    if !is_supported {
-        return Err(Error::unsupported_setting(format!(
-            "Unknown Merge method, supported options are {}",
-            MERGE_METHOD_OPTIONS.join(", ")
-        )));
-    }
-    Ok(configured.cloned().unwrap_or(Value::Null))
+fn log_detached_failure(error: &Error) {
+    tracing::error!(%error, "action.merge.failed");
 }
 
 fn as_pull_request_list(value: Option<&Value>) -> Result<&[Value]> {
@@ -118,8 +146,8 @@ async fn related_pull_requests(context: &Context) -> Result<Vec<Cow<'_, Value>>>
     match context.event_name.as_str() {
         "status" => {
             let commit_sha = json_value::to_display_string(context.payload.get("sha"));
-            let (owner, repo) = context.repo()?;
-            let query = format!("repo:{owner}/{repo} is:open {commit_sha}")
+            let repository = context.repository_name()?;
+            let query = format!("repo:{repository} is:open {commit_sha}")
                 .trim()
                 .to_string();
             let found = api::search_issues_and_pull_requests(
@@ -138,14 +166,14 @@ async fn related_pull_requests(context: &Context) -> Result<Vec<Cow<'_, Value>>>
             }
         }
         "check_suite" => Ok(as_pull_request_list(json_value::read(
-            event_aware::get_payload(context),
+            event_aware::payload(context),
             "pull_requests",
         )?)?
         .iter()
         .map(Cow::Borrowed)
         .collect()),
         _ => Ok(vec![
-            event_aware::get_payload(context).map_or(Cow::Owned(Value::Null), Cow::Borrowed),
+            event_aware::payload(context).map_or(Cow::Owned(Value::Null), Cow::Borrowed),
         ]),
     }
 }
@@ -173,7 +201,7 @@ impl Action for Merge {
         if is_comment_on_plain_issue(context) {
             return Ok(());
         }
-        let merge_method = validated_merge_method(settings)?;
+        let merge_method = MergeMethod::from_setting(settings.get("merge_method"))?;
         let merge_settings = Arc::new(MergeSettings {
             merge_method,
             commit_title: settings.get("commit_title").cloned(),
@@ -198,7 +226,6 @@ impl Action for Merge {
             match merged_check {
                 Ok(true) => {}
                 Ok(false) => spawn_detached(
-                    context,
                     "action/merge",
                     merge_unmerged_pull_request(
                         context.clone(),
@@ -206,7 +233,7 @@ impl Action for Merge {
                         Arc::clone(&merge_settings),
                     ),
                 ),
-                Err(error) => log_detached_failure(context, &error),
+                Err(error) => log_detached_failure(&error),
             }
         }
         Ok(())
@@ -224,16 +251,16 @@ mod tests {
 
     #[test]
     fn merge_method_defaults_to_merge() {
-        assert_eq!(validated_merge_method(&json!({})).unwrap(), json!("merge"));
+        assert_eq!(MergeMethod::from_setting(None).unwrap(), MergeMethod::Merge);
         assert_eq!(
-            validated_merge_method(&json!({"merge_method": "squash"})).unwrap(),
-            json!("squash")
+            MergeMethod::from_setting(Some(&json!("squash"))).unwrap(),
+            MergeMethod::Squash
         );
     }
 
     #[test]
     fn unknown_merge_method_is_an_unsupported_setting() {
-        let error = validated_merge_method(&json!({"merge_method": "fast-forward"})).unwrap_err();
+        let error = MergeMethod::from_setting(Some(&json!("fast-forward"))).unwrap_err();
         assert_eq!(error.kind(), ErrorKind::UnsupportedSetting);
         assert_eq!(
             error.message(),
@@ -244,7 +271,7 @@ mod tests {
     #[test]
     fn commit_title_and_message_are_omitted_when_not_configured() {
         let parameters =
-            merge_parameters(&json!(1), &json!("squash"), None, None, &pull_request()).unwrap();
+            merge_parameters(&json!(1), MergeMethod::Squash, None, None, &pull_request()).unwrap();
         assert_eq!(
             parameters,
             json!({"pull_number": 1, "merge_method": "squash"})
@@ -255,7 +282,7 @@ mod tests {
     fn commit_title_and_message_are_rendered_from_the_pull_request_without_escaping() {
         let parameters = merge_parameters(
             &json!(10),
-            &json!("squash"),
+            MergeMethod::Squash,
             Some(&json!("{{{ title }}} (#{{{ number }}})")),
             Some(&json!("{{{ body }}}")),
             &pull_request(),
@@ -269,7 +296,7 @@ mod tests {
     fn empty_commit_templates_stay_empty() {
         let parameters = merge_parameters(
             &json!(10),
-            &json!("squash"),
+            MergeMethod::Squash,
             Some(&json!("")),
             Some(&json!("")),
             &pull_request(),

@@ -1,8 +1,9 @@
 use crate::context::Context;
 use crate::error::Result;
 use crate::filters::Filter;
-use crate::filters::lib::logical_connective::{self, Connective};
+use crate::filters::logical_connective;
 use crate::registry::Registry;
+use crate::results::Connective;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 

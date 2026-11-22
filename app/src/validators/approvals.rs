@@ -4,7 +4,7 @@ use crate::event_aware;
 use crate::github::api;
 use crate::json_value;
 use crate::registry::Registry;
-use crate::results;
+use crate::results::{self, Status};
 use crate::validators::options_processor::{assignees, owners, requested_reviewers, teams};
 use crate::validators::{self, DEFAULT_SUPPORTED_OPTIONS, Validator};
 use crate::value_lists;
@@ -94,7 +94,7 @@ pub fn process_block_option(block_option: &Value, latest_reviews: &[Value]) -> R
         &validator_context(),
         Value::Array(changes_requested_reviewers),
         block_option,
-        if is_mergeable { "pass" } else { "fail" },
+        Status::from_check(is_mergeable),
         if is_mergeable {
             Value::String(NO_CHANGES_REQUESTED_MESSAGE.to_string())
         } else {
@@ -147,7 +147,7 @@ async fn required_reviewer_list(
     context: &Context,
     settings: &Value,
 ) -> Result<RequiredReviewerList> {
-    let payload = event_aware::get_payload(context);
+    let payload = event_aware::payload(context);
     let creator =
         json_value::read(json_value::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
     let mut required_reviewers = settings
@@ -234,7 +234,7 @@ async fn limit_to_allowed_sources(
     limit_option: &Value,
     approved_reviewers: Vec<Value>,
 ) -> Result<(Vec<Value>, Value)> {
-    let payload = event_aware::get_payload(context);
+    let payload = event_aware::payload(context);
     let mut owner_members = Vec::new();
     let team_names = json_value::get(limit_option, "teams")
         .filter(|value| json_value::is_truthy(value))
@@ -256,13 +256,11 @@ async fn limit_to_allowed_sources(
             .into_iter()
             .cloned()
             .collect();
-    let info = results::construct_output(
+    let info = results::construct_info_output(
         &validator_context(),
         Value::Array(counted_reviewers.clone()),
         limit_option,
-        "info",
         Value::String("Only approvals from following sources are counted".to_string()),
-        None,
     );
     Ok((counted_reviewers, info))
 }
@@ -321,7 +319,7 @@ impl Validator for Approvals {
         let exclude_option = take_truthy_option(&mut remaining_settings, "exclude");
 
         let pull_number =
-            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
         let reviews = api::list_reviews(context, pull_number).await?;
 
         let required_list = required_reviewer_list(context, &remaining_settings).await?;

@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::validators::options::lib::{self, OptionResult};
+use crate::validators::options::output::{self, OptionResult};
 use serde_json::Value;
 
 const COUNT_NOT_FOUND_ERROR: &str = "Failed to run the test because 'count' is not provided for 'max' option. Please check README for more information about configuration";
@@ -20,9 +20,9 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
     };
     let count_limit = count_number.as_f64().unwrap_or(f64::NAN);
     let count_text = json_value::number_to_string(count_number);
-    let validator_name = lib::validator_name(validator_context);
+    let validator_name = output::validator_name(validator_context);
     let success_description = format!("{validator_name} does have a maximum of '{count_text}'");
-    let failure_description = lib::message_or_default(
+    let failure_description = output::message_or_default(
         message,
         format!("{validator_name} count is more than \"{count_text}\""),
     );
@@ -47,10 +47,10 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
-    fn status_for(count: &Value, input: &Value) -> OptionStatus {
+    fn status_for(count: &Value, input: &Value) -> Status {
         process(
             &json!({"name": "label"}),
             input,
@@ -62,25 +62,19 @@ mod tests {
 
     #[test]
     fn list_within_or_at_maximum_passes_and_above_fails() {
-        assert_eq!(
-            status_for(&json!(3), &json!(["A", "B"])),
-            OptionStatus::Pass
-        );
-        assert_eq!(
-            status_for(&json!(3), &json!(["A", "B", "C"])),
-            OptionStatus::Pass
-        );
+        assert_eq!(status_for(&json!(3), &json!(["A", "B"])), Status::Pass);
+        assert_eq!(status_for(&json!(3), &json!(["A", "B", "C"])), Status::Pass);
         assert_eq!(
             status_for(&json!(3), &json!(["A", "B", "C", "D"])),
-            OptionStatus::Fail
+            Status::Fail
         );
     }
 
     #[test]
     fn integer_within_or_at_maximum_passes_and_above_fails() {
-        assert_eq!(status_for(&json!(20), &json!(10)), OptionStatus::Pass);
-        assert_eq!(status_for(&json!(10), &json!(10)), OptionStatus::Pass);
-        assert_eq!(status_for(&json!(10), &json!(20)), OptionStatus::Fail);
+        assert_eq!(status_for(&json!(20), &json!(10)), Status::Pass);
+        assert_eq!(status_for(&json!(10), &json!(10)), Status::Pass);
+        assert_eq!(status_for(&json!(10), &json!(20)), Status::Fail);
     }
 
     #[test]

@@ -58,7 +58,7 @@ async fn check_rerun(context: &mut Context) -> Result<()> {
         }
     };
     let pull_number = json_value::read(Some(first_pull_request), "number")?.unwrap_or(&Value::Null);
-    let pull_request = api::get_pull_request(context, pull_number).await?;
+    let pull_request = api::fetch_pull_request(context, pull_number).await?;
     if let Value::Object(payload) = context.payload.to_mut() {
         match rerun_metadata.get("action") {
             Some(action) => payload.insert("action".to_string(), action.clone()),
@@ -86,7 +86,7 @@ async fn milestoned(context: &mut Context) -> Result<()> {
     }
     let issue_number =
         json_value::read_path(&context.payload, &["issue", "number"])?.unwrap_or(&Value::Null);
-    let response = api::get_pull_request(context, issue_number).await?;
+    let response = api::fetch_pull_request(context, issue_number).await?;
     let mut pull_request = response.data;
     if let Value::Object(fields) = &mut pull_request {
         fields.insert(

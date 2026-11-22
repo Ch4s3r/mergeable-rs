@@ -1,6 +1,6 @@
 use crate::context::Context;
 use crate::error::Result;
-use crate::filters::options::lib::{consolidate_results, construct_error};
+use crate::filters::options::output::{consolidate_results, construct_error};
 use crate::filters::{self, Filter};
 use crate::json_value;
 use crate::registry::Registry;
@@ -122,8 +122,8 @@ impl Filter for Payload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filters::lib::test_context::context_for;
     use crate::filters::process_filter;
+    use crate::filters::test_context::context_for;
 
     fn status_of(result: &Value) -> &str {
         result

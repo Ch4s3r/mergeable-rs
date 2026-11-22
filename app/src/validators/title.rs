@@ -42,7 +42,7 @@ impl Validator for Title {
         _registry: &Registry,
     ) -> Result<Value> {
         let title =
-            json_value::read(event_aware::get_payload(context), "title")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "title")?.unwrap_or(&Value::Null);
         validators::process_options(settings, title, None).await
     }
 }

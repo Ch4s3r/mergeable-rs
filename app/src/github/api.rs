@@ -150,7 +150,7 @@ pub fn decode_content(data: &Value) -> Result<String> {
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-pub async fn get_content(context: &Context, params: Value) -> Result<Option<String>> {
+pub async fn fetch_content(context: &Context, params: Value) -> Result<Option<String>> {
     call_treating_not_found_as_absent(context, "GET /repos/{owner}/{repo}/contents/{path}", params)
         .await?
         .map(|response| decode_content(&response.data))
@@ -246,7 +246,10 @@ pub async fn delete_comment(
     .await
 }
 
-pub async fn get_issue(context: &Context, issue_number: &Value) -> Result<Option<GithubResponse>> {
+pub async fn fetch_issue(
+    context: &Context,
+    issue_number: &Value,
+) -> Result<Option<GithubResponse>> {
     let params = context.repo_params(json!({"issue_number": issue_number}))?;
     call_treating_not_found_as_absent(
         context,
@@ -285,7 +288,7 @@ pub async fn list_members_in_org(
     take_from_each(response.data, "login")
 }
 
-pub async fn get_membership_for_user_in_org(
+pub async fn fetch_membership_for_user_in_org(
     context: &Context,
     org: &str,
     team_slug: &str,
@@ -346,7 +349,7 @@ pub async fn list_collaborators(context: &Context, params: Value) -> Result<Vec<
     take_from_each(response.data, "login")
 }
 
-pub async fn get_all_topics(context: &Context, params: Value) -> Result<Value> {
+pub async fn fetch_all_topics(context: &Context, params: Value) -> Result<Value> {
     let response = call(context, "GET /repos/{owner}/{repo}/topics", params).await?;
     Ok(take_field(response.data, "names"))
 }
@@ -396,7 +399,7 @@ pub async fn check_if_merged(context: &Context, pull_number: &Value) -> Result<b
     Ok(merge.is_some())
 }
 
-pub async fn get_pull_request(context: &Context, pull_number: &Value) -> Result<GithubResponse> {
+pub async fn fetch_pull_request(context: &Context, pull_number: &Value) -> Result<GithubResponse> {
     let params = context.repo_params(json!({"pull_number": pull_number}))?;
     call_without_error_log(
         context,

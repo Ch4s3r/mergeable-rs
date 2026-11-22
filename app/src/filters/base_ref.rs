@@ -32,7 +32,7 @@ impl Filter for BaseRef {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let payload = event_aware::get_payload(context);
+        let payload = event_aware::payload(context);
         let base_ref =
             json_value::read(json_value::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
         filters::process_options(self, context, base_ref, settings).await
@@ -42,8 +42,8 @@ impl Filter for BaseRef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filters::lib::test_context::{PullRequest, pull_request_context};
     use crate::filters::process_filter;
+    use crate::filters::test_context::{PullRequest, pull_request_context};
 
     fn status_of(result: &Value) -> &str {
         result

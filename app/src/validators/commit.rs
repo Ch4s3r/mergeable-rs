@@ -5,8 +5,8 @@ use crate::github::api;
 use crate::json_value;
 use crate::registry::Registry;
 use crate::results;
+use crate::results::Status;
 use crate::validators::Validator;
-use crate::validators::options::lib::OptionStatus;
 use crate::validators::options::must_include;
 use crate::value_lists;
 use async_trait::async_trait;
@@ -179,13 +179,13 @@ pub fn must_include_rule(message_settings: &Value, fail_message: &str) -> Value 
     json!({"must_include": Value::Object(rule)})
 }
 
-fn output(input: Value, settings: &Value, status: Value, description: Value) -> Value {
+fn output(input: Value, settings: &Value, status: Status, description: Value) -> Value {
     let mut details = Map::new();
     details.insert("input".to_string(), input);
     details.insert("settings".to_string(), settings.clone());
     let mut result = Map::new();
     result.insert("validator".to_string(), validator_context());
-    result.insert("status".to_string(), status);
+    result.insert("status".to_string(), status.into());
     result.insert("description".to_string(), description);
     result.insert("details".to_string(), Value::Object(details));
     results::consolidate_result(vec![Value::Object(result)], &validator_context())
@@ -235,7 +235,7 @@ impl Validator for Commit {
     ) -> Result<Value> {
         let message_settings = check_settings(settings)?;
         let pull_number =
-            json_value::read(event_aware::get_payload(context), "number")?.unwrap_or(&Value::Null);
+            json_value::read(event_aware::payload(context), "number")?.unwrap_or(&Value::Null);
         let commits = api::list_commits(context, pull_number).await?;
         evaluate(commits, settings, message_settings)
     }
@@ -247,7 +247,7 @@ pub fn evaluate(commits: Vec<Value>, settings: &Value, message_settings: &Value)
             return Ok(output(
                 Value::Array(messages),
                 settings,
-                Value::String("pass".to_string()),
+                Status::Pass,
                 Value::String(
                     "Since there are more than one commits, Skipping validation".to_string(),
                 ),
@@ -258,17 +258,12 @@ pub fn evaluate(commits: Vec<Value>, settings: &Value, message_settings: &Value)
     let rule = must_include_rule(message_settings, selection.fail_message);
     let inputs = Value::Array(selection.inputs);
     let result = must_include::process(&validator_context(), &inputs, &rule)?;
-    let description = if result.status == OptionStatus::Pass {
+    let description = if result.status == Status::Pass {
         Value::String(DEFAULT_SUCCESS_MESSAGE.to_string())
     } else {
         result.description
     };
-    Ok(output(
-        inputs,
-        settings,
-        Value::String(result.status.as_str().to_string()),
-        description,
-    ))
+    Ok(output(inputs, settings, result.status, description))
 }
 
 #[cfg(test)]

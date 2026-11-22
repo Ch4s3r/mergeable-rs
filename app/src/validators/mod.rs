@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use std::borrow::Cow;
 use std::sync::Arc;
 
-pub mod lib;
+pub mod logical_connective;
 pub mod options;
 pub mod options_processor;
 
@@ -108,8 +108,6 @@ pub async fn process_validate(
 ) -> Result<Value> {
     let supported_settings = validator.supported_settings();
     tracing::info!(
-        event_id = %context.event_id,
-        repo = %context.repository_full_name(),
         validator = validator.name(),
         settings = %settings,
         "validator_process"

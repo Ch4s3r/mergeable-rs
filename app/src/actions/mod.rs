@@ -7,6 +7,7 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::future::Future;
 use std::sync::Arc;
+use tracing::Instrument;
 
 pub mod assign;
 pub mod checks;
@@ -57,16 +58,17 @@ pub fn is_event_supported(action: &dyn Action, event_name: &str) -> bool {
 }
 
 pub fn spawn_detached(
-    context: &Context,
     task_name: &'static str,
     task: impl Future<Output = Result<()>> + Send + 'static,
 ) {
-    let event_id = context.event_id.clone();
-    tokio::spawn(async move {
-        if let Err(error) = task.await {
-            tracing::error!(task = task_name, %event_id, %error, "action.task.failed");
+    tokio::spawn(
+        async move {
+            if let Err(error) = task.await {
+                tracing::error!(task = task_name, %error, "action.task.failed");
+            }
         }
-    });
+        .in_current_span(),
+    );
 }
 
 pub async fn process_before_validate(
@@ -76,8 +78,6 @@ pub async fn process_before_validate(
     rule_name: Option<&Value>,
 ) -> Result<()> {
     tracing::info!(
-        event_id = %context.event_id,
-        repo = %context.repository_full_name(),
         action = action.name(),
         settings = %rule,
         "action.before_validate.started"
@@ -93,8 +93,6 @@ pub async fn process_after_validate(
     validation_report: &Value,
 ) -> Result<()> {
     tracing::info!(
-        event_id = %context.event_id,
-        repo = %context.repository_full_name(),
         action = action.name(),
         %settings,
         "action.after_validate.started"
@@ -124,7 +122,7 @@ pub fn actionables<'value>(
                 .collect()
         }
         None => {
-            vec![event_aware::get_payload(context).map_or(Cow::Owned(Value::Null), Cow::Borrowed)]
+            vec![event_aware::payload(context).map_or(Cow::Owned(Value::Null), Cow::Borrowed)]
         }
     }
 }

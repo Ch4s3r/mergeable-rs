@@ -38,7 +38,7 @@ impl Action for Close {
                 .cloned()
                 .unwrap_or(Value::Null);
             let task_context = context.clone();
-            spawn_detached(context, "action/close", async move {
+            spawn_detached("action/close", async move {
                 api::update_issue_state(&task_context, &issue_number, "closed")
                     .await
                     .map(|_| ())

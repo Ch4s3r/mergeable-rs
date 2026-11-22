@@ -1,7 +1,8 @@
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::validators::options::lib::user_pattern::UserPattern;
-use crate::validators::options::lib::{self, OptionResult};
+use crate::validators::options::output::{self, OptionResult};
+use crate::validators::options::text_matching;
+use crate::validators::options::user_pattern::UserPattern;
 use serde_json::Value;
 
 const REGEX_NOT_FOUND_ERROR: &str = "Failed to run the test because 'regex' is not provided for 'must_exclude' option. Please check README for more information about configuration";
@@ -67,22 +68,22 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
         return Err(Error::general(REGEX_NOT_FOUND_ERROR));
     };
     let filter = filter.unwrap_or(&Value::Null);
-    let regex_list = lib::concat_into_list(regex);
+    let regex_list = text_matching::concat_into_list(regex);
     let all = json_value::truthy(json_value::get(filter, "all"));
     let all_text = if all { "all" } else { "" };
-    let joined_patterns = lib::join_list(regex_list, ", ");
-    let validator_name = lib::validator_name(validator_context);
+    let joined_patterns = text_matching::join_list(regex_list, ", ");
+    let validator_name = output::validator_name(validator_context);
     let success_description =
         format!("{validator_name} {all_text}must exclude '{joined_patterns}'");
-    let failure_description = lib::message_or_default(
+    let failure_description = output::message_or_default(
         message,
         format!("{validator_name} {all_text}does not exclude \"{joined_patterns}\""),
     );
-    let flags = lib::regex_flags(filter);
+    let flags = text_matching::regex_flags(filter);
 
     let mut is_mergeable = true;
     for pattern in regex_list {
-        let compiled = lib::compile_user_regex(pattern, &flags)?;
+        let compiled = text_matching::compile_user_regex(pattern, &flags)?;
         if !excludes_pattern(&compiled, input, key, all)? {
             is_mergeable = false;
             break;
@@ -98,10 +99,10 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
-    fn status_for(rule: &Value, input: &Value) -> OptionStatus {
+    fn status_for(rule: &Value, input: &Value) -> Status {
         process(
             &json!({"name": "label"}),
             input,
@@ -115,11 +116,11 @@ mod tests {
     fn passes_when_no_label_matches_and_fails_otherwise() {
         assert_eq!(
             status_for(&json!({"regex": "test"}), &json!(["A", "B", "C"])),
-            OptionStatus::Pass
+            Status::Pass
         );
         assert_eq!(
             status_for(&json!({"regex": "test"}), &json!(["A", "B", "the test"])),
-            OptionStatus::Fail
+            Status::Fail
         );
     }
 
@@ -141,14 +142,14 @@ mod tests {
                 &json!({"regex": "test", "all": true}),
                 &json!(["A", "B", "the test"])
             ),
-            OptionStatus::Fail
+            Status::Fail
         );
         assert_eq!(
             status_for(
                 &json!({"regex": "test", "all": true}),
                 &json!(["A", "B", "the"])
             ),
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 
@@ -159,7 +160,7 @@ mod tests {
                 &json!({"regex": "test", "regex_flag": "none"}),
                 &json!(["A", "B", "Test"])
             ),
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 
@@ -167,14 +168,14 @@ mod tests {
     fn every_regex_of_a_list_must_be_absent() {
         assert_eq!(
             status_for(&json!({"regex": ["test", "D"]}), &json!(["A", "B", "C"])),
-            OptionStatus::Pass
+            Status::Pass
         );
         assert_eq!(
             status_for(
                 &json!({"regex": ["^the", "F", "G"]}),
                 &json!(["A", "B", "the test"])
             ),
-            OptionStatus::Fail
+            Status::Fail
         );
     }
 
@@ -182,7 +183,7 @@ mod tests {
     fn title_with_odd_but_valid_regex_passes() {
         assert_eq!(
             status_for(&json!({"regex": "@#$@#$@#$"}), &json!("WIP Title")),
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 }

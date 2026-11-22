@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::json_value;
-use crate::validators::options::lib::{self, OptionResult};
+use crate::validators::options::output::{self, OptionResult};
 use serde_json::Value;
 
 const UNKNOWN_INPUT_TYPE_ERROR: &str = "Input type invalid, expected array of string as input";
@@ -80,9 +80,9 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
         required_descriptions.push(described);
     }
 
-    let validator_name = lib::validator_name(validator_context);
+    let validator_name = output::validator_name(validator_context);
     let success_description = format!("{validator_name}: all required reviewers have approved");
-    let failure_description = lib::message_or_default(
+    let failure_description = output::message_or_default(
         message,
         format!(
             "{validator_name}: {}required",
@@ -99,7 +99,7 @@ pub fn process(validator_context: &Value, input: &Value, rule: &Value) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validators::options::lib::OptionStatus;
+    use crate::results::Status;
     use serde_json::json;
 
     fn run(rule: &Value, input: &Value) -> OptionResult {
@@ -119,7 +119,7 @@ mod tests {
                 &json!(["shine2lay", "jusx"])
             )
             .status,
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 
@@ -131,7 +131,7 @@ mod tests {
                 &json!(["jusx"])
             )
             .status,
-            OptionStatus::Fail
+            Status::Fail
         );
     }
 
@@ -139,7 +139,7 @@ mod tests {
     fn passes_when_no_reviewers_are_required() {
         assert_eq!(
             run(&json!({"owners": true}), &json!(["jusx"])).status,
-            OptionStatus::Pass
+            Status::Pass
         );
     }
 
@@ -151,7 +151,7 @@ mod tests {
                 &json!(["jusxTest"])
             )
             .status,
-            OptionStatus::Fail
+            Status::Fail
         );
         let result = run(
             &json!({"reviewers": ["camelCaseUser", "jusxtest"]}),

@@ -253,11 +253,6 @@ pub fn number_from_timestamp_milliseconds(milliseconds: i64) -> f64 {
     milliseconds as f64
 }
 
-#[must_use]
-pub fn object() -> Map<String, Value> {
-    Map::new()
-}
-
 fn is_container(value: &Value) -> bool {
     value.is_object() || value.is_array()
 }
@@ -352,6 +347,25 @@ pub fn trim_whitespace_and_byte_order_mark(text: &str) -> &str {
     text.trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}')
 }
 
+#[must_use]
+pub fn parse_decimal_number(text: &str) -> f64 {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return 0.0;
+    }
+    match trimmed {
+        "Infinity" | "+Infinity" => f64::INFINITY,
+        "-Infinity" => f64::NEG_INFINITY,
+        _ if trimmed.chars().any(|character| {
+            character.is_ascii_alphabetic() && !matches!(character, 'e' | 'E')
+        }) =>
+        {
+            f64::NAN
+        }
+        _ => trimmed.parse::<f64>().unwrap_or(f64::NAN),
+    }
+}
+
 #[expect(
     clippy::cast_precision_loss,
     reason = "a radix literal rounds to the nearest f64 exactly like an integer-to-float cast"
@@ -438,5 +452,14 @@ mod tests {
         assert!(to_number(Some(&json!("inf"))).is_nan());
         assert_eq!(to_number(Some(&json!("0x10"))), 16.0);
         assert!(to_number(None).is_nan());
+    }
+
+    #[test]
+    fn decimal_text_is_parsed_as_a_decimal_number() {
+        assert_eq!(parse_decimal_number("3600"), 3600.0);
+        assert_eq!(parse_decimal_number(" 0.5 "), 0.5);
+        assert_eq!(parse_decimal_number(""), 0.0);
+        assert!(parse_decimal_number("abc").is_nan());
+        assert!(parse_decimal_number("inf").is_nan());
     }
 }

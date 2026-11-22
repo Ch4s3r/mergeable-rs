@@ -76,8 +76,8 @@ impl Action for Assign {
         _rule_name: Option<&Value>,
         _results: &Value,
     ) -> Result<()> {
-        let event = event_aware::get_event_attributes(context);
-        let payload = event_aware::get_payload(context);
+        let event = event_aware::event_attributes(context);
+        let payload = event_aware::payload(context);
         let issue_number = json_value::read(payload, "number")?.unwrap_or(&Value::Null);
         let assignees = resolve_assignees(settings, payload, &event)?;
         let mut checks = Vec::new();

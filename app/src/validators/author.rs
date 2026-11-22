@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::event_aware;
 use crate::json_value;
 use crate::registry::Registry;
+use crate::results::Status;
 use crate::validators::options_processor::{list_processor, teams};
 use crate::validators::{self, Validator};
 use async_trait::async_trait;
@@ -42,12 +43,12 @@ impl Validator for Author {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let payload = event_aware::get_payload(context);
+        let payload = event_aware::payload(context);
         let mut author_settings = Cow::Borrowed(settings);
 
         if json_value::truthy(json_value::read(Some(&*author_settings), "team")?) {
             let result = teams::process_team_option(context, &author_settings, payload).await?;
-            if json_value::as_str(result.get("status")) != Some("pass") {
+            if Status::of(&result) != Some(Status::Pass) {
                 return Ok(result);
             }
             if let Value::Object(fields) = author_settings.to_mut() {

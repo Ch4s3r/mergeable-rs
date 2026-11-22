@@ -5,7 +5,7 @@ use crate::github::api;
 use crate::glob;
 use crate::json_value;
 use crate::registry::Registry;
-use crate::results;
+use crate::results::{self, Status};
 use crate::validators::Validator;
 use async_trait::async_trait;
 use regex::Regex;
@@ -357,7 +357,7 @@ pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) 
             &validator_context,
             input.clone(),
             settings,
-            if is_mergeable { "pass" } else { "fail" },
+            Status::from_check(is_mergeable),
             description,
             None,
         ));
@@ -419,7 +419,7 @@ impl Validator for Size {
             .get("ignore")
             .filter(|value| json_value::is_truthy(value))
             .unwrap_or(&default_patterns_to_ignore);
-        let payload = event_aware::get_payload(context);
+        let payload = event_aware::payload(context);
         let pull_number = json_value::read(payload, "number")?.unwrap_or(&Value::Null);
         let listed_files = api::list_files(
             context,
@@ -432,7 +432,7 @@ impl Validator for Size {
             .filter(|value| json_value::is_truthy(value))
             .is_some_and(|lines| json_value::truthy(json_value::get(lines, "ignore_comments")));
         let modified_files = if ignore_comments {
-            let diff_url = json_value::read(event_aware::get_payload(context), "diff_url")?
+            let diff_url = json_value::read(event_aware::payload(context), "diff_url")?
                 .unwrap_or(&Value::Null);
             changes_without_comments(&fetch_diff(diff_url).await?)
         } else {

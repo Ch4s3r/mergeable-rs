@@ -1,7 +1,8 @@
 use crate::error::{Error, Result};
 use crate::json_value;
+use crate::results::Status;
 use crate::validators::options;
-use crate::validators::options::lib::{OptionResult, OptionStatus};
+use crate::validators::options::output::OptionResult;
 use futures::future::{BoxFuture, join_all};
 use serde_json::Value;
 
@@ -80,25 +81,26 @@ pub fn process<'call>(
         let mut error_message = String::from("Error occurred: \n");
 
         for result in &validated {
-            let status = json_value::read(result.as_ref(), "status")?;
+            let status = json_value::read(result.as_ref(), "status")?
+                .and_then(Value::as_str)
+                .and_then(Status::parse);
             let description_text = json_value::to_display_string(
                 result
                     .as_ref()
                     .and_then(|present| json_value::get(present, "description")),
             );
-            let status_text = json_value::as_str(status);
-            if status_text == Some("error") {
+            if status == Some(Status::Error) {
                 does_error_exist = true;
                 error_message.push_str("- ");
                 error_message.push_str(&description_text);
                 error_message.push_str(" \n");
             }
-            let result_success = status_text == Some("pass");
+            let result_success = status == Some(Status::Pass);
             is_mergeable = Some(match is_mergeable {
                 Some(previous) => connective.combine(previous, result_success),
                 None => result_success,
             });
-            if status_text == Some("fail") {
+            if status == Some(Status::Fail) {
                 if descriptions.encode_utf16().count() > 2 {
                     descriptions.push(' ');
                     descriptions.push_str(connective.separator());
@@ -112,7 +114,7 @@ pub fn process<'call>(
 
         if does_error_exist {
             return Ok(OptionResult {
-                status: OptionStatus::Error,
+                status: Status::Error,
                 description: Value::String(error_message),
             });
         }

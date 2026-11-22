@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-const REPLAY_TEST_SIGNING_KEY: &str = include_str!("../../../../replay/test-key.pem");
+const REPLAY_TEST_SIGNING_KEY: &str = include_str!("../../../replay/test-key.pem");
 
 #[must_use]
 pub fn context_for(event_name: &str, payload: Value) -> Context {

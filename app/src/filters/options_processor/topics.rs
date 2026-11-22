@@ -22,8 +22,7 @@ pub async fn process(
 }
 
 async fn repository_topics(context: &Context) -> Result<Value> {
-    let (owner, repo) = context.repo()?;
-    let cache_key = format!("{owner}/{repo}/topics");
+    let cache_key = format!("{}/topics", context.repository_name()?);
     let use_config_cache = context.global_setting("use_config_cache")? == Some(&Value::Bool(true));
     if use_config_cache
         && let Some(names) = TOPICS_CACHE.get(&cache_key).await
@@ -35,7 +34,7 @@ async fn repository_topics(context: &Context) -> Result<Value> {
         "owner": json_value::read_path(&context.payload, &["repository", "owner", "login"])?.unwrap_or(&Value::Null),
         "repo": json_value::read_path(&context.payload, &["repository", "name"])?.unwrap_or(&Value::Null),
     });
-    let topics = api::get_all_topics(context, params).await?;
+    let topics = api::fetch_all_topics(context, params).await?;
     if use_config_cache {
         TOPICS_CACHE.set(&cache_key, topics.clone()).await;
     }

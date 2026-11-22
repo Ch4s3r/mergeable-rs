@@ -34,7 +34,7 @@ impl Validator for HeadRef {
         _registry: &Registry,
     ) -> Result<Value> {
         let head_ref = json_value::read(
-            json_value::read(event_aware::get_payload(context), "head")?,
+            json_value::read(event_aware::payload(context), "head")?,
             "ref",
         )?
         .unwrap_or(&Value::Null);

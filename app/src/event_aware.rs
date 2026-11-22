@@ -50,12 +50,12 @@ pub fn payload_key(context: &Context) -> &str {
 }
 
 #[must_use]
-pub fn get_payload(context: &Context) -> Option<&Value> {
+pub fn payload(context: &Context) -> Option<&Value> {
     context.payload.get(payload_key(context))
 }
 
 #[must_use]
-pub fn get_event_attributes(context: &Context) -> EventAttributes<'_> {
+pub fn event_attributes(context: &Context) -> EventAttributes<'_> {
     if context.event_name == "schedule" {
         return EventAttributes::of_schedule();
     }
