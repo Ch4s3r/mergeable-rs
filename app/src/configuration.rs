@@ -82,10 +82,11 @@ impl Configuration {
                 Ok(configuration)
             }
             "2" => {
-                let mut transformed = configuration.settings.clone();
-                set_pull_request_defaults(&mut transformed)?;
-                configuration.settings =
-                    transformed.get("mergeable").cloned().unwrap_or(Value::Null);
+                set_pull_request_defaults(&mut configuration.settings)?;
+                configuration.settings = configuration
+                    .settings
+                    .get_mut("mergeable")
+                    .map_or(Value::Null, Value::take);
                 Ok(configuration)
             }
             other => Err(JsError::error(format!(
@@ -95,69 +96,90 @@ impl Configuration {
     }
 
     fn validate(&mut self) -> JsResult<()> {
-        let settings = self.settings.clone();
-        if js::truthy(settings.get("version"))
-            && !settings.get("version").is_some_and(Value::is_number)
-        {
-            self.set_error(error_codes::UNKNOWN_VERSION, "Invalid `version` found.");
-        }
-        match settings.get("mergeable") {
-            None => {
-                self.set_error(
-                    error_codes::MISSING_MERGEABLE_NODE,
-                    "The `mergeable` node is missing.",
-                );
-                return Ok(());
-            }
-            Some(Value::Null) => {
-                self.set_error(
-                    error_codes::MISSING_RULE_SETS,
-                    "`mergeable` node does not contain any rule sets",
-                );
-                return Ok(());
-            }
-            Some(_) => {}
-        }
-        if config_version(&settings) == "2" {
-            let Some(Value::Array(rule_sets)) = settings.get("mergeable") else {
-                self.set_error(
-                    error_codes::NON_ARRAY_MERGEABLE,
-                    "`mergeable` must be an array for version 2 config",
-                );
-                return Ok(());
-            };
-            for rule_set in rule_sets {
-                if js::read(Some(rule_set), "when")?.is_none() {
-                    self.set_error(
-                        error_codes::MISSING_WHEN_KEYWORD,
-                        "One or more rule set is missing `when` keyword",
-                    );
-                }
-                match js::read(Some(rule_set), "validate")? {
-                    None => {
-                        self.set_error(
-                            error_codes::MISSING_VALIDATE_KEYWORD,
-                            "One or more rule set is missing `validate` keyword",
-                        );
-                    }
-                    Some(Value::Array(_)) => {}
-                    Some(_) => {
-                        self.set_error(
-                            error_codes::NON_ARRAY_VALIDATE,
-                            "`validate` must be an array of rules",
-                        );
-                    }
-                }
-            }
+        for (code, message) in validation_errors(&self.settings)? {
+            self.set_error(code, message);
         }
         Ok(())
     }
+}
+
+fn validation_errors(settings: &Value) -> JsResult<Vec<(u16, &'static str)>> {
+    let mut errors = Vec::new();
+    if js::truthy(settings.get("version")) && !settings.get("version").is_some_and(Value::is_number)
+    {
+        errors.push((error_codes::UNKNOWN_VERSION, "Invalid `version` found."));
+    }
+    match settings.get("mergeable") {
+        None => {
+            errors.push((
+                error_codes::MISSING_MERGEABLE_NODE,
+                "The `mergeable` node is missing.",
+            ));
+            return Ok(errors);
+        }
+        Some(Value::Null) => {
+            errors.push((
+                error_codes::MISSING_RULE_SETS,
+                "`mergeable` node does not contain any rule sets",
+            ));
+            return Ok(errors);
+        }
+        Some(_) => {}
+    }
+    if config_version(settings) == "2" {
+        let Some(Value::Array(rule_sets)) = settings.get("mergeable") else {
+            errors.push((
+                error_codes::NON_ARRAY_MERGEABLE,
+                "`mergeable` must be an array for version 2 config",
+            ));
+            return Ok(errors);
+        };
+        for rule_set in rule_sets {
+            if js::read(Some(rule_set), "when")?.is_none() {
+                errors.push((
+                    error_codes::MISSING_WHEN_KEYWORD,
+                    "One or more rule set is missing `when` keyword",
+                ));
+            }
+            match js::read(Some(rule_set), "validate")? {
+                None => {
+                    errors.push((
+                        error_codes::MISSING_VALIDATE_KEYWORD,
+                        "One or more rule set is missing `validate` keyword",
+                    ));
+                }
+                Some(Value::Array(_)) => {}
+                Some(_) => {
+                    errors.push((
+                        error_codes::NON_ARRAY_VALIDATE,
+                        "`validate` must be an array of rules",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(errors)
 }
 
 fn config_version(settings: &Value) -> String {
     match settings.get("version") {
         Some(version) if js::is_truthy(version) => js::to_js_string(Some(version)),
         _ => "1".to_string(),
+    }
+}
+
+static DEFAULT_PASS_ACTIONS: LazyLock<Value> =
+    LazyLock::new(|| default_pull_request_actions("pass"));
+static DEFAULT_FAIL_ACTIONS: LazyLock<Value> =
+    LazyLock::new(|| default_pull_request_actions("fail"));
+static DEFAULT_ERROR_ACTIONS: LazyLock<Value> =
+    LazyLock::new(|| default_pull_request_actions("error"));
+
+fn default_actions_for(outcome: &str) -> &'static Value {
+    match outcome {
+        "pass" => &DEFAULT_PASS_ACTIONS,
+        "fail" => &DEFAULT_FAIL_ACTIONS,
+        _ => &DEFAULT_ERROR_ACTIONS,
     }
 }
 
@@ -196,46 +218,41 @@ fn default_pull_request_actions(outcome: &str) -> Value {
 }
 
 fn check_and_set_default(
-    outcome_actions: Option<&Value>,
-    default_actions: Value,
+    outcome_actions: Option<Value>,
+    default_actions: &Value,
 ) -> JsResult<Value> {
     let Some(actions) = outcome_actions else {
-        return Ok(default_actions);
+        return Ok(default_actions.clone());
     };
-    let Value::Array(items) = actions else {
+    let Value::Array(mut items) = actions else {
         return Err(JsError::type_error("ruleSet.map is not a function"));
     };
     let default_rule = &default_actions[0];
-    let mapped = items
-        .iter()
-        .map(|rule| {
-            if js::get(rule, "do").and_then(Value::as_str) != Some("checks") {
-                return rule.clone();
+    for rule in &mut items {
+        if js::get(rule, "do").and_then(Value::as_str) != Some("checks") {
+            continue;
+        }
+        let Value::Object(fields) = rule else {
+            continue;
+        };
+        if !fields.contains_key("status") {
+            fields.insert("status".to_string(), default_rule["status"].clone());
+        }
+        match fields.get_mut("payload") {
+            None => {
+                fields.insert("payload".to_string(), default_rule["payload"].clone());
             }
-            let mut new_rule = rule.clone();
-            if let Value::Object(fields) = &mut new_rule {
-                if !fields.contains_key("status") {
-                    fields.insert("status".to_string(), default_rule["status"].clone());
-                }
-                match fields.get_mut("payload") {
-                    None => {
-                        fields.insert("payload".to_string(), default_rule["payload"].clone());
+            Some(Value::Object(payload)) => {
+                for key in ["title", "summary"] {
+                    if !payload.contains_key(key) {
+                        payload.insert(key.to_string(), default_rule["payload"][key].clone());
                     }
-                    Some(Value::Object(payload)) => {
-                        for key in ["title", "summary"] {
-                            if !payload.contains_key(key) {
-                                payload
-                                    .insert(key.to_string(), default_rule["payload"][key].clone());
-                            }
-                        }
-                    }
-                    Some(_) => {}
                 }
             }
-            new_rule
-        })
-        .collect();
-    Ok(Value::Array(mapped))
+            Some(_) => {}
+        }
+    }
+    Ok(Value::Array(items))
 }
 
 fn has_checks_action(outcome: Option<&Value>) -> bool {
@@ -273,8 +290,8 @@ fn set_pull_request_defaults(config: &mut Value) -> JsResult<()> {
         for outcome in ["pass", "fail", "error"] {
             if should_apply_defaults {
                 let defaulted = check_and_set_default(
-                    fields.get(outcome),
-                    default_pull_request_actions(outcome),
+                    fields.get_mut(outcome).map(Value::take),
+                    default_actions_for(outcome),
                 )?;
                 fields.insert(outcome.to_string(), defaulted);
             } else if !fields.contains_key(outcome) {
@@ -312,8 +329,9 @@ pub async fn reset_cache(context: &Context) -> JsResult<()> {
     }
     let (owner, repo) = context.repo()?;
     if repo == ".github" {
+        let owner_prefix = format!("{owner}/");
         for key in CONFIG_CACHE.keys().await {
-            if key.starts_with(&format!("{owner}/")) {
+            if key.starts_with(&owner_prefix) {
                 CONFIG_CACHE.delete(&key).await;
             }
         }
@@ -352,14 +370,16 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
                 context.repo_params(json!({"pull_number": pull_number}))?,
             )
             .await?;
-            let mut modified_files = Vec::new();
+            let mut config_file_changed = false;
             for changed_file in &files {
                 let status = js::to_js_string(js::read(Some(changed_file), "status")?);
-                if status == "modified" || status == "added" {
-                    modified_files.push(js::to_js_string(changed_file.get("filename")));
+                if (status == "modified" || status == "added")
+                    && js::to_js_string(changed_file.get("filename")) == FILE_NAME
+                {
+                    config_file_changed = true;
                 }
             }
-            if modified_files.iter().any(|name| name == FILE_NAME) {
+            if config_file_changed {
                 let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
                     .cloned()
                     .unwrap_or(Value::Null);
@@ -470,6 +490,20 @@ mod tests {
                 .unwrap()
                 .starts_with("All the validators")
         );
+    }
+
+    #[test]
+    fn defaulted_outcomes_keep_their_position_in_the_rule() {
+        let configuration = Configuration::from_settings(json!({
+            "version": 2,
+            "mergeable": [{"when": "pull_request.*", "fail": [{"do": "checks"}], "validate": []}]
+        }))
+        .unwrap();
+        let keys: Vec<&String> = configuration.settings[0]
+            .as_object()
+            .map(|rule| rule.keys().collect())
+            .unwrap_or_default();
+        assert_eq!(keys, ["when", "fail", "validate", "pass", "error"]);
     }
 
     #[test]

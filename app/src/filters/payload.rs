@@ -59,14 +59,14 @@ fn recurse_through_fields<'walk>(
                     None,
                 )),
                 Some(nested_payload) => {
-                    let nested_field = js::get(field, &key).cloned().unwrap_or(Value::Null);
+                    let nested_field = js::get(field, &key).unwrap_or(&Value::Null);
                     recurse_through_fields(
                         filter,
                         context,
                         nested_path,
                         output,
                         nested_payload,
-                        &nested_field,
+                        nested_field,
                     )
                     .await?;
                 }

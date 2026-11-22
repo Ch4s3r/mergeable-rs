@@ -89,9 +89,9 @@ fn output_for(
     }
 }
 
-struct DeferredOption {
+struct DeferredOption<'rule> {
     key: String,
-    rule: Value,
+    rule: &'rule Value,
     setting: Value,
 }
 
@@ -101,12 +101,15 @@ pub async fn process(
     rules: &Value,
     return_raw_output: bool,
 ) -> JsResult<Value> {
-    let rule_list = js::as_array_or_wrap(rules);
+    let rule_list: &[Value] = match rules {
+        Value::Array(items) => items,
+        single_rule => std::slice::from_ref(single_rule),
+    };
     let mut pushed_synchronously = Vec::new();
     let mut pushed_after_one_tick = Vec::new();
     let mut deferred_options = Vec::new();
 
-    for rule in &rule_list {
+    for rule in rule_list {
         for key in js::object_keys(Some(rule))? {
             if key == "do" {
                 continue;
@@ -144,11 +147,7 @@ pub async fn process(
                 continue;
             }
             if matches!(key.as_str(), "and" | "or" | "jira") {
-                deferred_options.push(DeferredOption {
-                    key,
-                    rule: rule.clone(),
-                    setting,
-                });
+                deferred_options.push(DeferredOption { key, rule, setting });
                 continue;
             }
             match synchronous_option(&key, validator_context, input, rule) {
@@ -181,7 +180,7 @@ pub async fn process(
     // ponytail: Node appends and/or/jira outputs in promise completion order; they are appended here in declaration order
     let deferred_outputs = join_all(deferred_options.iter().map(|deferred| async move {
         let outcome =
-            asynchronous_option(&deferred.key, validator_context, input, &deferred.rule).await;
+            asynchronous_option(&deferred.key, validator_context, input, deferred.rule).await;
         output_for(validator_context, input, &deferred.setting, outcome)
     }))
     .await;

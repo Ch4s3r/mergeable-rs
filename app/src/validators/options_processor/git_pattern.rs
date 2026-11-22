@@ -1,9 +1,6 @@
 use crate::error::{JsError, JsResult};
+use crate::validators::options::lib::is_js_whitespace;
 use crate::validators::options::lib::js_regex::JsRegex;
-
-fn fixed_regex_matches(pattern: &str, text: &str) -> bool {
-    JsRegex::new(pattern, "i").is_ok_and(|regex| regex.test(text))
-}
 
 fn compile_case_insensitive(pattern: &str) -> JsResult<JsRegex> {
     JsRegex::new(pattern, "i").map_err(|_| {
@@ -14,11 +11,20 @@ fn compile_case_insensitive(pattern: &str) -> JsResult<JsRegex> {
     })
 }
 
-fn file_name(path: &str) -> Option<String> {
-    let regex = JsRegex::new("\\/\\w+[.](\\w*)$", "i").ok()?;
-    regex
-        .exec_first_match(path)
-        .map(|matched| matched[1..].to_string())
+fn is_ascii_word_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
+fn is_extension_glob(glob: &str) -> bool {
+    glob.strip_prefix("*.")
+        .is_some_and(|extension| extension.chars().all(is_ascii_word_character))
+}
+
+fn file_name(path: &str) -> Option<&str> {
+    let (_, last_segment) = path.rsplit_once('/')?;
+    let (stem, extension) = last_segment.split_once('.')?;
+    let is_word = |text: &str| text.chars().all(is_ascii_word_character);
+    (!stem.is_empty() && is_word(stem) && is_word(extension)).then_some(last_segment)
 }
 
 fn create_regex_to_match(pattern: &str) -> JsResult<JsRegex> {
@@ -28,17 +34,17 @@ fn create_regex_to_match(pattern: &str) -> JsResult<JsRegex> {
         to_match = rooted.to_string();
         regex_string.push('^');
     }
-    let match_one_directory = fixed_regex_matches("\\/[*]$", &to_match);
+    let match_one_directory = to_match.ends_with("/*");
     if match_one_directory {
         to_match.pop();
     }
-    if fixed_regex_matches("\\/[*]{2}\\/", &to_match) {
+    if to_match.contains("/**/") {
         to_match = to_match.replacen("/**/", "\\/(\\w*\\/)*", 1);
     }
-    if fixed_regex_matches("\\/[*]{2}$", &to_match) {
+    if to_match.ends_with("/**") {
         to_match = to_match.replacen("/**", "\\/", 1);
     }
-    if fixed_regex_matches("^[*]{2}\\/", &to_match) {
+    if to_match.starts_with("**/") {
         to_match = to_match.replacen("**/", "", 1);
     }
     regex_string.push_str(&to_match);
@@ -48,63 +54,103 @@ fn create_regex_to_match(pattern: &str) -> JsResult<JsRegex> {
     compile_case_insensitive(&regex_string)
 }
 
-pub fn check_if_path_matches(path: &str, to_match: &str) -> JsResult<bool> {
-    if fixed_regex_matches("^[*]$", to_match) {
-        return Ok(true);
-    }
-    if fixed_regex_matches("^[*][\\.]\\w*$", to_match) {
-        let file = file_name(path).unwrap_or_else(|| "null".to_string());
-        let extension_pattern: String = to_match.chars().skip(1).collect();
-        return Ok(compile_case_insensitive(&extension_pattern)?.test(&file));
-    }
-    let regex = create_regex_to_match(to_match)?;
-    let relative_path = path.strip_prefix('/').unwrap_or(path);
-    Ok(regex.test(relative_path))
+enum GlobMatcher {
+    Everything,
+    Extension(JsResult<JsRegex>),
+    Path(JsResult<JsRegex>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl GlobMatcher {
+    fn new(glob: &str) -> Self {
+        if glob == "*" {
+            GlobMatcher::Everything
+        } else if is_extension_glob(glob) {
+            GlobMatcher::Extension(compile_case_insensitive(&glob[1..]))
+        } else {
+            GlobMatcher::Path(create_regex_to_match(glob))
+        }
+    }
+
+    fn matches(&self, path: &str) -> JsResult<bool> {
+        match self {
+            GlobMatcher::Everything => Ok(true),
+            GlobMatcher::Extension(extension_regex) => {
+                let extension_regex = extension_regex.as_ref().map_err(Clone::clone)?;
+                Ok(extension_regex.test(file_name(path).unwrap_or("null")))
+            }
+            GlobMatcher::Path(path_regex) => {
+                let path_regex = path_regex.as_ref().map_err(Clone::clone)?;
+                let relative_path = path.strip_prefix('/').unwrap_or(path);
+                Ok(path_regex.test(relative_path))
+            }
+        }
+    }
+}
+
+pub fn check_if_path_matches(path: &str, to_match: &str) -> JsResult<bool> {
+    GlobMatcher::new(to_match).matches(path)
+}
+
+struct OwnerEntry {
+    globs: Vec<(bool, GlobMatcher)>,
+    owners: Vec<String>,
+}
+
+impl OwnerEntry {
+    fn matches(&self, path: &str) -> JsResult<bool> {
+        if self.globs.is_empty() {
+            return Ok(true);
+        }
+        for (is_empty_glob, matcher) in &self.globs {
+            if matcher.matches(path)? {
+                return Ok(!is_empty_glob);
+            }
+        }
+        Ok(false)
+    }
+}
+
 pub struct OwnerFile {
-    entries: Vec<Vec<String>>,
+    entries: Vec<OwnerEntry>,
 }
 
 impl OwnerFile {
-    pub fn owners_for(&self, path: &str) -> JsResult<Vec<String>> {
-        let mut owners = Vec::new();
+    pub fn owners_for(&self, path: &str) -> JsResult<&[String]> {
+        let mut owners: &[String] = &[];
         for entry in &self.entries {
-            let globs = entry.first().map(String::as_str).unwrap_or_default();
-            let mut is_matching = globs.is_empty();
-            if !is_matching {
-                for glob in globs.split(' ') {
-                    if check_if_path_matches(path, glob)? {
-                        is_matching = !glob.is_empty();
-                        break;
-                    }
-                }
-            }
-            if is_matching {
-                owners = entry[1..].to_vec();
+            if entry.matches(path)? {
+                owners = &entry.owners;
             }
         }
         Ok(owners)
     }
 }
 
-fn is_js_trim_whitespace(character: char) -> bool {
-    crate::validators::options::lib::is_js_whitespace(character)
+fn parse_owner_entry(line: &str) -> OwnerEntry {
+    let mut parts = line.split(' ').filter(|part| !part.is_empty());
+    let globs = parts
+        .next()
+        .filter(|globs| !globs.is_empty())
+        .map(|globs| {
+            globs
+                .split(' ')
+                .map(|glob| (glob.is_empty(), GlobMatcher::new(glob)))
+                .collect()
+        })
+        .unwrap_or_default();
+    OwnerEntry {
+        globs,
+        owners: parts.map(str::to_string).collect(),
+    }
 }
 
 pub fn parse_owner_file(content: &str) -> OwnerFile {
     let entries = content
         .split('\n')
         .map(|line| line.strip_suffix('\r').unwrap_or(line))
-        .map(|line| line.trim_matches(is_js_trim_whitespace))
+        .map(|line| line.trim_matches(is_js_whitespace))
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| {
-            line.split(' ')
-                .filter(|part| !part.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
+        .map(parse_owner_entry)
         .collect();
     OwnerFile { entries }
 }
@@ -114,7 +160,37 @@ mod tests {
     use super::*;
 
     fn owners(codeowners: &str, path: &str) -> Vec<String> {
-        parse_owner_file(codeowners).owners_for(path).unwrap()
+        parse_owner_file(codeowners)
+            .owners_for(path)
+            .unwrap()
+            .to_vec()
+    }
+
+    #[test]
+    fn string_checks_agree_with_the_original_javascript_patterns() {
+        let file_name_regex = JsRegex::new("\\/\\w+[.](\\w*)$", "i").unwrap();
+        for path in [
+            "a/b/test.js",
+            "a/b.c/d",
+            "a/x.y.z",
+            "/.js",
+            "a/_x.",
+            "noslash.js",
+            "a/b/c",
+        ] {
+            let expected = file_name_regex
+                .exec_first_match(path)
+                .map(|matched| matched[1..].to_string());
+            assert_eq!(file_name(path).map(str::to_string), expected, "{path}");
+        }
+        let extension_regex = JsRegex::new("^[*][\\.]\\w*$", "i").unwrap();
+        for glob in ["*.js", "*.", "*.j-s", "*.js/", "**.js", "*"] {
+            assert_eq!(
+                is_extension_glob(glob),
+                extension_regex.test(glob),
+                "{glob}"
+            );
+        }
     }
 
     #[test]

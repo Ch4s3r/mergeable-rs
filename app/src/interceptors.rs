@@ -4,11 +4,10 @@ use crate::error::JsResult;
 use crate::flex;
 use crate::github::api;
 use crate::js;
-use crate::logging;
 use crate::metadata;
 use crate::registry::Registry;
 use futures::future::join_all;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 pub async fn run_all(context: &mut Context) -> JsResult<()> {
     check_rerun(context).await?;
@@ -24,53 +23,47 @@ async fn check_rerun(context: &mut Context) -> JsResult<()> {
         .payload
         .get("check_run")
         .filter(|check_run| js::is_truthy(check_run))
-        .cloned()
     else {
         return Ok(());
     };
     if !js::truthy(check_run.get("output")) {
         return Ok(());
     }
-    let text = match js::read_path(&check_run, &["output", "text"])? {
-        Some(Value::String(text)) => text.clone(),
-        Some(other) => js::to_js_string(Some(other)),
+    let meta = match js::read_path(check_run, &["output", "text"])? {
+        Some(Value::String(text)) => metadata::deserialize(text)?,
+        Some(other) => metadata::deserialize(&js::to_js_string(Some(other)))?,
         None => {
             return Err(crate::error::JsError::reading_property_of_undefined(
                 "indexOf",
             ));
         }
     };
-    let meta = metadata::deserialize(&text)?;
-    let check_run_id = check_run.get("id").cloned().unwrap_or(Value::Null);
-    let meta_id = meta.get("id").cloned().unwrap_or(Value::Null);
-    if !js::strict_equals(&check_run_id, &meta_id) {
-        logging::warn("interceptors/checkReRun", || {
-            json!({
-                "logType": "potential_injection",
-                "message": "ids in payload do not match. Potential injection.",
-                "checkRun": check_run,
-                "meta": meta,
-            })
-        });
+    let check_run_id = check_run.get("id").unwrap_or(&Value::Null);
+    let meta_id = meta.get("id").unwrap_or(&Value::Null);
+    if !js::strict_equals(check_run_id, meta_id) {
+        tracing::warn!(
+            check_run = %check_run,
+            meta = %meta,
+            "check run ids in payload do not match, potential injection"
+        );
         return Ok(());
     }
-    let pull_requests = js::read(Some(&check_run), "pull_requests")?
-        .cloned()
-        .unwrap_or(Value::Null);
-    let first_pull_request = match &pull_requests {
-        Value::Array(items) if items.is_empty() => return Ok(()),
-        Value::Array(items) => items[0].clone(),
+    let first_pull_request = match js::read(Some(check_run), "pull_requests")? {
+        Some(Value::Array(items)) => match items.first() {
+            Some(first) => first,
+            None => return Ok(()),
+        },
         _ => {
             return Err(crate::error::JsError::reading_property_of_undefined(
                 "length",
             ));
         }
     };
-    let pull_number = js::read(Some(&first_pull_request), "number")?
+    let pull_number = js::read(Some(first_pull_request), "number")?
         .cloned()
         .unwrap_or(Value::Null);
     let pull_request = api::get_pull_request(context, &pull_number).await?;
-    if let Value::Object(payload) = &mut context.payload {
+    if let Value::Object(payload) = context.payload.to_mut() {
         match meta.get("action") {
             Some(action) => payload.insert("action".to_string(), action.clone()),
             None => payload.shift_remove("action"),
@@ -84,7 +77,7 @@ async fn check_rerun(context: &mut Context) -> JsResult<()> {
 async fn milestoned(context: &mut Context) -> JsResult<()> {
     let is_milestone_action = matches!(
         js::as_str(context.action()),
-        Some("milestoned") | Some("demilestoned")
+        Some("milestoned" | "demilestoned")
     );
     if !(context.event_name == "issues" && is_milestone_action) {
         return Ok(());
@@ -104,7 +97,7 @@ async fn milestoned(context: &mut Context) -> JsResult<()> {
         );
     }
     context.event_name = "pull_request".to_string();
-    if let Value::Object(payload) = &mut context.payload {
+    if let Value::Object(payload) = context.payload.to_mut() {
         payload.insert("pull_request".to_string(), pull_request);
     }
     Ok(())
@@ -118,7 +111,6 @@ async fn push(context: &mut Context) -> JsResult<()> {
         .payload
         .get("head_commit")
         .filter(|commit| js::is_truthy(commit))
-        .cloned()
     else {
         return Ok(());
     };
@@ -146,7 +138,7 @@ async fn push(context: &mut Context) -> JsResult<()> {
     let pending = pulls.into_iter().map(|pull_request| {
         let mut rerun_context = context.clone();
         rerun_context.event_name = "pull_request".to_string();
-        if let Value::Object(payload) = &mut rerun_context.payload {
+        if let Value::Object(payload) = rerun_context.payload.to_mut() {
             payload.insert("pull_request".to_string(), pull_request);
             payload.insert(
                 "action".to_string(),

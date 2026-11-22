@@ -1,7 +1,6 @@
 use crate::context::Context;
 use crate::error::{JsError, JsResult};
 use crate::js;
-use crate::logging;
 use crate::registry::Registry;
 use crate::results;
 use async_trait::async_trait;
@@ -108,15 +107,13 @@ pub async fn process_validate(
     let supported_settings = validator.supported_settings().ok_or_else(|| {
         JsError::error("Class extending validators must provide supported Settings")
     })?;
-    logging::info(&format!("validator/{}", validator.name()), || {
-        json!({
-            "logType": "validator_process",
-            "eventId": context.event_id,
-            "repo": context.repository_full_name(),
-            "validatorName": validator.name(),
-            "settings": js::stringify(settings),
-        })
-    });
+    tracing::info!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        validator = validator.name(),
+        settings = %settings,
+        "validator_process"
+    );
     if validator.checks_settings() {
         match validate_settings(
             &format!("validator/{}", validator.name()),
@@ -170,15 +167,13 @@ pub fn validate_settings(
                 "{owner}: {prefix}{key} option is not supported"
             )));
         }
-        let value_to_check = js::get(setting_to_check, &key)
-            .cloned()
-            .unwrap_or(Value::Null);
+        let value_to_check = js::get(setting_to_check, &key).unwrap_or(&Value::Null);
         let supported_value = supported_setting_at(supported_settings, &key);
-        let value_type = option_type(&value_to_check);
+        let value_type = option_type(value_to_check);
         if value_type == "object" {
             let mut deeper = nestings.to_vec();
             deeper.push(key.clone());
-            validate_settings(owner, &supported_value, &value_to_check, &deeper)?;
+            validate_settings(owner, &supported_value, value_to_check, &deeper)?;
         } else {
             let allowed = match &supported_value {
                 Value::String(text) => text.contains(value_type),
@@ -206,8 +201,9 @@ fn supported_setting_at(supported_settings: &Value, key: &str) -> Value {
             .parse::<usize>()
             .ok()
             .and_then(|index| text.encode_utf16().nth(index))
-            .map(|unit| Value::String(String::from_utf16_lossy(&[unit])))
-            .unwrap_or(Value::Null),
+            .map_or(Value::Null, |unit| {
+                Value::String(String::from_utf16_lossy(&[unit]))
+            }),
         other => js::get(other, key).cloned().unwrap_or(Value::Null),
     }
 }

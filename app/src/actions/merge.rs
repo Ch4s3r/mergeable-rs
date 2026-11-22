@@ -1,15 +1,15 @@
-use crate::actions::Action;
 use crate::actions::comment::spawn_detached;
+use crate::actions::{Action, is_comment_on_plain_issue};
 use crate::context::Context;
 use crate::error::{JsError, JsResult};
 use crate::event_aware;
 use crate::github::api;
 use crate::js;
-use crate::logging;
 use crate::template;
 use async_trait::async_trait;
 use futures::future::join_all;
 use serde_json::{Map, Value, json};
+use std::borrow::Cow;
 
 pub const SUPPORTED_EVENTS: [&str; 5] = [
     "pull_request.*",
@@ -76,10 +76,7 @@ async fn merge_unmerged_pull_request(
 }
 
 fn log_detached_failure(context: &Context, error: &JsError) {
-    logging::error(
-        "action/merge",
-        || json!({"eventId": context.event_id, "errors": error.to_string()}),
-    );
+    tracing::error!(event_id = %context.event_id, %error, "merge action failed");
 }
 
 fn validated_merge_method(settings: &Value) -> JsResult<Value> {
@@ -99,9 +96,9 @@ fn validated_merge_method(settings: &Value) -> JsResult<Value> {
     Ok(configured.cloned().unwrap_or(Value::Null))
 }
 
-fn as_pull_request_list(value: Option<&Value>) -> JsResult<Vec<Value>> {
+fn as_pull_request_list(value: Option<&Value>) -> JsResult<&[Value]> {
     match value {
-        Some(Value::Array(items)) => Ok(items.clone()),
+        Some(Value::Array(items)) => Ok(items),
         None => Err(JsError::reading_property_of_undefined("map")),
         Some(Value::Null) => Err(JsError::type_error(
             "Cannot read properties of null (reading 'map')",
@@ -112,7 +109,7 @@ fn as_pull_request_list(value: Option<&Value>) -> JsResult<Vec<Value>> {
     }
 }
 
-async fn related_pull_requests(context: &Context) -> JsResult<Vec<Value>> {
+async fn related_pull_requests(context: &Context) -> JsResult<Vec<Cow<'_, Value>>> {
     match context.event_name.as_str() {
         "status" => {
             let commit_sha = js::to_js_string(context.payload.get("sha"));
@@ -129,19 +126,21 @@ async fn related_pull_requests(context: &Context) -> JsResult<Vec<Value>> {
                 Value::Array(items) => Ok(items
                     .into_iter()
                     .filter(|item| js::truthy(item.get("pull_request")))
+                    .map(Cow::Owned)
                     .collect()),
                 Value::Null => Err(JsError::reading_property_of_undefined("filter")),
                 _ => Err(JsError::type_error("results.filter is not a function")),
             }
         }
-        "check_suite" => as_pull_request_list(js::read(
+        "check_suite" => Ok(as_pull_request_list(js::read(
             event_aware::get_payload(context),
             "pull_requests",
-        )?),
+        )?)?
+        .iter()
+        .map(Cow::Borrowed)
+        .collect()),
         _ => Ok(vec![
-            event_aware::get_payload(context)
-                .cloned()
-                .unwrap_or(Value::Null),
+            event_aware::get_payload(context).map_or(Cow::Owned(Value::Null), Cow::Borrowed),
         ]),
     }
 }
@@ -175,20 +174,19 @@ impl Action for Merge {
         _rule_name: Option<&Value>,
         _results: &Value,
     ) -> JsResult<()> {
-        if context.event_name == "issue_comment"
-            && !js::truthy(js::get_path(&context.payload, &["issue", "pull_request"]))
-        {
+        if is_comment_on_plain_issue(context) {
             return Ok(());
         }
         let merge_method = validated_merge_method(settings)?;
-        let mut pull_numbers = Vec::new();
-        for pull_request in related_pull_requests(context).await? {
-            pull_numbers.push(
-                js::read(Some(&pull_request), "number")?
+        let pull_numbers = related_pull_requests(context)
+            .await?
+            .iter()
+            .map(|pull_request| {
+                Ok(js::read(Some(pull_request), "number")?
                     .cloned()
-                    .unwrap_or(Value::Null),
-            );
-        }
+                    .unwrap_or(Value::Null))
+            })
+            .collect::<JsResult<Vec<Value>>>()?;
         let merged_checks = join_all(
             pull_numbers
                 .iter()

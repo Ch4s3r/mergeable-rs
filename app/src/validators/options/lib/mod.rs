@@ -3,7 +3,7 @@ pub mod js_regex;
 
 use crate::error::{JsError, JsResult};
 use crate::js;
-use js_regex::JsRegex;
+use js_regex::{JsRegex, JsRegexFlags};
 use serde_json::{Map, Value, json};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -111,6 +111,11 @@ pub fn compile_user_regex(regex: &Value, flags: &str) -> JsResult<JsRegex> {
     })
 }
 
+pub fn compile_constant_pattern(pattern: &str, flags: JsRegexFlags) -> Option<fancy_regex::Regex> {
+    let translated = js_regex::translate(pattern, flags).ok()?;
+    fancy_regex::Regex::new(&translated).ok()
+}
+
 pub fn concat_into_list(value: &Value) -> Vec<Value> {
     js::as_array_or_wrap(value)
 }
@@ -161,16 +166,14 @@ fn index_of(container: &Value, needle: &Value) -> Result<f64, NotSearchable> {
     match container {
         Value::String(text) => {
             let needle_text = js::to_js_string(Some(needle));
-            Ok(text
-                .find(&needle_text)
-                .map(|byte_offset| utf16_length(&text[..byte_offset]) as f64)
-                .unwrap_or(-1.0))
+            Ok(text.find(&needle_text).map_or(-1.0, |byte_offset| {
+                utf16_length(&text[..byte_offset]) as f64
+            }))
         }
         Value::Array(items) => Ok(items
             .iter()
             .position(|item| js::strict_equals(item, needle))
-            .map(|index| index as f64)
-            .unwrap_or(-1.0)),
+            .map_or(-1.0, |index| index as f64)),
         _ => Err(NotSearchable),
     }
 }

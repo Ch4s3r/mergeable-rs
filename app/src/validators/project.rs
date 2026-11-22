@@ -110,7 +110,10 @@ async fn project_card_urls(
             }))
             .await;
         for response in responses {
-            cards = js::concat(&cards, &response?.data);
+            match response?.data {
+                Value::Array(column_cards) => cards.extend(column_cards),
+                single_card => cards.push(single_card),
+            }
         }
     }
     cards

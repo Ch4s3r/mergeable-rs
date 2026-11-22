@@ -1,5 +1,6 @@
 use crate::js;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 pub fn same_value_zero(left: Option<&Value>, right: Option<&Value>) -> bool {
@@ -14,7 +15,7 @@ fn contains(items: &[Value], needle: &Value) -> bool {
     items.iter().any(|item| js::strict_equals(item, needle))
 }
 
-pub fn uniq(items: &[Value]) -> Vec<Value> {
+fn unique_clones<'item>(items: impl IntoIterator<Item = &'item Value>) -> Vec<Value> {
     let mut unique: Vec<Value> = Vec::new();
     for item in items {
         if !contains(&unique, item) {
@@ -24,17 +25,16 @@ pub fn uniq(items: &[Value]) -> Vec<Value> {
     unique
 }
 
+pub fn uniq(items: &[Value]) -> Vec<Value> {
+    unique_clones(items)
+}
+
 pub fn union(first: &[Value], second: &[Value]) -> Vec<Value> {
-    let mut combined = first.to_vec();
-    combined.extend(second.iter().cloned());
-    uniq(&combined)
+    unique_clones(first.iter().chain(second))
 }
 
 pub fn intersection(first: &[Value], second: &[Value]) -> Vec<Value> {
-    uniq(first)
-        .into_iter()
-        .filter(|item| contains(second, item))
-        .collect()
+    unique_clones(first.iter().filter(|item| contains(second, item)))
 }
 
 pub fn difference(items: &[Value], excluded: &[Value]) -> Vec<Value> {
@@ -53,18 +53,15 @@ pub fn array_like(value: Option<&Value>) -> Vec<Value> {
 }
 
 pub fn uniq_by_path(items: Vec<Value>, path: &[&str]) -> Vec<Value> {
-    let mut seen_keys: Vec<Option<Value>> = Vec::new();
-    let mut unique = Vec::new();
+    let mut unique: Vec<Value> = Vec::new();
     for item in items {
-        let key = js::get_path(&item, path).cloned();
-        if seen_keys
+        let key = js::get_path(&item, path);
+        let already_seen = unique
             .iter()
-            .any(|seen| same_value_zero(seen.as_ref(), key.as_ref()))
-        {
-            continue;
+            .any(|kept| same_value_zero(js::get_path(kept, path), key));
+        if !already_seen {
+            unique.push(item);
         }
-        seen_keys.push(key);
-        unique.push(item);
     }
     unique
 }
@@ -106,12 +103,12 @@ pub fn compare_ascending(value: Option<&Value>, other: Option<&Value>) -> Orderi
     Ordering::Equal
 }
 
-fn to_primitive(value: Option<&Value>) -> Option<Value> {
+fn to_primitive(value: Option<&Value>) -> Option<Cow<'_, Value>> {
     match value {
-        Some(Value::Array(_)) | Some(Value::Object(_)) => {
-            Some(Value::String(js::to_js_string(value)))
+        Some(Value::Array(_) | Value::Object(_)) => {
+            Some(Cow::Owned(Value::String(js::to_js_string(value))))
         }
-        other => other.cloned(),
+        other => other.map(Cow::Borrowed),
     }
 }
 
@@ -122,27 +119,22 @@ pub fn greater_than(value: Option<&Value>, other: Option<&Value>) -> bool {
 pub fn less_than(value: Option<&Value>, other: Option<&Value>) -> bool {
     let left = to_primitive(value);
     let right = to_primitive(other);
-    if let (Some(Value::String(left_text)), Some(Value::String(right_text))) = (&left, &right) {
+    if let (Some(Value::String(left_text)), Some(Value::String(right_text))) =
+        (left.as_deref(), right.as_deref())
+    {
         return left_text.encode_utf16().lt(right_text.encode_utf16());
     }
-    to_number(left.as_ref()) < to_number(right.as_ref())
+    to_number(left.as_deref()) < to_number(right.as_deref())
 }
 
 pub fn to_number(value: Option<&Value>) -> f64 {
     match value {
-        None => f64::NAN,
+        None | Some(Value::Object(_)) => f64::NAN,
         Some(Value::Null) => 0.0,
-        Some(Value::Bool(flag)) => {
-            if *flag {
-                1.0
-            } else {
-                0.0
-            }
-        }
+        Some(Value::Bool(flag)) => f64::from(u8::from(*flag)),
         Some(Value::Number(number)) => number.as_f64().unwrap_or(f64::NAN),
         Some(Value::String(text)) => string_to_number(text),
         Some(Value::Array(_)) => string_to_number(&js::to_js_string(value)),
-        Some(Value::Object(_)) => f64::NAN,
     }
 }
 
@@ -165,9 +157,7 @@ fn string_to_number(text: &str) -> f64 {
     ];
     for (prefix, radix) in radix_prefixes {
         if let Some(digits) = trimmed.strip_prefix(prefix) {
-            return u64::from_str_radix(digits, radix)
-                .map(|parsed| parsed as f64)
-                .unwrap_or(f64::NAN);
+            return u64::from_str_radix(digits, radix).map_or(f64::NAN, |parsed| parsed as f64);
         }
     }
     match trimmed {

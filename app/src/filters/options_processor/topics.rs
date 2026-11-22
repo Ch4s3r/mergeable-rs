@@ -16,8 +16,8 @@ pub async fn process(
     settings: &Value,
 ) -> JsResult<ProcessedOption> {
     let input = repository_topics(context).await?;
-    let topics_settings = settings.get("topics").cloned().unwrap_or(Value::Null);
-    let result = options::process(context, filter_context, &input, &topics_settings).await?;
+    let topics_settings = settings.get("topics").unwrap_or(&Value::Null);
+    let result = options::process(context, filter_context, &input, topics_settings).await?;
     Ok(ProcessedOption { input, result })
 }
 

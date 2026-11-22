@@ -5,7 +5,6 @@ use crate::error::{JsError, JsResult};
 use crate::filters;
 use crate::interceptors;
 use crate::js;
-use crate::logging;
 use crate::registry::Registry;
 use crate::results;
 use crate::settings;
@@ -22,14 +21,12 @@ pub async fn execute_mergeable(mut context: Context) -> JsResult<()> {
         return log_and_process_config_errors(&context, &configuration).await;
     }
     if std::env::var("LOG_CONFIG").is_ok_and(|value| !value.is_empty()) {
-        logging::info("flex", || {
-            json!({
-                "logType": "config",
-                "eventId": context.event_id,
-                "repo": context.repository_full_name(),
-                "settings": js::stringify(&configuration.settings),
-            })
-        });
+        tracing::info!(
+            event_id = %context.event_id,
+            repo = %context.repository_full_name(),
+            settings = %configuration.settings,
+            "config loaded"
+        );
     }
     process_workflow(&context, &registry, &configuration).await
 }
@@ -73,15 +70,13 @@ pub async fn log_and_process_config_errors(
         });
         log_type = "config_no_yml";
     }
-    logging::info("flex", || {
-        json!({
-            "logType": log_type,
-            "eventId": context.event_id,
-            "repo": context.repository_full_name(),
-            "event": event,
-            "errors": configuration.errors.iter().map(|(code, message)| json!([code, message])).collect::<Vec<_>>(),
-        })
-    });
+    tracing::info!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        event = %event,
+        errors = ?configuration.errors,
+        "{log_type}"
+    );
     checks::run(context, &payload).await
 }
 
@@ -101,7 +96,7 @@ fn is_event_in_context(when: Option<&Value>, context: &Context) -> JsResult<bool
     }))
 }
 
-fn spawn_cancelled_check(context: &Context, title: &str, summary: String, name: Option<String>) {
+fn spawn_cancelled_check(context: &Context, title: &str, summary: &str, name: Option<String>) {
     let mut payload = json!({
         "status": "completed",
         "conclusion": "cancelled",
@@ -117,10 +112,10 @@ fn spawn_cancelled_check(context: &Context, title: &str, summary: String, name: 
     });
 }
 
-fn entries(list: Option<&Value>) -> JsResult<Vec<Value>> {
+fn entries(list: Option<&Value>) -> JsResult<&[Value]> {
     match list {
-        None => Ok(Vec::new()),
-        Some(Value::Array(items)) => Ok(items.clone()),
+        None => Ok(&[]),
+        Some(Value::Array(items)) => Ok(items),
         Some(_) => Err(JsError::type_error(
             "arrayToIterate.forEach is not a function",
         )),
@@ -156,9 +151,9 @@ pub async fn filter_results(
     let filter_settings = if js::truthy(rule.get("filter")) {
         entries(rule.get("filter"))?
     } else {
-        Vec::new()
+        &[]
     };
-    run_filters(context, registry, &filter_settings).await
+    run_filters(context, registry, filter_settings).await
 }
 
 pub async fn validator_results(
@@ -169,7 +164,7 @@ pub async fn validator_results(
     let event_name = context.event_with_action();
     let validations = entries(rule.get("validate"))?;
     let mut pending = Vec::new();
-    for validation in &validations {
+    for validation in validations {
         let key = js::to_js_string(js::read(Some(validation), "do")?);
         let validator = registry
             .validator(&key)
@@ -202,14 +197,14 @@ fn internal_error_result(error: &JsError) -> Value {
 
 fn action_names(rule: &Value) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
-    for outcome in ["pass", "fail", "error"] {
-        if let Some(Value::Array(actions)) = rule.get(outcome) {
-            for action in actions {
-                let name = js::to_js_string(action.get("do"));
-                if !names.contains(&name) {
-                    names.push(name);
-                }
-            }
+    let outcome_actions = ["pass", "fail", "error"]
+        .into_iter()
+        .filter_map(|outcome| rule.get(outcome).and_then(Value::as_array))
+        .flatten();
+    for action in outcome_actions {
+        let name = js::to_js_string(action.get("do"));
+        if !names.contains(&name) {
+            names.push(name);
         }
     }
     names
@@ -218,11 +213,11 @@ fn action_names(rule: &Value) -> Vec<String> {
 async fn process_pre_actions(
     context: &Context,
     registry: &Registry,
-    rules: &[Value],
+    rules: &[&Value],
 ) -> JsResult<()> {
     let event_name = context.event_with_action();
     let mut pending = Vec::new();
-    for rule in rules {
+    for &rule in rules {
         for name in action_names(rule) {
             let action = registry
                 .action(&name)
@@ -260,7 +255,7 @@ async fn run_actions(
     let event_name = context.event_with_action();
     let mut pending = Vec::new();
     for action_settings in entries(Some(outcome_actions))? {
-        let key = js::to_js_string(js::read(Some(&action_settings), "do")?);
+        let key = js::to_js_string(js::read(Some(action_settings), "do")?);
         let action = registry
             .action(&key)
             .ok_or_else(|| JsError::reading_property_of_undefined("isEventSupported"))?;
@@ -269,7 +264,7 @@ async fn run_actions(
                 actions::process_after_validate(
                     action.as_ref(),
                     context,
-                    &action_settings,
+                    action_settings,
                     rule.get("name"),
                     stats,
                 )
@@ -296,7 +291,7 @@ pub async fn process_workflow(
             spawn_cancelled_check(
                 context,
                 "Invalid Filters or Validators or Actions",
-                error.to_string(),
+                &error.to_string(),
                 None,
             );
         }
@@ -307,21 +302,19 @@ pub async fn process_workflow(
         if !is_event_in_context(rule.get("when"), context)? {
             continue;
         }
-        match filter_results(context, registry, &rule).await {
+        match filter_results(context, registry, rule).await {
             Err(error) => {
-                logging::error("flex", || {
-                    json!({
-                        "logType": "unknown_error_filter",
-                        "eventId": context.event_id,
-                        "errors": error.to_string(),
-                        "repo": context.repository_full_name(),
-                        "event": event_name,
-                    })
-                });
+                tracing::error!(
+                    event_id = %context.event_id,
+                    repo = %context.repository_full_name(),
+                    event = %event_name,
+                    %error,
+                    "unknown filter error"
+                );
                 spawn_cancelled_check(
                     context,
                     "Invalid Filters",
-                    error.to_string(),
+                    &error.to_string(),
                     Some(checks::create_check_name(rule.get("name"))),
                 );
                 continue;
@@ -340,23 +333,21 @@ pub async fn process_workflow(
 
     process_pre_actions(context, registry, &applicable_rules).await?;
 
-    for rule in &applicable_rules {
+    for &rule in &applicable_rules {
         let validation_results = match validator_results(context, registry, rule).await {
             Ok(outputs) => outputs,
             Err(error) => {
-                logging::error("flex", || {
-                    json!({
-                        "logType": "unknown_error_validator",
-                        "eventId": context.event_id,
-                        "errors": error.to_string(),
-                        "repo": context.repository_full_name(),
-                        "event": event_name,
-                    })
-                });
+                tracing::error!(
+                    event_id = %context.event_id,
+                    repo = %context.repository_full_name(),
+                    event = %event_name,
+                    %error,
+                    "unknown validator error"
+                );
                 vec![internal_error_result(&error)]
             }
         };
-        let stats = results::extract_validation_stats(&validation_results);
+        let stats = results::extract_validation_stats(validation_results);
         let Some(action_outcome) = run_actions(context, registry, rule, &stats).await? else {
             continue;
         };
@@ -365,15 +356,13 @@ pub async fn process_workflow(
                 let body = format!(
                     "####  :x: Error Occurred while executing an Action \n\n If you believe this is an unexpected error, please report it on our issue tracker: https://github.com/mergeability/mergeable/issues/new \n##### Error Details \n-------------------- \n{error}"
                 );
-                logging::error("flex", || {
-                    json!({
-                        "logType": "unknown_error_action",
-                        "eventId": context.event_id,
-                        "errors": error.to_string(),
-                        "repo": context.repository_full_name(),
-                        "event": event_name,
-                    })
-                });
+                tracing::error!(
+                    event_id = %context.event_id,
+                    repo = %context.repository_full_name(),
+                    event = %event_name,
+                    %error,
+                    "unknown action error"
+                );
                 if comment::is_supported(&event_name) {
                     let task_context = context.clone();
                     comment::spawn_detached(context, "flex", async move {

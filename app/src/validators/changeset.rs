@@ -14,18 +14,17 @@ pub fn files_with_selected_status(
     files: Vec<Value>,
     file_status_settings: &Value,
 ) -> JsResult<Vec<Value>> {
-    let selected_statuses: Vec<Value> = js::object_keys(Some(file_status_settings))?
+    let selected_statuses: Vec<String> = js::object_keys(Some(file_status_settings))?
         .into_iter()
         .filter(|status| js::truthy(js::get(file_status_settings, status)))
-        .map(Value::String)
         .collect();
     let mut selected = Vec::new();
     for file in files {
-        let status = js::read(Some(&file), "status")?.cloned();
+        let status = js::as_str(js::read(Some(&file), "status")?);
         if status.is_some_and(|status| {
             selected_statuses
                 .iter()
-                .any(|selected_status| js::strict_equals(selected_status, &status))
+                .any(|selected_status| selected_status == status)
         }) {
             selected.push(file);
         }

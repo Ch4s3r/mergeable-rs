@@ -15,8 +15,7 @@ pub fn exists(text: Option<&str>) -> bool {
 pub fn deserialize(text: &str) -> JsResult<Value> {
     let begin = text
         .find(DATA_START)
-        .map(|index| index + DATA_START.len())
-        .unwrap_or(DATA_START.len() - 1);
+        .map_or(DATA_START.len() - 1, |index| index + DATA_START.len());
     let end = text.find(DATA_END).unwrap_or(0);
     let embedded = if begin <= end {
         &text[begin..end]

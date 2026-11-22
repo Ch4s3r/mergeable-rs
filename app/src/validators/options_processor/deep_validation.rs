@@ -2,25 +2,34 @@ use crate::context::Context;
 use crate::error::{JsError, JsResult};
 use crate::github::api;
 use crate::js;
-use crate::validators::options::lib::js_regex::JsRegex;
+use crate::validators::options::lib::compile_constant_pattern;
+use crate::validators::options::lib::js_regex::JsRegexFlags;
 use serde_json::Value;
+use std::sync::LazyLock;
 
-const CLOSES_ISSUE_PATTERN: &str =
-    "\\b(closes?|closed|fix|fixes?|fixed|resolves?|resolved)\\b.#[0-9]*";
+static CLOSES_ISSUE_REGEX: LazyLock<Option<fancy_regex::Regex>> = LazyLock::new(|| {
+    compile_constant_pattern(
+        "\\b(closes?|closed|fix|fixes?|fixed|resolves?|resolved)\\b.#[0-9]*",
+        JsRegexFlags {
+            ignore_case: true,
+            ..JsRegexFlags::default()
+        },
+    )
+});
 
 pub fn check_if_closes_an_issue(description: Option<&Value>) -> Vec<String> {
-    let Ok(closes_issue_regex) = JsRegex::new(CLOSES_ISSUE_PATTERN, "ig") else {
+    let Some(closes_issue_regex) = CLOSES_ISSUE_REGEX.as_ref() else {
         return Vec::new();
     };
     let text = js::to_js_string(description);
-    let mut issues = Vec::new();
-    while let Some((start, end)) = closes_issue_regex.find(&text) {
-        let matched = &text[start..end];
-        if let Some(hash_position) = matched.find('#') {
-            issues.push(matched[hash_position + 1..].to_string());
-        }
-    }
-    issues
+    closes_issue_regex
+        .find_iter(&text)
+        .map_while(Result::ok)
+        .filter_map(|matched| {
+            let (_, issue_number) = matched.as_str().split_once('#')?;
+            Some(issue_number.to_string())
+        })
+        .collect()
 }
 
 pub async fn check_if_issue_have_property(

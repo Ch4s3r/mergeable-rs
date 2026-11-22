@@ -12,14 +12,15 @@ use serde_json::{Map, Value, json};
 
 pub struct BaseRef;
 
-async fn validate_pull_requests(pull_requests: &[Value], settings: &Value) -> JsResult<Value> {
+async fn validate_pull_requests(
+    pull_requests: impl IntoIterator<Item = &Value>,
+    settings: &Value,
+) -> JsResult<Value> {
     let validator_context = json!({"name": "baseRef"});
-    let base_refs: Vec<Value> = pull_requests
-        .iter()
+    let base_refs: Vec<&Value> = pull_requests
+        .into_iter()
         .map(|pull_request| {
-            Ok(js::read(js::read(Some(pull_request), "base")?, "ref")?
-                .cloned()
-                .unwrap_or(Value::Null))
+            Ok(js::read(js::read(Some(pull_request), "base")?, "ref")?.unwrap_or(&Value::Null))
         })
         .collect::<JsResult<_>>()?;
     if base_refs.is_empty() {
@@ -43,9 +44,9 @@ async fn validate_pull_requests(pull_requests: &[Value], settings: &Value) -> Js
     Ok(results::consolidate_result(outputs, &validator_context))
 }
 
-fn array_entries(list: Option<&Value>, expression: &str) -> JsResult<Vec<Value>> {
+fn array_entries<'list>(list: Option<&'list Value>, expression: &str) -> JsResult<&'list [Value]> {
     match list {
-        Some(Value::Array(items)) => Ok(items.clone()),
+        Some(Value::Array(items)) => Ok(items),
         None => Err(JsError::reading_property_of_undefined("map")),
         Some(Value::Null) => Err(JsError::type_error(
             "Cannot read properties of null (reading 'map')",
@@ -82,15 +83,13 @@ async fn validate_status(
             Value::Object(request),
         )
         .await?;
-    let open_pull_requests: Vec<Value> = match &pulls.data {
-        Value::Array(pull_requests) => pull_requests
-            .iter()
-            .filter(|pull_request| js::as_str(pull_request.get("state")) == Some("open"))
-            .cloned()
-            .collect(),
-        _ => return Err(JsError::type_error("pulls.data.filter is not a function")),
+    let Value::Array(pull_requests) = &pulls.data else {
+        return Err(JsError::type_error("pulls.data.filter is not a function"));
     };
-    validate_pull_requests(&open_pull_requests, settings).await
+    let open_pull_requests = pull_requests
+        .iter()
+        .filter(|pull_request| js::as_str(pull_request.get("state")) == Some("open"));
+    validate_pull_requests(open_pull_requests, settings).await
 }
 
 #[async_trait]
@@ -131,7 +130,7 @@ impl Validator for BaseRef {
         if context.event_name == "check_suite" {
             let pull_requests =
                 array_entries(js::read(payload, "pull_requests")?, "payload.pull_requests")?;
-            return validate_pull_requests(&pull_requests, &validation_settings).await;
+            return validate_pull_requests(pull_requests, &validation_settings).await;
         }
         if context.event_name == "status" {
             return validate_status(context, &validation_settings, media_type).await;

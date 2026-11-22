@@ -46,13 +46,17 @@ pub async fn process(
     settings: &Value,
 ) -> JsResult<Value> {
     let mut output = Vec::new();
-    for setting in js::as_array_or_wrap(settings) {
-        for key in js::object_keys(Some(&setting))? {
+    let listed_settings = match settings {
+        Value::Array(items) => items.as_slice(),
+        single => std::slice::from_ref(single),
+    };
+    for setting in listed_settings {
+        for key in js::object_keys(Some(setting))? {
             if key == "do" {
                 continue;
             }
             let mut rule_fields = Map::new();
-            if let Some(option_value) = js::get(&setting, &key) {
+            if let Some(option_value) = js::get(setting, &key) {
                 rule_fields.insert(key.clone(), option_value.clone());
             }
             let rule = Value::Object(rule_fields);

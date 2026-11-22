@@ -1,7 +1,6 @@
-use crate::logging;
 use redis::aio::MultiplexedConnection;
 use redis::{AsyncCommands, IntoConnectionInfo};
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::sync::Mutex;
 
 const DEFAULT_HOST: &str = "localhost";
@@ -71,10 +70,7 @@ pub struct RedisCache {
 }
 
 fn log_cache_error(operation: &str, error: impl std::fmt::Display) {
-    logging::error(
-        "cache",
-        || json!({"operation": operation, "message": error.to_string()}),
-    );
+    tracing::error!(operation, %error, "redis cache error");
 }
 
 impl RedisCache {
@@ -108,9 +104,8 @@ impl RedisCache {
                 if self.settings.password.is_some()
                     && error.kind() == redis::ErrorKind::AuthenticationFailed =>
             {
-                logging::warn(
-                    "cache",
-                    || json!({"message": "Redis server does not require a password, but a password was supplied"}),
+                tracing::warn!(
+                    "Redis server does not require a password, but a password was supplied"
                 );
                 self.open_connection(false).await?
             }
@@ -198,6 +193,7 @@ impl RedisCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::collections::HashMap;
 
     fn settings_from(variables: &[(&str, &str)]) -> RedisSettings {

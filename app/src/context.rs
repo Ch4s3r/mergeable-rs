@@ -1,13 +1,45 @@
 use crate::error::{JsError, JsResult};
 use crate::github::client::InstallationClient;
 use crate::js;
+use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
+use std::ops::Deref;
+use std::sync::Arc;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SharedPayload(Arc<Value>);
+
+impl SharedPayload {
+    pub fn to_mut(&mut self) -> &mut Value {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl Deref for SharedPayload {
+    type Target = Value;
+
+    fn deref(&self) -> &Value {
+        &self.0
+    }
+}
+
+impl From<Value> for SharedPayload {
+    fn from(payload: Value) -> Self {
+        SharedPayload(Arc::new(payload))
+    }
+}
+
+impl Serialize for SharedPayload {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
 
 #[derive(Clone)]
 pub struct Context {
     pub event_id: String,
     pub event_name: String,
-    pub payload: Value,
+    pub payload: SharedPayload,
     pub github: InstallationClient,
     pub global_settings: Option<Value>,
 }
@@ -16,13 +48,13 @@ impl Context {
     pub fn new(
         event_id: String,
         event_name: String,
-        payload: Value,
+        payload: impl Into<SharedPayload>,
         github: InstallationClient,
     ) -> Self {
         Context {
             event_id,
             event_name,
-            payload,
+            payload: payload.into(),
             github,
             global_settings: None,
         }
@@ -64,9 +96,7 @@ impl Context {
         params.insert("owner".to_string(), Value::String(owner));
         params.insert("repo".to_string(), Value::String(repo));
         if let Value::Object(extra_fields) = extra {
-            for (key, value) in extra_fields {
-                params.insert(key, value);
-            }
+            params.extend(extra_fields);
         }
         Ok(Value::Object(params))
     }

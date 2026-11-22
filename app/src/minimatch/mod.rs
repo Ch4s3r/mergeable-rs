@@ -2,6 +2,12 @@ pub mod brace_expansion;
 use crate::error::{JsError, JsResult};
 use fancy_regex::Regex;
 use serde_json::Value;
+use std::sync::{Arc, LazyLock};
+
+const COMPILED_GLOB_CACHE_CAPACITY: u64 = 4096;
+
+static COMPILED_GLOBS: LazyLock<moka::sync::Cache<(String, bool), Arc<Minimatch>>> =
+    LazyLock::new(|| moka::sync::Cache::new(COMPILED_GLOB_CACHE_CAPACITY));
 
 const QUESTION_MARK: &str = "[^/]";
 const STAR: &str = "[^/]*?";
@@ -35,47 +41,54 @@ struct Minimatch {
 }
 
 pub fn minimatch(file_path: &Value, pattern: &Value, dot: bool) -> JsResult<bool> {
-    let pattern_text = assert_valid_pattern(pattern)?;
+    let Value::String(pattern_text) = pattern else {
+        return Err(JsError::type_error("invalid pattern"));
+    };
+    assert_pattern_length(pattern_text)?;
     if pattern_text.starts_with('#') {
         return Ok(false);
     }
-    Minimatch::new(pattern_text, dot).matches(file_path)
+    compiled_glob(pattern_text, dot).matches(file_path)
 }
 
 pub fn matches(file_path: &str, pattern: &str, dot: bool) -> JsResult<bool> {
-    minimatch(
-        &Value::String(file_path.to_string()),
-        &Value::String(pattern.to_string()),
-        dot,
-    )
+    assert_pattern_length(pattern)?;
+    if pattern.starts_with('#') {
+        return Ok(false);
+    }
+    Ok(compiled_glob(pattern, dot).matches_path(file_path))
 }
 
-fn assert_valid_pattern(pattern: &Value) -> JsResult<&str> {
-    match pattern {
-        Value::String(text) if text.encode_utf16().count() > MAX_PATTERN_LENGTH => {
-            Err(JsError::type_error("pattern is too long"))
-        }
-        Value::String(text) => Ok(text),
-        _ => Err(JsError::type_error("invalid pattern")),
+fn compiled_glob(pattern: &str, dot: bool) -> Arc<Minimatch> {
+    COMPILED_GLOBS.get_with((pattern.to_string(), dot), || {
+        Arc::new(Minimatch::new(pattern, dot))
+    })
+}
+
+fn assert_pattern_length(pattern: &str) -> JsResult<()> {
+    if pattern.encode_utf16().count() > MAX_PATTERN_LENGTH {
+        Err(JsError::type_error("pattern is too long"))
+    } else {
+        Ok(())
     }
 }
 
-fn split_on_slashes(text: &str) -> Vec<String> {
+fn split_on_slashes(text: &str) -> Vec<&str> {
     let mut parts = Vec::new();
-    let mut current = String::new();
+    let mut segment_start = 0;
     let mut previous_was_slash = false;
-    for character in text.chars() {
-        if character == '/' {
+    for (index, byte) in text.bytes().enumerate() {
+        if byte == b'/' {
             if !previous_was_slash {
-                parts.push(std::mem::take(&mut current));
+                parts.push(&text[segment_start..index]);
             }
             previous_was_slash = true;
+            segment_start = index + 1;
         } else {
-            current.push(character);
             previous_was_slash = false;
         }
     }
-    parts.push(current);
+    parts.push(&text[segment_start..]);
     parts
 }
 
@@ -128,10 +141,12 @@ fn translate_class_body(body: &str) -> String {
                     translated.push('\\');
                     translated.push(next);
                 }
-                Some(next) => translated.push_str(&regex::escape(&next.to_string())),
+                Some(next) => translated.push_str(&regex::escape(next.encode_utf8(&mut [0; 4]))),
                 None => translated.push_str(r"\\"),
             },
-            '[' | '&' | '~' => translated.push_str(&regex::escape(&character.to_string())),
+            '[' | '&' | '~' => {
+                translated.push_str(&regex::escape(character.encode_utf8(&mut [0; 4])));
+            }
             other => translated.push(other),
         }
     }
@@ -199,18 +214,18 @@ fn escape_unclosed_list_pipes(tail: &str) -> String {
                 } else {
                     2 * matched - 1
                 };
-                rewritten.push_str(&"\\".repeat(untouched + escaped_count));
+                rewritten.extend(std::iter::repeat_n('\\', untouched + escaped_count));
                 rewritten.push('|');
                 pending_backslashes = 0;
             }
             other => {
-                rewritten.push_str(&"\\".repeat(pending_backslashes));
+                rewritten.extend(std::iter::repeat_n('\\', pending_backslashes));
                 pending_backslashes = 0;
                 rewritten.push(other);
             }
         }
     }
-    rewritten.push_str(&"\\".repeat(pending_backslashes));
+    rewritten.extend(std::iter::repeat_n('\\', pending_backslashes));
     rewritten
 }
 
@@ -234,12 +249,11 @@ impl Minimatch {
             empty: false,
             set: Vec::new(),
         };
-        let trimmed = crate::lodash::js_trim(raw_pattern).to_string();
-        matcher.make(trimmed);
+        matcher.make(crate::lodash::js_trim(raw_pattern));
         matcher
     }
 
-    fn make(&mut self, pattern: String) {
+    fn make(&mut self, pattern: &str) {
         if pattern.starts_with('#') {
             self.comment = true;
             return;
@@ -253,17 +267,17 @@ impl Minimatch {
             .take_while(|character| *character == '!')
             .count();
         self.negate = negation_count % 2 == 1;
-        let pattern = pattern[negation_count..].to_string();
-        let brace_set = if has_brace_set(&pattern) {
-            brace_expansion::expand_top(&pattern)
+        let pattern = &pattern[negation_count..];
+        let brace_set = if has_brace_set(pattern) {
+            brace_expansion::expand_top(pattern)
         } else {
-            vec![pattern]
+            vec![pattern.to_string()]
         };
         for expanded in brace_set {
             let mut parts = Vec::new();
             let mut compiled_all = true;
             for segment in split_on_slashes(&expanded) {
-                match self.parse_part(&segment) {
+                match self.parse_part(segment) {
                     Some(part) => parts.push(part),
                     None => compiled_all = false,
                 }
@@ -534,36 +548,42 @@ impl Minimatch {
         if self.empty {
             return Ok(file_path.as_str() == Some(""));
         }
-        let path_text = match file_path {
-            Value::String(text) => text,
-            Value::Null => {
-                return Err(JsError::type_error(
-                    "Cannot read properties of null (reading 'split')",
-                ));
-            }
-            _ => return Err(JsError::type_error("f.split is not a function")),
-        };
-        let file_segments = split_on_slashes(path_text);
-        for pattern in &self.set {
-            if self.match_one(&file_segments, pattern) {
-                return Ok(!self.negate);
-            }
+        match file_path {
+            Value::String(path_text) => Ok(self.matches_path(path_text)),
+            Value::Null => Err(JsError::type_error(
+                "Cannot read properties of null (reading 'split')",
+            )),
+            _ => Err(JsError::type_error("f.split is not a function")),
         }
-        Ok(self.negate)
     }
 
-    fn match_one(&self, file: &[String], pattern: &[PatternPart]) -> bool {
+    fn matches_path(&self, path_text: &str) -> bool {
+        if self.comment {
+            return false;
+        }
+        if self.empty {
+            return path_text.is_empty();
+        }
+        let file_segments = split_on_slashes(path_text);
+        let any_pattern_matches = self
+            .set
+            .iter()
+            .any(|pattern| self.match_one(&file_segments, pattern));
+        any_pattern_matches != self.negate
+    }
+
+    fn match_one(&self, file: &[&str], pattern: &[PatternPart]) -> bool {
         let mut file_index = 0;
         let mut pattern_index = 0;
         while file_index < file.len() && pattern_index < pattern.len() {
-            let segment = &file[file_index];
+            let segment = file[file_index];
             match &pattern[pattern_index] {
                 PatternPart::Globstar => {
                     let rest_of_pattern = pattern_index + 1;
                     if rest_of_pattern == pattern.len() {
                         return file[file_index..].iter().all(|remaining| {
-                            remaining != "."
-                                && remaining != ".."
+                            *remaining != "."
+                                && *remaining != ".."
                                 && (self.dot || !remaining.starts_with('.'))
                         });
                     }
@@ -572,7 +592,7 @@ impl Minimatch {
                         if self.match_one(&file[swallow_index..], &pattern[rest_of_pattern..]) {
                             return true;
                         }
-                        let swallowed = &file[swallow_index];
+                        let swallowed = file[swallow_index];
                         if swallowed == "."
                             || swallowed == ".."
                             || (!self.dot && swallowed.starts_with('.'))
@@ -584,7 +604,7 @@ impl Minimatch {
                     return false;
                 }
                 PatternPart::Literal(literal) => {
-                    if segment != literal {
+                    if segment != literal.as_str() {
                         return false;
                     }
                 }

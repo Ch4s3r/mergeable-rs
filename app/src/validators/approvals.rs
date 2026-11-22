@@ -40,23 +40,35 @@ fn lower_case_state(review: &Value) -> JsResult<String> {
     }
 }
 
-pub fn find_reviewers_by_state(reviews: &[Value], state: &str) -> JsResult<Vec<Value>> {
+fn review_decision_fields(review: &Value) -> Value {
+    let decision_fields = ["state", "submitted_at", "user"]
+        .into_iter()
+        .filter_map(|key| Some((key.to_string(), review.get(key)?.clone())))
+        .collect();
+    Value::Object(decision_fields)
+}
+
+pub fn latest_review_per_user(reviews: &[Value]) -> JsResult<Vec<Value>> {
     let mut relevant_reviews = Vec::new();
     for review in reviews {
         if lower_case_state(review)? != "commented" {
-            relevant_reviews.push(review.clone());
+            relevant_reviews.push(review_decision_fields(review));
         }
     }
     let ordered = lodash::order_by_path(relevant_reviews, &["submitted_at"], true);
-    let latest_per_user = lodash::uniq_by_path(ordered, &["user", "login"]);
+    Ok(lodash::uniq_by_path(ordered, &["user", "login"]))
+}
+
+pub fn find_reviewers_by_state(latest_reviews: &[Value], state: &str) -> JsResult<Vec<Value>> {
     let mut reviewers = Vec::new();
-    for review in &latest_per_user {
+    for review in latest_reviews {
         if lower_case_state(review)? == state {
-            let user = review.get("user").cloned().unwrap_or(Value::Null);
-            let reviewer = if js::is_truthy(&user) {
-                user.get("login").cloned().unwrap_or(Value::Null)
-            } else {
-                user
+            let reviewer = match review.get("user") {
+                Some(user) if js::is_truthy(user) => {
+                    user.get("login").cloned().unwrap_or(Value::Null)
+                }
+                Some(falsy_user) => falsy_user.clone(),
+                None => Value::Null,
             };
             reviewers.push(reviewer);
         }
@@ -64,7 +76,7 @@ pub fn find_reviewers_by_state(reviews: &[Value], state: &str) -> JsResult<Vec<V
     Ok(reviewers)
 }
 
-pub fn process_block_option(block_option: &Value, reviews: &[Value]) -> JsResult<Value> {
+pub fn process_block_option(block_option: &Value, latest_reviews: &[Value]) -> JsResult<Value> {
     let description = match block_option
         .get("message")
         .filter(|message| js::is_truthy(message))
@@ -72,7 +84,7 @@ pub fn process_block_option(block_option: &Value, reviews: &[Value]) -> JsResult
         Some(message) => message.clone(),
         None => Value::String(DEFAULT_BLOCK_MESSAGE.to_string()),
     };
-    let changes_requested_reviewers = find_reviewers_by_state(reviews, "changes_requested")?;
+    let changes_requested_reviewers = find_reviewers_by_state(latest_reviews, "changes_requested")?;
     let is_mergeable = changes_requested_reviewers.is_empty();
     Ok(results::construct_output(
         &validator_context(),
@@ -106,14 +118,12 @@ fn required_option(settings: &Value, key: &str) -> bool {
         .is_some_and(|required| js::truthy(js::get(required, key)))
 }
 
-fn append_unique(required_reviewers: Vec<Value>, additions: &[Value]) -> Vec<Value> {
+fn append_unique(mut required_reviewers: Vec<Value>, additions: &[Value]) -> Vec<Value> {
     if additions.is_empty() {
         return required_reviewers;
     }
-    lodash::uniq(&js::concat(
-        &required_reviewers,
-        &Value::Array(additions.to_vec()),
-    ))
+    required_reviewers.extend_from_slice(additions);
+    lodash::uniq(&required_reviewers)
 }
 
 pub fn remove_pull_request_creator(
@@ -158,14 +168,14 @@ async fn required_reviewer_list(
     required_reviewers = append_unique(required_reviewers, &owner_list);
 
     let assignee_list = if required_option(settings, "assignees") {
-        assignees::process(payload).await?
+        assignees::process(payload)?
     } else {
         Vec::new()
     };
     required_reviewers = append_unique(required_reviewers, &assignee_list);
 
     let requested_reviewer_list = if required_option(settings, "requested_reviewers") {
-        requested_reviewers::process(payload).await?
+        requested_reviewers::process(payload)?
     } else {
         Vec::new()
     };
@@ -179,12 +189,11 @@ async fn required_reviewer_list(
     })
 }
 
-pub fn with_resolved_required_option(settings: &Value, list: &RequiredReviewerList) -> Value {
+pub fn with_resolved_required_option(mut settings: Value, list: &RequiredReviewerList) -> Value {
     if list.required_reviewers.is_empty() {
-        return settings.clone();
+        return settings;
     }
-    let mut resolved = settings.clone();
-    if let Value::Object(map) = &mut resolved {
+    if let Value::Object(map) = &mut settings {
         map.insert(
             "required".to_string(),
             json!({
@@ -195,7 +204,7 @@ pub fn with_resolved_required_option(settings: &Value, list: &RequiredReviewerLi
             }),
         );
     }
-    resolved
+    settings
 }
 
 pub fn exclude_users(approved_reviewers: Vec<Value>, exclude_option: Option<&Value>) -> Vec<Value> {
@@ -242,7 +251,7 @@ async fn limit_to_allowed_sources(
 
 async fn process_options_raw(
     settings: &Value,
-    approved_reviewers: &[Value],
+    approved_reviewers: Vec<Value>,
 ) -> JsResult<Vec<Value>> {
     let supported: Vec<Value> = DEFAULT_SUPPORTED_OPTIONS
         .iter()
@@ -254,7 +263,7 @@ async fn process_options_raw(
     });
     let raw_output = validators::options::process(
         &options_context,
-        &Value::Array(approved_reviewers.to_vec()),
+        &Value::Array(approved_reviewers),
         settings,
         true,
     )
@@ -306,9 +315,10 @@ impl Validator for Approvals {
         let reviews = api::list_reviews(context, &pull_number).await?;
 
         let required_list = required_reviewer_list(context, &remaining_settings).await?;
-        let options_settings = with_resolved_required_option(&remaining_settings, &required_list);
+        let options_settings = with_resolved_required_option(remaining_settings, &required_list);
 
-        let mut approved_reviewers = find_reviewers_by_state(&reviews, "approved")?;
+        let latest_reviews = latest_review_per_user(&reviews)?;
+        let mut approved_reviewers = find_reviewers_by_state(&latest_reviews, "approved")?;
         let mut output = Vec::new();
         if let Some(limit) = &limit_option {
             let (counted_reviewers, info) =
@@ -318,13 +328,13 @@ impl Validator for Approvals {
         }
         approved_reviewers = exclude_users(approved_reviewers, exclude_option.as_ref());
 
-        output.extend(process_options_raw(&options_settings, &approved_reviewers).await?);
+        output.extend(process_options_raw(&options_settings, approved_reviewers).await?);
 
         if let Some(block) = block_option
             .as_ref()
             .filter(|block| js::truthy(js::get(block, "changes_requested")))
         {
-            output.push(process_block_option(block, &reviews)?);
+            output.push(process_block_option(block, &latest_reviews)?);
         }
 
         Ok(results::consolidate_result(output, &validator_context()))
@@ -336,7 +346,11 @@ mod tests {
     use super::*;
 
     fn review(login: &str, state: &str, submitted_at: &str) -> Value {
-        json!({"user": {"login": login}, "state": state, "submitted_at": submitted_at})
+        json!({"user": {"login": login}, "state": state, "submitted_at": submitted_at, "body": "review text"})
+    }
+
+    fn reviewers_with_state(reviews: &[Value], state: &str) -> JsResult<Vec<Value>> {
+        find_reviewers_by_state(&latest_review_per_user(reviews)?, state)
     }
 
     #[test]
@@ -347,11 +361,11 @@ mod tests {
             review("carol", "APPROVED", "2024-01-01T10:00:00Z"),
         ];
         assert_eq!(
-            find_reviewers_by_state(&reviews, "approved").unwrap(),
+            reviewers_with_state(&reviews, "approved").unwrap(),
             vec![json!("carol")]
         );
         assert_eq!(
-            find_reviewers_by_state(&reviews, "changes_requested").unwrap(),
+            reviewers_with_state(&reviews, "changes_requested").unwrap(),
             vec![json!("bob")]
         );
     }
@@ -363,7 +377,7 @@ mod tests {
             review("bob", "COMMENTED", "2024-01-02T10:00:00Z"),
         ];
         assert_eq!(
-            find_reviewers_by_state(&reviews, "approved").unwrap(),
+            reviewers_with_state(&reviews, "approved").unwrap(),
             vec![json!("bob")]
         );
     }
@@ -375,7 +389,7 @@ mod tests {
             review("bob", "PENDING", "2024-01-02T10:00:00Z"),
         ];
         assert!(
-            find_reviewers_by_state(&reviews, "approved")
+            reviewers_with_state(&reviews, "approved")
                 .unwrap()
                 .is_empty()
         );
@@ -386,7 +400,7 @@ mod tests {
         let reviews = vec![review("bob", "CHANGES_REQUESTED", "2024-01-01T10:00:00Z")];
         let output = process_block_option(
             &json!({"changes_requested": true, "message": "Fix it"}),
-            &reviews,
+            &latest_review_per_user(&reviews).unwrap(),
         )
         .unwrap();
         assert_eq!(output["status"], "fail");
@@ -397,7 +411,11 @@ mod tests {
     #[test]
     fn no_requested_changes_passes_the_block_option() {
         let reviews = vec![review("bob", "APPROVED", "2024-01-01T10:00:00Z")];
-        let output = process_block_option(&json!({"changes_requested": true}), &reviews).unwrap();
+        let output = process_block_option(
+            &json!({"changes_requested": true}),
+            &latest_review_per_user(&reviews).unwrap(),
+        )
+        .unwrap();
         assert_eq!(output["status"], "pass");
         assert_eq!(output["description"], NO_CHANGES_REQUESTED_MESSAGE);
     }
@@ -418,7 +436,7 @@ mod tests {
             assignee_list: vec![json!("carol")],
             requested_reviewer_list: vec![],
         };
-        let resolved = with_resolved_required_option(&settings, &list);
+        let resolved = with_resolved_required_option(settings, &list);
         assert_eq!(
             js::stringify(&resolved),
             r#"{"do":"approvals","required":{"owners":[],"assignees":["carol"],"reviewers":["bob","carol"],"requested_reviewers":[]},"min":{"count":1}}"#
@@ -437,7 +455,7 @@ mod tests {
     #[test]
     fn review_without_state_throws_like_node() {
         let error =
-            find_reviewers_by_state(&[json!({"user": {"login": "bob"}})], "approved").unwrap_err();
+            reviewers_with_state(&[json!({"user": {"login": "bob"}})], "approved").unwrap_err();
         assert_eq!(
             error.to_string(),
             "TypeError: Cannot read properties of undefined (reading 'toLowerCase')"

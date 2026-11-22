@@ -149,11 +149,26 @@ enum TokenKind {
 }
 
 #[derive(Debug, Clone)]
-struct Token {
+struct Token<'source> {
     kind: TokenKind,
-    text: String,
+    text: Cow<'source, str>,
     line: usize,
     column: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceLocation {
+    position: usize,
+    line: usize,
+    column: usize,
+}
+
+impl SourceLocation {
+    const START: SourceLocation = SourceLocation {
+        position: 0,
+        line: 1,
+        column: 0,
+    };
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,7 +183,8 @@ struct Lexer<'source> {
     source: &'source str,
     position: usize,
     states: Vec<LexerState>,
-    tokens: Vec<Token>,
+    tokens: Vec<Token<'source>>,
+    last_location: SourceLocation,
 }
 
 impl<'source> Lexer<'source> {
@@ -178,25 +194,40 @@ impl<'source> Lexer<'source> {
             position: 0,
             states: vec![LexerState::Initial],
             tokens: Vec::new(),
+            last_location: SourceLocation::START,
         }
     }
 
-    fn location(&self, position: usize) -> (usize, usize) {
-        let before = &self.source[..position];
-        let line = before.matches('\n').count() + 1;
-        let column = before
-            .rsplit('\n')
-            .next()
-            .map(|tail| tail.encode_utf16().count())
-            .unwrap_or(0);
+    fn location(&mut self, position: usize) -> (usize, usize) {
+        let resume_from = if position >= self.last_location.position {
+            self.last_location
+        } else {
+            SourceLocation::START
+        };
+        let advanced = &self.source[resume_from.position..position];
+        let (line, column) = match advanced.rfind('\n') {
+            Some(last_newline) => (
+                resume_from.line + advanced.bytes().filter(|byte| *byte == b'\n').count(),
+                advanced[last_newline + 1..].encode_utf16().count(),
+            ),
+            None => (
+                resume_from.line,
+                resume_from.column + advanced.encode_utf16().count(),
+            ),
+        };
+        self.last_location = SourceLocation {
+            position,
+            line,
+            column,
+        };
         (line, column)
     }
 
-    fn emit(&mut self, kind: TokenKind, text: &str, start: usize) {
+    fn emit(&mut self, kind: TokenKind, text: impl Into<Cow<'source, str>>, start: usize) {
         let (line, column) = self.location(start);
         self.tokens.push(Token {
             kind,
-            text: text.to_string(),
+            text: text.into(),
             line,
             column,
         });
@@ -213,7 +244,7 @@ impl<'source> Lexer<'source> {
         self.states.pop();
     }
 
-    fn tokenize(mut self) -> JsResult<Vec<Token>> {
+    fn tokenize(mut self) -> JsResult<Vec<Token<'source>>> {
         loop {
             let state = self.states.last().copied().unwrap_or(LexerState::Initial);
             let keep_going = match state {
@@ -266,18 +297,18 @@ impl<'source> Lexer<'source> {
         let source = self.source;
         let start = self.position;
         let rest = &source[start..];
-        let boundaries: Vec<usize> = rest
+        let end = rest
             .char_indices()
             .map(|(index, _)| index)
             .chain(std::iter::once(rest.len()))
-            .collect();
-        let end = boundaries.iter().skip(2).copied().find(|boundary| {
-            let tail = &rest[*boundary..];
-            tail.is_empty()
-                || tail.starts_with("{{")
-                || tail.starts_with("\\{{")
-                || tail.starts_with("\\\\{{")
-        });
+            .skip(2)
+            .find(|boundary| {
+                let tail = &rest[*boundary..];
+                tail.is_empty()
+                    || tail.starts_with("{{")
+                    || tail.starts_with("\\{{")
+                    || tail.starts_with("\\\\{{")
+            });
         let Some(end) = end else {
             return Err(self.lexical_error(start));
         };
@@ -312,7 +343,7 @@ impl<'source> Lexer<'source> {
         Err(self.lexical_error(start))
     }
 
-    fn lexical_error(&self, position: usize) -> JsError {
+    fn lexical_error(&mut self, position: usize) -> JsError {
         let (line, _) = self.location(position);
         JsError::error(format!("Lexical error on line {line}. Unrecognized text."))
     }
@@ -419,16 +450,16 @@ impl<'source> Lexer<'source> {
             && let Some(length) = bracket_segment_length(rest)
         {
             let text = unescape_bracket_segment(&rest[..length]);
-            self.emit(TokenKind::Identifier, &text, start);
+            self.emit(TokenKind::Identifier, text, start);
             self.position = start + length;
             return true;
         }
-        let length = rest.chars().next().map(char::len_utf8).unwrap_or(1);
+        let length = rest.chars().next().map_or(1, char::len_utf8);
         self.emit_and_advance(TokenKind::Invalid, length);
         true
     }
 
-    fn lex_open(&mut self, rest: &str) {
+    fn lex_open(&mut self, rest: &'source str) {
         let tilde_length = usize::from(rest[2..].starts_with('~'));
         let prefix_length = 2 + tilde_length;
         let body = &rest[prefix_length..];
@@ -509,8 +540,12 @@ impl<'source> Lexer<'source> {
         self.emit_and_advance(TokenKind::Open, prefix_length);
     }
 
-    fn lex_string(&mut self, rest: &str) {
-        let quote = if rest.starts_with('"') { '"' } else { '\'' };
+    fn lex_string(&mut self, rest: &'source str) {
+        let (quote, escaped_quote, plain_quote) = if rest.starts_with('"') {
+            ('"', "\\\"", "\"")
+        } else {
+            ('\'', "\\'", "'")
+        };
         let mut characters = rest.char_indices().skip(1).peekable();
         while let Some((index, character)) = characters.next() {
             if character == '\\' && characters.peek().is_some_and(|(_, next)| *next == quote) {
@@ -519,10 +554,13 @@ impl<'source> Lexer<'source> {
             }
             if character == quote {
                 let inner = &rest[1..index];
-                let escaped_quote = format!("\\{quote}");
-                let text = inner.replace(&escaped_quote, &quote.to_string());
+                let text = if inner.contains(escaped_quote) {
+                    Cow::Owned(inner.replace(escaped_quote, plain_quote))
+                } else {
+                    Cow::Borrowed(inner)
+                };
                 let start = self.position;
-                self.emit(TokenKind::StringLiteral, &text, start);
+                self.emit(TokenKind::StringLiteral, text, start);
                 self.position = start + index + 1;
                 return;
             }
@@ -614,10 +652,9 @@ struct Strip {
 }
 
 fn strip_flags(open: &str, close: &str) -> Strip {
-    let close_characters: Vec<char> = close.chars().collect();
     Strip {
         open: open.chars().nth(2) == Some('~'),
-        close: close_characters.len() >= 3 && close_characters[close_characters.len() - 3] == '~',
+        close: close.chars().rev().nth(2) == Some('~'),
     }
 }
 
@@ -729,12 +766,12 @@ fn parse(template: &str) -> JsResult<Program> {
     Ok(program)
 }
 
-struct Parser {
-    tokens: Vec<Token>,
+struct Parser<'source> {
+    tokens: Vec<Token<'source>>,
     index: usize,
 }
 
-impl Parser {
+impl<'source> Parser<'source> {
     fn peek(&self) -> TokenKind {
         self.peek_at(0)
     }
@@ -742,38 +779,42 @@ impl Parser {
     fn peek_at(&self, offset: usize) -> TokenKind {
         self.tokens
             .get(self.index + offset)
-            .map(|token| token.kind)
-            .unwrap_or(TokenKind::EndOfInput)
+            .map_or(TokenKind::EndOfInput, |token| token.kind)
     }
 
     fn current_location(&self) -> (usize, usize) {
         self.tokens
             .get(self.index)
-            .map(|token| (token.line, token.column))
-            .unwrap_or((1, 0))
+            .map_or((1, 0), |token| (token.line, token.column))
     }
 
-    fn advance(&mut self) -> Token {
-        let token = self.tokens.get(self.index).cloned().unwrap_or(Token {
-            kind: TokenKind::EndOfInput,
-            text: String::new(),
-            line: 1,
-            column: 0,
-        });
+    fn advance(&mut self) -> Token<'source> {
+        let token = match self.tokens.get_mut(self.index) {
+            Some(token) => Token {
+                kind: token.kind,
+                text: std::mem::take(&mut token.text),
+                line: token.line,
+                column: token.column,
+            },
+            None => Token {
+                kind: TokenKind::EndOfInput,
+                text: Cow::Borrowed(""),
+                line: 1,
+                column: 0,
+            },
+        };
         self.index += 1;
         token
     }
 
     fn error(&self) -> JsError {
         let token = self.tokens.get(self.index);
-        let line = token.map(|token| token.line).unwrap_or(1);
-        let found = token
-            .map(|token| format!("{:?}", token.kind))
-            .unwrap_or_else(|| "EndOfInput".to_string());
-        JsError::error(format!("Parse error on line {line}: unexpected {found}"))
+        let line = token.map_or(1, |token| token.line);
+        let found = token.map_or(TokenKind::EndOfInput, |token| token.kind);
+        JsError::error(format!("Parse error on line {line}: unexpected {found:?}"))
     }
 
-    fn expect(&mut self, kind: TokenKind) -> JsResult<Token> {
+    fn expect(&mut self, kind: TokenKind) -> JsResult<Token<'source>> {
         if self.peek() == kind {
             Ok(self.advance())
         } else {
@@ -786,10 +827,10 @@ impl Parser {
         loop {
             match self.peek() {
                 TokenKind::Content => {
-                    let token = self.advance();
+                    let text = self.advance().text.into_owned();
                     body.push(Statement::Content(ContentNode {
-                        original: token.text.clone(),
-                        value: token.text,
+                        original: text.clone(),
+                        value: text,
                         right_stripped: false,
                         left_stripped: false,
                     }));
@@ -799,10 +840,10 @@ impl Parser {
                     body.push(Statement::Comment(strip_flags(&token.text, &token.text)));
                 }
                 TokenKind::Open | TokenKind::OpenUnescaped => {
-                    body.push(Statement::Mustache(self.parse_mustache()?))
+                    body.push(Statement::Mustache(self.parse_mustache()?));
                 }
                 TokenKind::OpenBlock | TokenKind::OpenInverse => {
-                    body.push(Statement::Block(Box::new(self.parse_block()?)))
+                    body.push(Statement::Block(Box::new(self.parse_block()?)));
                 }
                 TokenKind::Unsupported | TokenKind::Invalid => return Err(self.error()),
                 _ => break,
@@ -830,7 +871,7 @@ impl Parser {
             .or_else(|| open.text.chars().nth(2));
         Ok(Mustache {
             call,
-            escaped: !matches!(escape_flag, Some('{') | Some('&')),
+            escaped: !matches!(escape_flag, Some('{' | '&')),
             strip: strip_flags(&open.text, &close.text),
         })
     }
@@ -876,7 +917,9 @@ impl Parser {
                 self.advance();
                 Ok(Expression::Path(self.parse_path(true)?))
             }
-            TokenKind::StringLiteral => Ok(Expression::StringLiteral(self.advance().text)),
+            TokenKind::StringLiteral => {
+                Ok(Expression::StringLiteral(self.advance().text.into_owned()))
+            }
             TokenKind::NumberLiteral => {
                 let text = self.advance().text;
                 Ok(Expression::NumberLiteral(
@@ -901,7 +944,11 @@ impl Parser {
     fn parse_path(&mut self, data: bool) -> JsResult<PathExpression> {
         let (line, column) = self.current_location();
         let first = self.expect(TokenKind::Identifier)?;
-        let mut segments = vec![(segment_identifier(&first.text), first.text, String::new())];
+        let mut segments = vec![(
+            segment_identifier(&first.text),
+            first.text,
+            Cow::Borrowed(""),
+        )];
         while self.peek() == TokenKind::Separator {
             let separator = self.advance();
             let identifier = self.expect(TokenKind::Identifier)?;
@@ -915,7 +962,7 @@ impl Parser {
         let mut parts = Vec::new();
         let mut depth = 0;
         for (part, token_text, separator) in segments {
-            let is_literal = token_text != part;
+            let is_literal = token_text.as_ref() != part.as_str();
             original.push_str(&separator);
             original.push_str(&part);
             if !is_literal && (part == ".." || part == "." || part == "this") {
@@ -939,7 +986,7 @@ impl Parser {
         })
     }
 
-    fn parse_open_block(&mut self, open: &Token) -> JsResult<OpenBlock> {
+    fn parse_open_block(&mut self, open: &Token<'source>) -> JsResult<OpenBlock> {
         let call = self.parse_call()?;
         let block_params = if self.peek() == TokenKind::OpenBlockParams {
             self.advance();
@@ -1119,21 +1166,21 @@ fn is_previous_whitespace(body: &[Statement], index: Option<usize>, is_root: boo
     let has_sibling = index >= 2;
     match previous {
         Statement::Content(content) => {
-            trailing_whitespace_has_newline(&content.original, !(has_sibling || !is_root))
+            trailing_whitespace_has_newline(&content.original, !has_sibling && is_root)
         }
         _ => false,
     }
 }
 
 fn is_next_whitespace(body: &[Statement], index: Option<usize>, is_root: bool) -> bool {
-    let next_index = index.map(|position| position + 1).unwrap_or(0);
+    let next_index = index.map_or(0, |position| position + 1);
     let Some(next) = body.get(next_index) else {
         return is_root;
     };
     let has_sibling = body.get(next_index + 1).is_some();
     match next {
         Statement::Content(content) => {
-            leading_whitespace_has_newline(&content.original, !(has_sibling || !is_root))
+            leading_whitespace_has_newline(&content.original, !has_sibling && is_root)
         }
         _ => false,
     }
@@ -1151,23 +1198,21 @@ fn strip_line_start(text: &str) -> &str {
 }
 
 fn omit_right(body: &mut [Statement], index: Option<usize>, multiple: bool) {
-    let position = index.map(|value| value + 1).unwrap_or(0);
+    let position = index.map_or(0, |value| value + 1);
     let Some(Statement::Content(current)) = body.get_mut(position) else {
         return;
     };
     if !multiple && current.right_stripped {
         return;
     }
-    let stripped = if multiple {
-        current
-            .value
-            .trim_start_matches(is_js_whitespace)
-            .to_string()
+    let kept_length = if multiple {
+        current.value.trim_start_matches(is_js_whitespace).len()
     } else {
-        strip_line_start(&current.value).to_string()
+        strip_line_start(&current.value).len()
     };
-    current.right_stripped = stripped != current.value;
-    current.value = stripped;
+    let removed_length = current.value.len() - kept_length;
+    current.right_stripped = removed_length > 0;
+    current.value.drain(..removed_length);
 }
 
 fn omit_left(body: &mut [Statement], index: Option<usize>, multiple: bool) -> bool {
@@ -1181,13 +1226,13 @@ fn omit_left(body: &mut [Statement], index: Option<usize>, multiple: bool) -> bo
     if !multiple && current.left_stripped {
         return false;
     }
-    let stripped = if multiple {
-        current.value.trim_end_matches(is_js_whitespace).to_string()
+    let kept_length = if multiple {
+        current.value.trim_end_matches(is_js_whitespace).len()
     } else {
-        current.value.trim_end_matches([' ', '\t']).to_string()
+        current.value.trim_end_matches([' ', '\t']).len()
     };
-    current.left_stripped = stripped != current.value;
-    current.value = stripped;
+    current.left_stripped = kept_length != current.value.len();
+    current.value.truncate(kept_length);
     current.left_stripped
 }
 
@@ -1435,54 +1480,57 @@ impl<'data> Js<'data> {
 
     fn child(&self, select: impl FnOnce(&Value) -> Option<&Value>) -> Js<'data> {
         match self {
-            Js::Borrowed(value) => select(value).map(Js::Borrowed).unwrap_or(Js::Undefined),
-            Js::Owned(value) => select(value)
-                .map(|selected| Js::owned(selected.clone()))
-                .unwrap_or(Js::Undefined),
+            Js::Borrowed(value) => select(value).map_or(Js::Undefined, Js::Borrowed),
+            Js::Owned(value) => {
+                select(value).map_or(Js::Undefined, |selected| Js::owned(selected.clone()))
+            }
             _ => Js::Undefined,
         }
     }
 }
 
-fn js_to_string(value: &Js) -> String {
+fn js_text<'value>(value: &'value Js) -> Cow<'value, str> {
     match value {
-        Js::Undefined => "undefined".to_string(),
-        Js::Safe(text) => text.to_string(),
-        Js::NullContext => "[object Object]".to_string(),
-        _ => js::to_js_string(value.value()),
+        Js::Undefined => Cow::Borrowed("undefined"),
+        Js::Safe(text) => Cow::Borrowed(text),
+        Js::NullContext => Cow::Borrowed("[object Object]"),
+        _ => match value.value() {
+            Some(Value::String(text)) => Cow::Borrowed(text),
+            other => Cow::Owned(js::to_js_string(other)),
+        },
     }
 }
 
-fn escape_html(text: &str) -> String {
-    let mut escaped = String::with_capacity(text.len());
+fn js_to_string(value: &Js) -> String {
+    js_text(value).into_owned()
+}
+
+fn push_escaped_html(output: &mut String, text: &str) {
     for character in text.chars() {
         match character {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#x27;"),
-            '\x60' => escaped.push_str("&#x60;"),
-            '=' => escaped.push_str("&#x3D;"),
-            other => escaped.push(other),
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            '\'' => output.push_str("&#x27;"),
+            '\x60' => output.push_str("&#x60;"),
+            '=' => output.push_str("&#x3D;"),
+            other => output.push(other),
         }
     }
-    escaped
 }
 
-fn escape_expression(value: &Js) -> String {
+fn push_escaped_expression(output: &mut String, value: &Js) {
     match value {
-        Js::Safe(text) => text.to_string(),
-        _ if value.is_nullish() => String::new(),
-        _ => escape_html(&js_to_string(value)),
+        Js::Safe(text) => output.push_str(text),
+        _ if value.is_nullish() => {}
+        _ => push_escaped_html(output, &js_text(value)),
     }
 }
 
-fn append_string(value: &Js) -> String {
-    if value.is_nullish() {
-        String::new()
-    } else {
-        js_to_string(value)
+fn push_appended_string(output: &mut String, value: &Js) {
+    if !value.is_nullish() {
+        output.push_str(&js_text(value));
     }
 }
 
@@ -1520,11 +1568,12 @@ fn lookup_property<'data>(parent: &Js<'data>, name: &str) -> Js<'data> {
             }
         }
         Some(Value::String(text)) => {
-            let units: Vec<u16> = text.encode_utf16().collect();
             if name == "length" {
-                Js::owned(Value::from(units.len()))
-            } else if let Some(unit) = array_index(name).and_then(|index| units.get(index)) {
-                Js::text(String::from_utf16_lossy(&[*unit]))
+                Js::owned(Value::from(text.encode_utf16().count()))
+            } else if let Some(unit) =
+                array_index(name).and_then(|index| text.encode_utf16().nth(index))
+            {
+                Js::text(String::from_utf16_lossy(&[unit]))
             } else {
                 Js::Undefined
             }
@@ -1537,9 +1586,7 @@ fn javascript_number_value(number: f64) -> Value {
     if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 {
         Value::from(number as i64)
     } else {
-        serde_json::Number::from_f64(number)
-            .map(Value::Number)
-            .unwrap_or(Value::Null)
+        serde_json::Number::from_f64(number).map_or(Value::Null, Value::Number)
     }
 }
 
@@ -1633,31 +1680,45 @@ fn is_empty(value: &Js) -> bool {
 }
 
 fn json_stringify(value: &Value) -> String {
+    let mut output = String::new();
+    push_json(&mut output, value);
+    output
+}
+
+fn push_json_string(output: &mut String, text: &str) {
+    output.push_str(&serde_json::to_string(text).unwrap_or_default());
+}
+
+fn push_json(output: &mut String, value: &Value) {
     match value {
-        Value::Null => "null".to_string(),
-        Value::Bool(flag) => flag.to_string(),
-        Value::Number(number) => js::number_to_string(number),
-        Value::String(text) => serde_json::to_string(text).unwrap_or_default(),
-        Value::Array(items) => format!(
-            "[{}]",
-            items
-                .iter()
-                .map(json_stringify)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        Value::Object(map) => format!(
-            "{{{}}}",
-            js_ordered_keys(map)
-                .into_iter()
-                .map(|key| format!(
-                    "{}:{}",
-                    serde_json::to_string(key).unwrap_or_default(),
-                    map.get(key).map(json_stringify).unwrap_or_default()
-                ))
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
+        Value::Null => output.push_str("null"),
+        Value::Bool(flag) => output.push_str(if *flag { "true" } else { "false" }),
+        Value::Number(number) => output.push_str(&js::number_to_string(number)),
+        Value::String(text) => push_json_string(output, text),
+        Value::Array(items) => {
+            output.push('[');
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                push_json(output, item);
+            }
+            output.push(']');
+        }
+        Value::Object(map) => {
+            output.push('{');
+            for (index, key) in js_ordered_keys(map).into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                push_json_string(output, key);
+                output.push(':');
+                if let Some(item) = map.get(key) {
+                    push_json(output, item);
+                }
+            }
+            output.push('}');
+        }
     }
 }
 
@@ -1671,13 +1732,12 @@ impl<'data> DataFrame<'data> {
         self.entries
             .iter()
             .find(|(key, _)| key == name)
-            .map(|(_, value)| value.clone())
-            .unwrap_or(Js::Undefined)
+            .map_or(Js::Undefined, |(_, value)| value.clone())
     }
 
     fn child_frame(
         parent: &Rc<DataFrame<'data>>,
-        updates: Vec<(&str, Js<'data>)>,
+        updates: [(&str, Js<'data>); 4],
     ) -> Rc<DataFrame<'data>> {
         let mut entries = parent.entries.clone();
         for (name, value) in updates {
@@ -1729,13 +1789,12 @@ struct HelperOptions<'tree, 'data> {
     this: Js<'data>,
 }
 
-impl<'tree, 'data> HelperOptions<'tree, 'data> {
+impl<'data> HelperOptions<'_, 'data> {
     fn hash_value(&self, name: &str) -> Js<'data> {
         self.hash
             .iter()
             .find(|(key, _)| key == name)
-            .map(|(_, value)| value.clone())
-            .unwrap_or(Js::Undefined)
+            .map_or(Js::Undefined, |(_, value)| value.clone())
     }
 }
 
@@ -1806,10 +1865,7 @@ fn invoke<'tree, 'data>(
     render_program(program, &scope)
 }
 
-fn render_program<'tree, 'data>(
-    program: &'tree Program,
-    scope: &Scope<'tree, 'data>,
-) -> JsResult<String> {
+fn render_program<'tree>(program: &'tree Program, scope: &Scope<'tree, '_>) -> JsResult<String> {
     let mut output = String::new();
     for statement in &program.body {
         match statement {
@@ -1818,14 +1874,14 @@ fn render_program<'tree, 'data>(
             Statement::Mustache(mustache) => {
                 let value = evaluate_call(&mustache.call, scope, CallSite::Mustache)?;
                 if mustache.escaped {
-                    output.push_str(&escape_expression(&value));
+                    push_escaped_expression(&mut output, &value);
                 } else {
-                    output.push_str(&append_string(&value));
+                    push_appended_string(&mut output, &value);
                 }
             }
             Statement::Block(block) => {
                 let value = evaluate_call(&block.call, scope, CallSite::Block(block))?;
-                output.push_str(&append_string(&value));
+                push_appended_string(&mut output, &value);
             }
         }
     }
@@ -1871,8 +1927,7 @@ fn context_at_depth<'data>(scope: &Scope<'_, 'data>, depth: usize) -> Js<'data> 
     for _ in 0..depth {
         node = node.and_then(|current| current.parent.as_ref());
     }
-    node.map(|current| current.value.clone())
-        .unwrap_or(Js::Undefined)
+    node.map_or(Js::Undefined, |current| current.value.clone())
 }
 
 fn data_at_depth<'data>(scope: &Scope<'_, 'data>, depth: usize) -> Option<Rc<DataFrame<'data>>> {
@@ -1987,7 +2042,7 @@ fn evaluate_call<'tree, 'data>(
         _ => (program_handle(None, scope), program_handle(None, scope)),
     };
     let mut options = HelperOptions {
-        name: path.original.clone(),
+        name: String::new(),
         hash: Vec::new(),
         function,
         inverse,
@@ -2032,8 +2087,8 @@ fn evaluate_call<'tree, 'data>(
         )));
     }
     if is_eligible {
-        options.name = first_part.to_string();
         if is_registered_helper(first_part) {
+            options.name = first_part.to_string();
             return call_helper(first_part, &[], &options);
         }
         let value = lookup_path(&path, scope);
@@ -2056,10 +2111,10 @@ fn evaluate_call<'tree, 'data>(
     }
 }
 
-fn call_helper<'tree, 'data>(
+fn call_helper<'data>(
     name: &str,
     params: &[Js<'data>],
-    options: &HelperOptions<'tree, 'data>,
+    options: &HelperOptions<'_, 'data>,
 ) -> JsResult<Js<'data>> {
     match name {
         "if" => conditional_helper(params, options, false),
@@ -2164,7 +2219,7 @@ fn each_helper<'data>(
                 let position = Js::owned(Value::from(index));
                 let frame = DataFrame::child_frame(
                     &options.data,
-                    vec![
+                    [
                         ("key", position.clone()),
                         ("index", position.clone()),
                         ("first", Js::owned(Value::Bool(index == 0))),
@@ -2188,7 +2243,7 @@ fn each_helper<'data>(
                 let key_value = Js::text(key.clone());
                 let frame = DataFrame::child_frame(
                     &options.data,
-                    vec![
+                    [
                         ("key", key_value.clone()),
                         ("index", Js::owned(Value::from(index))),
                         ("first", Js::owned(Value::Bool(index == 0))),
@@ -2221,8 +2276,7 @@ fn lookup_helper<'data>(params: &[Js<'data>]) -> Js<'data> {
     }
     let field = params
         .get(1)
-        .map(js_to_string)
-        .unwrap_or_else(|| "[object Object]".to_string());
+        .map_or(Cow::Borrowed("[object Object]"), js_text);
     lookup_property(object, &field)
 }
 
@@ -2234,7 +2288,7 @@ fn block_helper_missing<'data>(
         Some(Value::Bool(true)) => {
             invoke(&options.function, options.this.clone(), None, Vec::new())?
         }
-        Some(Value::Bool(false)) | Some(Value::Null) => {
+        Some(Value::Bool(false) | Value::Null) => {
             invoke(&options.inverse, options.this.clone(), None, Vec::new())?
         }
         None if matches!(context, Js::Undefined) => {
@@ -2250,11 +2304,12 @@ fn block_helper_missing<'data>(
 }
 
 fn breaklines_helper<'data>(params: &[Js<'data>]) -> Js<'data> {
-    let escaped = match argument(params, 0) {
-        Argument::Value(value) => escape_expression(value),
-        Argument::Options => "[object Object]".to_string(),
-        Argument::Missing => String::new(),
-    };
+    let mut escaped = String::new();
+    match argument(params, 0) {
+        Argument::Value(value) => push_escaped_expression(&mut escaped, value),
+        Argument::Options => escaped.push_str("[object Object]"),
+        Argument::Missing => {}
+    }
     let mut with_breaks = String::with_capacity(escaped.len());
     let mut characters = escaped.chars().peekable();
     while let Some(character) = characters.next() {
@@ -2422,7 +2477,7 @@ struct DigitReader<'text> {
     position: usize,
 }
 
-impl<'text> DigitReader<'text> {
+impl DigitReader<'_> {
     fn digits(&mut self, count: usize) -> Option<i64> {
         let slice = self.bytes.get(self.position..self.position + count)?;
         if !slice.iter().all(u8::is_ascii_digit) {

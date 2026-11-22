@@ -4,10 +4,9 @@ use crate::error::JsResult;
 use crate::event_aware;
 use crate::github::api;
 use crate::js;
-use crate::logging;
 use crate::template;
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 pub const SUPPORTED_EVENTS: [&str; 4] = [
     "pull_request.*",
@@ -92,10 +91,7 @@ pub fn spawn_detached(
     let event_id = context.event_id.clone();
     tokio::spawn(async move {
         if let Err(error) = future.await {
-            logging::error(
-                task_name,
-                || json!({"eventId": event_id, "errors": error.to_string()}),
-            );
+            tracing::error!(task = task_name, event_id = %event_id, %error, "comment action failed");
         }
     });
 }
@@ -133,13 +129,12 @@ impl Action for Comment {
         let event = event_aware::get_event_attributes(context);
         let leave_old_comment = js::truthy(settings.get("leave_old_comment"));
         for issue in commentables {
-            let issue_number = js::read(Some(&issue), "number")?
+            let issue_number = js::read(Some(&*issue), "number")?
                 .cloned()
                 .unwrap_or(Value::Null);
-            let body_template = js::read_path(settings, &["payload", "body"])?
-                .cloned()
-                .unwrap_or(Value::Null);
-            let body = template::populate_template(&body_template, results, Some(&issue), &event)?;
+            let body_template =
+                js::read_path(settings, &["payload", "body"])?.unwrap_or(&Value::Null);
+            let body = template::populate_template(body_template, results, Some(&issue), &event)?;
             let old_comments = if leave_old_comment {
                 Ok(Vec::new())
             } else {

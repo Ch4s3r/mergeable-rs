@@ -1,11 +1,10 @@
 use crate::app_config::AppConfig;
-use crate::context::Context;
+use crate::context::{Context, SharedPayload};
 use crate::error::{JsError, JsResult};
 use crate::flex;
 use crate::github::app_auth::AppJwtClient;
 use crate::github::client::{GithubApp, InstallationClient};
 use crate::js;
-use crate::logging;
 use crate::metrics::{self, Metrics};
 use crate::scheduler::Scheduler;
 use axum::Router;
@@ -93,7 +92,7 @@ async fn express_not_found(request: Request) -> Response {
     let resource = request
         .uri()
         .path_and_query()
-        .map(|path| path.as_str())
+        .map(axum::http::uri::PathAndQuery::as_str)
         .unwrap_or("/");
     let body = format!(
         "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Error</title>\n</head>\n<body>\n<pre>Cannot {} {}</pre>\n</body>\n</html>\n",
@@ -112,7 +111,7 @@ async fn unknown_webhook_route(request: Request) -> Response {
     let url = request
         .uri()
         .path_and_query()
-        .map(|path| path.as_str())
+        .map(axum::http::uri::PathAndQuery::as_str)
         .unwrap_or("/");
     json_error(
         StatusCode::NOT_FOUND,
@@ -220,11 +219,11 @@ pub fn signature_matches(secret: &str, body: &[u8], signature_header: &str) -> b
     }
 }
 
-fn header_text(headers: &HeaderMap, name: &str) -> Option<String> {
+fn header_text<'headers>(headers: &'headers HeaderMap, name: &str) -> &'headers str {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
+        .unwrap_or_default()
 }
 
 async fn receive_webhook(
@@ -232,7 +231,7 @@ async fn receive_webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let content_type = header_text(&headers, "content-type").unwrap_or_default();
+    let content_type = header_text(&headers, "content-type");
     if !content_type.starts_with("application/json") {
         return (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -251,10 +250,8 @@ async fn receive_webhook(
             format!("Required headers missing: {}", missing.join(", ")),
         );
     }
-    let event_name = header_text(&headers, "x-github-event").unwrap_or_default();
-    let delivery_id = header_text(&headers, "x-github-delivery").unwrap_or_default();
-    let signature = header_text(&headers, "x-hub-signature-256").unwrap_or_default();
-    if !signature_matches(&state.webhook_secret, &body, &signature) {
+    let signature = header_text(&headers, "x-hub-signature-256");
+    if !signature_matches(&state.webhook_secret, &body, signature) {
         return json_error(
             StatusCode::BAD_REQUEST,
             "Error: [@octokit/webhooks] signature does not match event payload and secret"
@@ -265,7 +262,14 @@ async fn receive_webhook(
         Ok(payload) => payload,
         Err(error) => return json_error(StatusCode::BAD_REQUEST, format!("SyntaxError: {error}")),
     };
-    let handling = tokio::spawn(handle_event(state, delivery_id, event_name, payload));
+    let event_name = header_text(&headers, "x-github-event").to_string();
+    let delivery_id = header_text(&headers, "x-github-delivery").to_string();
+    let handling = tokio::spawn(handle_event(
+        state,
+        delivery_id,
+        event_name,
+        SharedPayload::from(payload),
+    ));
     match tokio::time::timeout(STILL_PROCESSING_AFTER, handling).await {
         Err(_) => (StatusCode::ACCEPTED, "still processing\n").into_response(),
         Ok(Ok(Ok(()))) => (StatusCode::OK, "ok\n").into_response(),
@@ -353,7 +357,7 @@ fn log_event_received(context: &Context) -> JsResult<()> {
             }
         }
     }
-    logging::info("mergeable", move || Value::Object(entry));
+    tracing::info!(details = %serde_json::Value::Object(entry), "event received");
     Ok(())
 }
 
@@ -370,7 +374,7 @@ fn event_client(github: &Arc<GithubApp>, event_name: &str, payload: &Value) -> I
             action
                 .map(|action| js::to_js_string(Some(action)))
                 .as_deref(),
-            Some("suspend") | Some("deleted")
+            Some("suspend" | "deleted")
         );
     match installation_id {
         None => github.unauthenticated(format!(
@@ -388,7 +392,7 @@ pub async fn run_mergeable(
     github: Arc<GithubApp>,
     delivery_id: String,
     event_name: String,
-    payload: Value,
+    payload: SharedPayload,
 ) -> JsResult<()> {
     let client = event_client(&github, &event_name, &payload);
     let context = Context::new(delivery_id, event_name, payload, client);
@@ -400,7 +404,7 @@ pub async fn handle_event(
     state: ServerState,
     delivery_id: String,
     event_name: String,
-    payload: Value,
+    payload: SharedPayload,
 ) -> JsResult<()> {
     let mut handlers: FuturesUnordered<BoxFuture<'static, JsResult<()>>> = FuturesUnordered::new();
     if let Some(scheduler) = state.scheduler.clone()

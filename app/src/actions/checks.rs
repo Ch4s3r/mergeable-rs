@@ -130,12 +130,13 @@ async fn update_checks(
     } else {
         Value::String("success".to_string())
     };
+    let is_completed = state.as_str() == Some("completed");
     let mut check = Map::new();
     check.insert("name".to_string(), Value::String(name));
-    check.insert("status".to_string(), state.clone());
+    check.insert("status".to_string(), state);
     check.insert("output".to_string(), output);
     check.insert("check_run_id".to_string(), check_run_id);
-    if state.as_str() == Some("completed") {
+    if is_completed {
         check.insert("conclusion".to_string(), conclusion);
         check.insert("completed_at".to_string(), Value::String(now_iso()));
     }
@@ -150,7 +151,6 @@ pub struct Checks {
 
 impl Checks {
     fn populate_payload_with_result(
-        &self,
         payload_settings: &Value,
         results: &Value,
         context: &Context,
@@ -159,10 +159,8 @@ impl Checks {
         let payload = event_aware::get_payload(context);
         let event = event_aware::get_event_attributes(context);
         for key in js::object_keys(Some(payload_settings))? {
-            let template_value = js::get(payload_settings, &key)
-                .cloned()
-                .unwrap_or(Value::Null);
-            let rendered = template::populate_template(&template_value, results, payload, &event)?;
+            let template_value = js::get(payload_settings, &key).unwrap_or(&Value::Null);
+            let rendered = template::populate_template(template_value, results, payload, &event)?;
             output.insert(key, Value::String(rendered));
         }
         Ok(Value::Object(output))
@@ -229,9 +227,11 @@ impl Action for Checks {
             .get("payload")
             .filter(|payload| js::is_truthy(payload))
         {
-            Some(payload_settings) => {
-                Some(self.populate_payload_with_result(payload_settings, results, context)?)
-            }
+            Some(payload_settings) => Some(Self::populate_payload_with_result(
+                payload_settings,
+                results,
+                context,
+            )?),
             None => None,
         };
         let check_run_id = || -> JsResult<Value> {
@@ -239,17 +239,14 @@ impl Action for Checks {
             Ok(js::read(data, "id")?.cloned().unwrap_or(Value::Null))
         };
         if let Some(Value::Object(fields)) = payload.as_mut()
-            && let Some(Value::String(text)) = fields.get("text").cloned()
+            && let Some(Value::String(text)) = fields.get_mut("text")
         {
             let meta = json!({
                 "id": check_run_id()?,
                 "eventName": context.event_name,
                 "action": context.action().cloned().unwrap_or(Value::Null),
             });
-            fields.insert(
-                "text".to_string(),
-                Value::String(format!("{text}{}", metadata::serialize(&meta))),
-            );
+            text.push_str(&metadata::serialize(&meta));
         }
         update_checks(
             context,

@@ -26,7 +26,7 @@ pub fn parse(text: &str) -> Result<Option<Value>, YamlError> {
     if text.trim().is_empty() {
         return Ok(None);
     }
-    let parsed: serde_yaml_ng::Value =
+    let mut parsed: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(text).map_err(|error| YamlError {
             message: error.to_string(),
         })?;
@@ -35,11 +35,10 @@ pub fn parse(text: &str) -> Result<Option<Value>, YamlError> {
             message: "unknown tag".to_string(),
         });
     }
-    let mut merged = parsed;
-    merged.apply_merge().map_err(|error| YamlError {
+    parsed.apply_merge().map_err(|error| YamlError {
         message: error.to_string(),
     })?;
-    Ok(Some(to_json(merged)))
+    Ok(Some(to_json(parsed)))
 }
 
 fn to_json(value: serde_yaml_ng::Value) -> Value {
@@ -56,9 +55,7 @@ fn to_json(value: serde_yaml_ng::Value) -> Value {
                     Some(float) if float.fract() == 0.0 && float.abs() < 9.0e15 => {
                         Value::Number((float as i64).into())
                     }
-                    Some(float) => Number::from_f64(float)
-                        .map(Value::Number)
-                        .unwrap_or(Value::Null),
+                    Some(float) => Number::from_f64(float).map_or(Value::Null, Value::Number),
                     None => Value::Null,
                 }
             }
@@ -68,7 +65,7 @@ fn to_json(value: serde_yaml_ng::Value) -> Value {
             Value::Array(items.into_iter().map(to_json).collect())
         }
         serde_yaml_ng::Value::Mapping(mapping) => {
-            let mut object = Map::new();
+            let mut object = Map::with_capacity(mapping.len());
             for (key, item) in mapping {
                 let key_text = match to_json(key) {
                     Value::String(text) => text,

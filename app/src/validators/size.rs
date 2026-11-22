@@ -81,12 +81,10 @@ fn javascript_substring(units: &[u16], start: i64, end: i64) -> String {
 
 pub fn extract_file_name(file_diff: &str) -> String {
     let units = utf16_units(file_diff);
-    let start_index = utf16_index_of(&units, &utf16_units("+++ b/"), 0)
-        .map(|index| index as i64)
-        .unwrap_or(-1);
+    let start_index =
+        utf16_index_of(&units, &utf16_units("+++ b/"), 0).map_or(-1, |index| index as i64);
     let end_index = utf16_index_of(&units, &[u16::from(b'\n')], start_index.max(0) as usize)
-        .map(|index| index as i64)
-        .unwrap_or(-1);
+        .map_or(-1, |index| index as i64);
     javascript_substring(&units, start_index + 6, end_index)
 }
 
@@ -105,10 +103,8 @@ pub fn changes_without_comments(diffs: &str) -> Vec<ChangedFile> {
         if file_diff.contains("deleted") {
             continue;
         }
-        let ignores_comments = extension
-            .as_deref()
-            .is_some_and(|extension| EXTENSIONS_WITH_IGNORABLE_COMMENTS.contains(&extension));
-        let extension_text = extension.clone().unwrap_or_default();
+        let extension_text = extension.as_deref().unwrap_or_default();
+        let ignores_comments = EXTENSIONS_WITH_IGNORABLE_COMMENTS.contains(&extension_text);
         let mut additions = 0u64;
         let mut deletions = 0u64;
         let mut is_block_comment_active = false;
@@ -118,10 +114,10 @@ pub fn changes_without_comments(diffs: &str) -> Vec<ChangedFile> {
             }
             if ignores_comments {
                 let line_content = lodash::js_trim(line.get(1..).unwrap_or_default());
-                if is_single_line_comment(&extension_text, line_content) {
+                if is_single_line_comment(extension_text, line_content) {
                     continue;
                 }
-                if has_block_comments(&extension_text) {
+                if has_block_comments(extension_text) {
                     let starts_block = line_content.contains("/*");
                     let ends_block = line_content.contains("*/");
                     if is_block_comment_active {
@@ -154,9 +150,8 @@ pub fn changes_without_comments(diffs: &str) -> Vec<ChangedFile> {
 }
 
 fn matches_patterns(file_name: &Value, patterns: &Value) -> JsResult<bool> {
-    let patterns = match patterns {
-        Value::Array(patterns) => patterns,
-        _ => return Err(JsError::type_error("patterns.some is not a function")),
+    let Value::Array(patterns) = patterns else {
+        return Err(JsError::type_error("patterns.some is not a function"));
     };
     for pattern in patterns {
         if minimatch::minimatch(file_name, pattern, true)? {
@@ -236,10 +231,10 @@ pub fn input_message(changes: &SizeChanges, files: &[ChangedFile]) -> String {
     )
 }
 
-fn error_result(input: &str, settings: &Value, message: &str) -> Value {
+fn error_result(input: &Value, settings: &Value, message: &str) -> Value {
     let output = results::construct_error_output(
         &Value::String(VALIDATOR_NAME.to_string()),
-        &Value::String(input.to_string()),
+        input,
         settings,
         message,
         None,
@@ -257,7 +252,7 @@ fn change_count(changes: &SizeChanges, key: &str) -> Option<f64> {
 }
 
 pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) -> JsResult<Value> {
-    let input = input_message(changes, files);
+    let input = Value::String(input_message(changes, files));
     let Some(lines) = settings.get("lines").filter(|value| js::is_truthy(value)) else {
         return Ok(error_result(&input, settings, ERROR_MESSAGE));
     };
@@ -304,7 +299,7 @@ pub fn evaluate(changes: &SizeChanges, files: &[ChangedFile], settings: &Value) 
         };
         output.push(results::construct_output(
             &validator_context,
-            &Value::String(input.clone()),
+            &input,
             settings,
             if is_mergeable { "pass" } else { "fail" },
             description,

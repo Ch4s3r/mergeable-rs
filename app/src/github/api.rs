@@ -2,9 +2,22 @@ use crate::context::Context;
 use crate::error::{JsError, JsResult};
 use crate::github::client::GithubResponse;
 use crate::js;
-use crate::logging;
 use base64::Engine as _;
 use serde_json::{Value, json};
+
+const LENIENT_BASE64: base64::engine::GeneralPurpose = base64::engine::GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    base64::engine::GeneralPurposeConfig::new()
+        .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent)
+        .with_decode_allow_trailing_bits(true),
+);
+
+fn take_field(data: Value, key: &str) -> Value {
+    match data {
+        Value::Object(mut fields) => fields.shift_remove(key).unwrap_or(Value::Null),
+        _ => Value::Null,
+    }
+}
 
 fn log_and_rethrow<T>(error: JsError, context: &Context, call_name: &str) -> JsResult<T> {
     let log_type = match error.status {
@@ -12,29 +25,25 @@ fn log_and_rethrow<T>(error: JsError, context: &Context, call_name: &str) -> JsR
         Some(404) => "http_not_found_error",
         _ => "unknown_github_api_error",
     };
-    logging::error(&format!("GithubAPI/{call_name}"), || {
-        json!({
-            "logType": log_type,
-            "eventId": context.event_id,
-            "repo": context.repository_full_name(),
-            "event": context.event_with_action(),
-            "callFn": call_name,
-            "errors": error.to_string(),
-        })
-    });
+    tracing::error!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        event = %context.event_with_action(),
+        call = call_name,
+        %error,
+        "{log_type}"
+    );
     Err(error)
 }
 
 fn debug_call(context: &Context, call_name: &str) {
-    logging::debug(&format!("GithubAPI/{call_name}"), || {
-        json!({
-            "logType": "github_api_debug",
-            "eventId": context.event_id,
-            "repo": context.repository_full_name(),
-            "event": context.event_with_action(),
-            "callFn": call_name,
-        })
-    });
+    tracing::debug!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        event = %context.event_with_action(),
+        call = call_name,
+        "github api call"
+    );
 }
 
 async fn call(
@@ -145,13 +154,7 @@ pub fn decode_content(data: &Value) -> JsResult<String> {
         .chars()
         .filter(|character| !character.is_whitespace())
         .collect();
-    let lenient_decoder = base64::engine::GeneralPurpose::new(
-        &base64::alphabet::STANDARD,
-        base64::engine::GeneralPurposeConfig::new()
-            .with_decode_padding_mode(base64::engine::DecodePaddingMode::Indifferent)
-            .with_decode_allow_trailing_bits(true),
-    );
-    let bytes = lenient_decoder.decode(compact).unwrap_or_default();
+    let bytes = LENIENT_BASE64.decode(compact).unwrap_or_default();
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -424,7 +427,7 @@ pub async fn search_issues_and_pull_requests(context: &Context, params: Value) -
         params,
     )
     .await?;
-    Ok(response.data.get("items").cloned().unwrap_or(Value::Null))
+    Ok(take_field(response.data, "items"))
 }
 
 pub async fn list_collaborators(context: &Context, params: Value) -> JsResult<Vec<Value>> {
@@ -446,7 +449,7 @@ pub async fn get_all_topics(context: &Context, params: Value) -> JsResult<Value>
         params,
     )
     .await?;
-    Ok(response.data.get("names").cloned().unwrap_or(Value::Null))
+    Ok(take_field(response.data, "names"))
 }
 
 pub async fn compare_commits(context: &Context, params: Value) -> JsResult<Value> {
@@ -475,7 +478,7 @@ pub async fn merge_pull_request(
     {
         Ok(response) => Ok(Some(response)),
         Err(error) => {
-            if matches!(error.status, Some(405) | Some(409)) {
+            if matches!(error.status, Some(405 | 409)) {
                 if error
                     .message
                     .to_lowercase()
@@ -483,16 +486,14 @@ pub async fn merge_pull_request(
                 {
                     return Ok(None);
                 }
-                logging::info("GithubAPI/pulls.merge", || {
-                    json!({
-                        "logType": "merge_fail_error",
-                        "eventId": context.event_id,
-                        "repo": context.repository_full_name(),
-                        "event": context.event_with_action(),
-                        "callFn": "pulls.merge",
-                        "errors": error.to_string(),
-                    })
-                });
+                tracing::info!(
+                    event_id = %context.event_id,
+                    repo = %context.repository_full_name(),
+                    event = %context.event_with_action(),
+                    call = "pulls.merge",
+                    %error,
+                    "merge_fail_error"
+                );
             }
             log_and_rethrow(error, context, "pulls.merge")
         }
@@ -553,26 +554,23 @@ pub async fn request_reviewers(
     {
         Ok(response) => Ok(Some(response)),
         Err(error) => {
-            logging::info("GithubAPI/pulls.requestReview", || {
-                json!({
-                    "logType": "request_review_fail_error",
-                    "eventId": context.event_id,
-                    "repo": context.repository_full_name(),
-                    "event": context.event_with_action(),
-                    "callFn": "pulls.requestReview",
-                    "errors": error.to_string(),
-                })
-            });
+            tracing::info!(
+                event_id = %context.event_id,
+                repo = %context.repository_full_name(),
+                event = %context.event_with_action(),
+                call = "pulls.requestReview",
+                %error,
+                "request_review_fail_error"
+            );
             Ok(None)
         }
     }
 }
 
 pub async fn list_pull_requests(context: &Context) -> JsResult<GithubResponse> {
-    let base = context.payload.get("ref").cloned();
     let mut extra = serde_json::Map::new();
-    if let Some(reference) = base {
-        extra.insert("base".to_string(), reference);
+    if let Some(reference) = context.payload.get("ref") {
+        extra.insert("base".to_string(), reference.clone());
     }
     let params = context.repo_params(Value::Object(extra))?;
     call(

@@ -1,4 +1,14 @@
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
+
+fn output_details(input: &Value, settings: &Value, error: Option<Value>) -> Value {
+    let mut details = Map::new();
+    details.insert("input".to_string(), input.clone());
+    details.insert("settings".to_string(), settings.clone());
+    if let Some(error_value) = error {
+        details.insert("error".to_string(), error_value);
+    }
+    Value::Object(details)
+}
 
 pub fn construct_output(
     validator_context: &Value,
@@ -8,18 +18,15 @@ pub fn construct_output(
     description: Value,
     error: Option<Value>,
 ) -> Value {
-    let mut details = Map::new();
-    details.insert("input".to_string(), input.clone());
-    details.insert("settings".to_string(), settings.clone());
-    if let Some(error_value) = error {
-        details.insert("error".to_string(), error_value);
-    }
-    json!({
-        "validator": validator_context,
-        "status": status,
-        "description": description,
-        "details": Value::Object(details),
-    })
+    let mut output = Map::new();
+    output.insert("validator".to_string(), validator_context.clone());
+    output.insert("status".to_string(), Value::String(status.to_string()));
+    output.insert("description".to_string(), description);
+    output.insert(
+        "details".to_string(),
+        output_details(input, settings, error),
+    );
+    Value::Object(output)
 }
 
 pub fn construct_error_output(
@@ -54,34 +61,27 @@ pub fn consolidate_status<'item>(
     status
 }
 
-pub fn consolidate_result(outputs: Vec<Value>, validator_context: &Value) -> Value {
-    let status = consolidate_status(
-        outputs
-            .iter()
-            .map(|output| output.get("status").and_then(Value::as_str)),
-    );
+fn status_of(output: &Value) -> Option<&str> {
+    output.get("status").and_then(Value::as_str)
+}
+
+fn consolidate(outputs: Vec<Value>, context: &Value, outputs_key: &str) -> Value {
+    let status = consolidate_status(outputs.iter().map(status_of));
     let mut result = Map::new();
     result.insert("status".to_string(), Value::String(status.to_string()));
-    if let Some(name) = crate::js::get(validator_context, "name") {
+    if let Some(name) = crate::js::get(context, "name") {
         result.insert("name".to_string(), name.clone());
     }
-    result.insert("validations".to_string(), Value::Array(outputs));
+    result.insert(outputs_key.to_string(), Value::Array(outputs));
     Value::Object(result)
 }
 
+pub fn consolidate_result(outputs: Vec<Value>, validator_context: &Value) -> Value {
+    consolidate(outputs, validator_context, "validations")
+}
+
 pub fn consolidate_filter_result(outputs: Vec<Value>, filter_context: &Value) -> Value {
-    let status = consolidate_status(
-        outputs
-            .iter()
-            .map(|output| output.get("status").and_then(Value::as_str)),
-    );
-    let mut result = Map::new();
-    result.insert("status".to_string(), Value::String(status.to_string()));
-    if let Some(name) = crate::js::get(filter_context, "name") {
-        result.insert("name".to_string(), name.clone());
-    }
-    result.insert("filters".to_string(), Value::Array(outputs));
-    Value::Object(result)
+    consolidate(outputs, filter_context, "filters")
 }
 
 pub fn construct_filter_output(
@@ -92,18 +92,15 @@ pub fn construct_filter_output(
     description: Value,
     error: Option<Value>,
 ) -> Value {
-    let mut details = Map::new();
-    details.insert("input".to_string(), input.clone());
-    details.insert("settings".to_string(), settings.clone());
-    if let Some(error_value) = error {
-        details.insert("error".to_string(), error_value);
-    }
-    json!({
-        "status": status,
-        "description": description,
-        "details": Value::Object(details),
-        "filter": filter_context,
-    })
+    let mut output = Map::new();
+    output.insert("status".to_string(), Value::String(status.to_string()));
+    output.insert("description".to_string(), description);
+    output.insert(
+        "details".to_string(),
+        output_details(input, settings, error),
+    );
+    output.insert("filter".to_string(), filter_context.clone());
+    Value::Object(output)
 }
 
 pub fn construct_filter_error(
@@ -123,20 +120,16 @@ pub fn construct_filter_error(
     )
 }
 
-pub fn extract_validation_stats(results: &[Value]) -> Value {
-    let statuses: Vec<Option<&str>> = results
-        .iter()
-        .map(|result| result.get("status").and_then(Value::as_str))
-        .collect();
-    let count = |wanted: &str| {
-        statuses
-            .iter()
-            .filter(|status| **status == Some(wanted))
-            .count()
-    };
-    let pass_count = count("pass");
-    let fail_count = count("fail");
-    let error_count = count("error");
+pub fn extract_validation_stats(results: Vec<Value>) -> Value {
+    let (mut pass_count, mut fail_count, mut error_count) = (0_usize, 0_usize, 0_usize);
+    for result in &results {
+        match status_of(result) {
+            Some("pass") => pass_count += 1,
+            Some("fail") => fail_count += 1,
+            Some("error") => error_count += 1,
+            _ => {}
+        }
+    }
     let validation_status = if error_count > 0 {
         "error"
     } else if fail_count > 0 {
@@ -146,23 +139,27 @@ pub fn extract_validation_stats(results: &[Value]) -> Value {
     };
     let failures: Vec<Value> = results
         .iter()
-        .filter(|result| result.get("status").and_then(Value::as_str) == Some("fail"))
+        .filter(|result| status_of(result) == Some("fail"))
         .cloned()
         .collect();
-    json!({
-        "validationStatus": validation_status,
-        "validationCount": statuses.len(),
-        "passCount": pass_count,
-        "failCount": fail_count,
-        "errorCount": error_count,
-        "validationSuites": results,
-        "failures": failures,
-    })
+    let mut stats = Map::new();
+    stats.insert(
+        "validationStatus".to_string(),
+        Value::String(validation_status.to_string()),
+    );
+    stats.insert("validationCount".to_string(), Value::from(results.len()));
+    stats.insert("passCount".to_string(), Value::from(pass_count));
+    stats.insert("failCount".to_string(), Value::from(fail_count));
+    stats.insert("errorCount".to_string(), Value::from(error_count));
+    stats.insert("validationSuites".to_string(), Value::Array(results));
+    stats.insert("failures".to_string(), Value::Array(failures));
+    Value::Object(stats)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn error_status_wins_over_fail_when_consolidating() {
@@ -178,12 +175,33 @@ mod tests {
 
     #[test]
     fn validation_stats_count_each_status() {
-        let stats = extract_validation_stats(&[
+        let stats = extract_validation_stats(vec![
             json!({"status": "pass"}),
             json!({"status": "fail", "name": "x"}),
         ]);
         assert_eq!(stats["validationStatus"], "fail");
         assert_eq!(stats["passCount"], 1);
         assert_eq!(stats["failures"], json!([{"status": "fail", "name": "x"}]));
+    }
+
+    #[test]
+    fn validation_stats_keep_the_javascript_key_order() {
+        let stats = extract_validation_stats(vec![json!({"status": "error"})]);
+        let keys: Vec<&String> = stats
+            .as_object()
+            .map(|fields| fields.keys().collect())
+            .unwrap_or_default();
+        assert_eq!(
+            keys,
+            [
+                "validationStatus",
+                "validationCount",
+                "passCount",
+                "failCount",
+                "errorCount",
+                "validationSuites",
+                "failures"
+            ]
+        );
     }
 }

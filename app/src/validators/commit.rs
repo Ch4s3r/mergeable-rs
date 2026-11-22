@@ -36,8 +36,8 @@ fn validator_context() -> Value {
     json!({"name": "commit"})
 }
 
-fn option_or(settings: &Value, key: &str, default: Value) -> Value {
-    settings.get(key).cloned().unwrap_or(default)
+fn is_option_enabled(settings: &Value, key: &str, default: bool) -> bool {
+    settings.get(key).map_or(default, js::is_truthy)
 }
 
 fn includes_merge_branch(message: Option<&Value>) -> JsResult<bool> {
@@ -70,19 +70,15 @@ fn read_each(commits: &[Option<Value>], path: &[&str]) -> JsResult<Vec<Value>> {
 }
 
 pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult<CommitPlan> {
-    let oldest_only = option_or(message_settings, "oldest_only", Value::Bool(false));
-    let newest_only = option_or(message_settings, "newest_only", Value::Bool(false));
-    let skip_merge = option_or(message_settings, "skip_merge", Value::Bool(true));
-    let single_commit_only = option_or(message_settings, "single_commit_only", Value::Bool(false));
-    let message_type = option_or(
-        message_settings,
-        "message_type",
-        Value::String(String::new()),
-    );
+    let oldest_only = is_option_enabled(message_settings, "oldest_only", false);
+    let newest_only = is_option_enabled(message_settings, "newest_only", false);
+    let skip_merge = is_option_enabled(message_settings, "skip_merge", true);
+    let single_commit_only = is_option_enabled(message_settings, "single_commit_only", false);
+    let message_type = js::as_str(message_settings.get("message_type"));
 
     let mut ordered = lodash::order_by_path(commits, &["date"], false);
 
-    if js::is_truthy(&single_commit_only) && ordered.len() != 1 {
+    if single_commit_only && ordered.len() != 1 {
         let messages = ordered
             .iter()
             .map(|commit| {
@@ -94,7 +90,7 @@ pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult
         return Ok(CommitPlan::SkippedForMultipleCommits(messages));
     }
 
-    if js::is_truthy(&skip_merge) {
+    if skip_merge {
         let mut kept = Vec::new();
         for commit in ordered {
             if !includes_merge_branch(js::read(Some(&commit), "message")?)? {
@@ -105,19 +101,19 @@ pub fn select_commits(commits: Vec<Value>, message_settings: &Value) -> JsResult
     }
 
     let mut selected: Vec<Option<Value>> = ordered.into_iter().map(Some).collect();
-    if js::is_truthy(&oldest_only) {
-        selected = vec![selected.first().cloned().flatten()];
+    if oldest_only {
+        selected = vec![selected.into_iter().next().flatten()];
     }
-    if js::is_truthy(&newest_only) {
-        selected = vec![selected.last().cloned().flatten()];
+    if newest_only {
+        selected = vec![selected.into_iter().next_back().flatten()];
     }
 
     let mut inputs = read_each(&selected, &["message"])?;
     let mut fail_message = DEFAULT_FAIL_MESSAGE;
-    if message_type.as_str() == Some("author_email") {
+    if message_type == Some("author_email") {
         inputs = read_each(&selected, &["author", "email"])?;
         fail_message = DEFAULT_FAIL_AUTHOR_EMAIL_MESSAGE;
-    } else if message_type.as_str() == Some("committer_email") {
+    } else if message_type == Some("committer_email") {
         inputs = read_each(&selected, &["committer", "email"])?;
         fail_message = DEFAULT_FAIL_COMMITTER_EMAIL_MESSAGE;
     }
@@ -147,7 +143,7 @@ pub fn must_include_rule(message_settings: &Value, fail_message: &str) -> Value 
     json!({"must_include": Value::Object(rule)})
 }
 
-fn output(input: Vec<Value>, settings: &Value, status: Value, description: Value) -> Value {
+fn output(input: &Value, settings: &Value, status: Value, description: Value) -> Value {
     let mut result = Map::new();
     result.insert("validator".to_string(), validator_context());
     result.insert("status".to_string(), status);
@@ -218,7 +214,7 @@ pub fn evaluate(
     let selection = match select_commits(commits, message_settings)? {
         CommitPlan::SkippedForMultipleCommits(messages) => {
             return Ok(output(
-                messages,
+                &Value::Array(messages),
                 settings,
                 Value::String("pass".to_string()),
                 Value::String(
@@ -229,18 +225,15 @@ pub fn evaluate(
         CommitPlan::Check(selection) => selection,
     };
     let rule = must_include_rule(message_settings, selection.fail_message);
-    let result = must_include::process(
-        &validator_context(),
-        &Value::Array(selection.inputs.clone()),
-        &rule,
-    )?;
+    let inputs = Value::Array(selection.inputs);
+    let result = must_include::process(&validator_context(), &inputs, &rule)?;
     let description = if result.status == "pass" {
         Value::String(DEFAULT_SUCCESS_MESSAGE.to_string())
     } else {
         result.description
     };
     Ok(output(
-        selection.inputs,
+        &inputs,
         settings,
         Value::String(result.status.to_string()),
         description,

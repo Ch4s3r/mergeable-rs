@@ -28,9 +28,9 @@ pub fn separate_teams_and_individuals(owners: &[String]) -> SeparatedOwners {
     separated
 }
 
-fn extract_user_ids(owners: Vec<String>) -> JsResult<Vec<String>> {
+fn extract_user_ids(owners: &[String]) -> JsResult<Vec<String>> {
     owners
-        .into_iter()
+        .iter()
         .map(|owner| match owner.strip_prefix('@') {
             Some(user_id) => Ok(user_id.to_string()),
             None => Err(JsError::type_error("EMAIL_REGEX.test is not a function")),
@@ -49,21 +49,15 @@ async fn retrieve_codeowners(context: &Context) -> JsResult<Option<String>> {
             context.repo_params(json!({"pull_number": pull_number}))?,
         )
         .await?;
-        let mut modified_files = Vec::new();
+        let mut is_owner_file_modified = false;
         for changed_file in &files {
             let status = js::read(Some(changed_file), "status")?;
-            if matches!(js::as_str(status), Some("modified") | Some("added")) {
-                modified_files.push(
-                    js::read(Some(changed_file), "filename")?
-                        .cloned()
-                        .unwrap_or(Value::Null),
-                );
+            if matches!(js::as_str(status), Some("modified" | "added")) {
+                let filename = js::read(Some(changed_file), "filename")?;
+                is_owner_file_modified |= js::as_str(filename) == Some(OWNER_FILE_PATH);
             }
         }
-        if modified_files
-            .iter()
-            .any(|filename| filename.as_str() == Some(OWNER_FILE_PATH))
-        {
+        if is_owner_file_modified {
             let head_sha = js::read_path(&context.payload, &["pull_request", "head", "sha"])?
                 .cloned()
                 .unwrap_or(Value::Null);
@@ -115,7 +109,7 @@ pub async fn process(payload: &Value, context: &Context) -> JsResult<Vec<Value>>
         Some(_) => return Err(JsError::type_error("compare.files.map is not a function")),
     };
 
-    let mut owner_list = Vec::new();
+    let mut owner_list: &[String] = &[];
     for path in &paths {
         let path_owners = owner_file.owners_for(path)?;
         if !path_owners.is_empty() {
@@ -148,10 +142,10 @@ mod tests {
     #[test]
     fn at_prefix_is_stripped_and_email_owners_hit_the_node_type_error() {
         assert_eq!(
-            extract_user_ids(vec!["@bob".to_string()]).unwrap(),
+            extract_user_ids(&["@bob".to_string()]).unwrap(),
             vec!["bob"]
         );
-        let error = extract_user_ids(vec!["bob@example.com".to_string()]).unwrap_err();
+        let error = extract_user_ids(&["bob@example.com".to_string()]).unwrap_err();
         assert_eq!(
             error.to_string(),
             "TypeError: EMAIL_REGEX.test is not a function"

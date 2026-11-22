@@ -3,14 +3,9 @@ use serde_json::{Value, json};
 
 pub fn is_event_supported(supported_events: &[&str], event_name: &str) -> bool {
     let event_object = event_name.split('.').next().unwrap_or_default();
-    let relevant: Vec<&&str> = supported_events
-        .iter()
-        .filter(|event| event.split('.').next() == Some(event_object) || **event == "*")
-        .collect();
-    let wildcard_for_object = format!("{event_object}.*");
-    relevant
-        .iter()
-        .any(|event| **event == "*" || **event == wildcard_for_object || **event == event_name)
+    supported_events.iter().any(|&event| {
+        event == "*" || event == event_name || event.strip_suffix(".*") == Some(event_object)
+    })
 }
 
 pub fn payload_key(context: &Context) -> &str {
@@ -56,5 +51,6 @@ mod tests {
         assert!(is_event_supported(&["issues.opened"], "issues.opened"));
         assert!(!is_event_supported(&["issues.opened"], "issues.closed"));
         assert!(!is_event_supported(&["pull_request.*"], "issues.opened"));
+        assert!(!is_event_supported(&["issues.opened.*"], "issues.opened"));
     }
 }

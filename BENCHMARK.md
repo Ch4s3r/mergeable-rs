@@ -51,3 +51,20 @@ Chosen: `[profile.release] lto = true, codegen-units = 1` plus log payloads buil
 Not adopted: `-Ctarget-cpu=native` (no measurable gain, binaries would not run on other CPUs / in the Docker image),
 `panic = "abort"` (1-3% more, but a panic in one webhook would abort the whole server instead of failing that
 webhook). Replay after the change: 379/381 identical, 2 known diffs (unchanged).
+
+## Rust-to-Rust: code optimization round (2026-11-22)
+
+Same method as above (20,000 webhooks, 32 in flight, app CPU per webhook, median of 5 interleaved runs), comparing
+the tuned release build (`84243c6`) with this round.
+
+| Build | Read µs CPU/webhook | Write µs CPU/webhook | Binary |
+|---|---|---|---|
+| `84243c6` (release profile tuning) | 385 | 658 | 12.1 MB |
+| this round | 281 (-27%) | 544 (-17%) | 12.4 MB |
+
+Main changes: user regex and glob patterns compiled once and cached (moka) instead of per webhook, CODEOWNERS globs
+compiled once per file, the webhook payload shared copy-on-write across tasks instead of deep-copied, rule lists and
+settings borrowed instead of cloned in flex/registry/configuration, GitHub request URLs built and parsed once with
+the token header cached, the template lexer made linear, and logging switched to plain `tracing` macros with fields.
+Replay: 379/381 identical + 2 known diffs (unchanged); one case hit a harness connection reset under `--jobs 12`
+and passed 3/3 when rerun.

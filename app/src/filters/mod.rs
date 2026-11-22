@@ -1,7 +1,6 @@
 use crate::context::Context;
 use crate::error::{JsError, JsResult};
 use crate::js;
-use crate::logging;
 use crate::registry::Registry;
 use crate::results;
 use async_trait::async_trait;
@@ -66,15 +65,13 @@ pub async fn process_filter(
     let supported_settings = filter
         .supported_settings()
         .ok_or_else(|| JsError::error("Class extending filters must provide supported Settings"))?;
-    logging::info(&format!("filter/{}", filter.name()), || {
-        json!({
-            "logType": "filter_process",
-            "eventId": context.event_id,
-            "repo": context.repository_full_name(),
-            "filterName": filter.name(),
-            "settings": js::stringify(settings),
-        })
-    });
+    tracing::info!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        filter = filter.name(),
+        settings = %settings,
+        "filter_process"
+    );
     if filter.checks_settings() {
         match crate::validators::validate_settings(
             &format!("filter/{}", filter.name()),

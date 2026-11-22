@@ -65,7 +65,9 @@ pub fn process<'call>(
             let status_text = js::as_str(status);
             if status_text == Some("error") {
                 does_error_exist = true;
-                error_message.push_str(&format!("- {description_text} \n"));
+                error_message.push_str("- ");
+                error_message.push_str(&description_text);
+                error_message.push_str(" \n");
             }
             let result_success = status_text == Some("pass");
             is_mergeable = Some(match is_mergeable {
@@ -76,7 +78,10 @@ pub fn process<'call>(
             if status_text == Some("fail") {
                 if descriptions.encode_utf16().count() > 2 {
                     let connective = if is_and { " ***AND*** " } else { " ***OR*** " };
-                    descriptions.push_str(&format!(" {connective} {description_text}"));
+                    descriptions.push(' ');
+                    descriptions.push_str(connective);
+                    descriptions.push(' ');
+                    descriptions.push_str(&description_text);
                 } else {
                     descriptions.push_str(&description_text);
                 }

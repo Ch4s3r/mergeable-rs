@@ -56,9 +56,7 @@ async fn get_config_file(
         Err(error) if error.status == Some(404) => return Ok(empty),
         Err(error) => return Err(error),
     };
-    if response.headers.get("content-type").map(String::as_str)
-        == Some("application/json; charset=utf-8")
-    {
+    if response.header("content-type") == Some("application/json; charset=utf-8") {
         return Err(plugin_error(format!(
             "{url} exists, but is either a directory or a submodule. Ignoring."
         )));
@@ -190,29 +188,25 @@ fn is_mergeable_object(value: &Value) -> bool {
     value.is_object() || value.is_array()
 }
 
-pub fn deepmerge(target: &Value, source: &Value) -> Value {
+fn deepmerge_owned(target: Value, source: Value) -> Value {
     match (target, source) {
-        (Value::Array(target_items), Value::Array(source_items)) => Value::Array(
-            target_items
-                .iter()
-                .chain(source_items.iter())
-                .cloned()
-                .collect(),
-        ),
-        (Value::Object(target_map), Value::Object(source_map)) => {
-            let mut destination = target_map.clone();
+        (Value::Array(mut target_items), Value::Array(source_items)) => {
+            target_items.extend(source_items);
+            Value::Array(target_items)
+        }
+        (Value::Object(mut destination), Value::Object(source_map)) => {
             for (key, source_value) in source_map {
-                let merged = match target_map.get(key) {
-                    Some(target_value) if is_mergeable_object(source_value) => {
-                        deepmerge(target_value, source_value)
+                let merged = match destination.get_mut(&key) {
+                    Some(target_value) if is_mergeable_object(&source_value) => {
+                        deepmerge_owned(target_value.take(), source_value)
                     }
-                    _ => source_value.clone(),
+                    _ => source_value,
                 };
-                destination.insert(key.clone(), merged);
+                destination.insert(key, merged);
             }
             Value::Object(destination)
         }
-        (_, other) => other.clone(),
+        (_, other) => other,
     }
 }
 
@@ -224,22 +218,19 @@ pub async fn load(
     let (owner, repo) = context.repo()?;
     let path = format!(".github/{}", file_name.trim_start_matches('/'));
     let files = get_config_files(context, &owner, &repo, &path).await?;
-    let configs: Vec<Value> = files
-        .iter()
-        .rev()
-        .filter_map(|file| file.config.clone().filter(js::is_truthy))
-        .collect();
     let has_default = default_config.is_some_and(js::is_truthy);
     if !has_default && files.iter().all(|file| file.config.is_none()) {
         return Ok(None);
     }
-    let mut merged = match default_config {
+    let initial = match default_config {
         Some(default_value) if js::is_truthy(default_value) => default_value.clone(),
         _ => Value::Object(Map::new()),
     };
-    for config in configs {
-        merged = deepmerge(&merged, &config);
-    }
+    let merged = files
+        .into_iter()
+        .rev()
+        .filter_map(|file| file.config.filter(js::is_truthy))
+        .fold(initial, deepmerge_owned);
     Ok(Some(merged))
 }
 
@@ -252,7 +243,7 @@ mod tests {
         let base = json!({"mergeable": [{"when": "a"}], "version": 2});
         let repo = json!({"mergeable": [{"when": "b"}]});
         assert_eq!(
-            deepmerge(&base, &repo),
+            deepmerge_owned(base, repo),
             json!({"mergeable": [{"when": "a"}, {"when": "b"}], "version": 2})
         );
     }

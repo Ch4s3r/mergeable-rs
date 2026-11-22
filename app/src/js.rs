@@ -9,7 +9,7 @@ pub fn truthy(value: Option<&Value>) -> bool {
             .as_f64()
             .is_some_and(|float| float != 0.0 && !float.is_nan()),
         Some(Value::String(text)) => !text.is_empty(),
-        Some(Value::Array(_)) | Some(Value::Object(_)) => true,
+        Some(Value::Array(_) | Value::Object(_)) => true,
     }
 }
 
@@ -20,7 +20,7 @@ pub fn is_truthy(value: &Value) -> bool {
 pub fn type_of(value: Option<&Value>) -> &'static str {
     match value {
         None => "undefined",
-        Some(Value::Null) | Some(Value::Array(_)) | Some(Value::Object(_)) => "object",
+        Some(Value::Null | Value::Array(_) | Value::Object(_)) => "object",
         Some(Value::Bool(_)) => "boolean",
         Some(Value::Number(_)) => "number",
         Some(Value::String(_)) => "string",
@@ -68,14 +68,20 @@ pub fn to_js_string(value: Option<&Value>) -> String {
         Some(Value::Bool(flag)) => flag.to_string(),
         Some(Value::Number(number)) => number_to_string(number),
         Some(Value::String(text)) => text.clone(),
-        Some(Value::Array(items)) => items
-            .iter()
-            .map(|item| match item {
-                Value::Null => String::new(),
-                other => to_js_string(Some(other)),
-            })
-            .collect::<Vec<_>>()
-            .join(","),
+        Some(Value::Array(items)) => {
+            let mut joined = String::new();
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    joined.push(',');
+                }
+                match item {
+                    Value::Null => {}
+                    Value::String(text) => joined.push_str(text),
+                    other => joined.push_str(&to_js_string(Some(other))),
+                }
+            }
+            joined
+        }
         Some(Value::Object(_)) => "[object Object]".to_string(),
     }
 }

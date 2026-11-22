@@ -1,4 +1,11 @@
 use std::cell::Cell;
+use std::sync::LazyLock;
+
+const COMPILED_PATTERN_CACHE_CAPACITY: u64 = 4096;
+
+static COMPILED_PATTERNS: LazyLock<
+    moka::sync::Cache<(String, JsRegexFlags), Result<fancy_regex::Regex, JsRegexSyntaxError>>,
+> = LazyLock::new(|| moka::sync::Cache::new(COMPILED_PATTERN_CACHE_CAPACITY));
 
 const WORD_CLASS_ITEMS: &str = "0-9A-Za-z_";
 const DIGIT_CLASS_ITEMS: &str = "0-9";
@@ -6,7 +13,7 @@ const WHITESPACE_CLASS_ITEMS: &str = "\\t\\n\\x0B\\x0C\\r \\x{A0}\\x{1680}\\x{20
 const LINE_TERMINATOR_CLASS_ITEMS: &str = "\\n\\r\\x{2028}\\x{2029}";
 const NEVER_MATCHING_CLASS: &str = "[^\\x00-\\x{10FFFF}]";
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct JsRegexFlags {
     pub global: bool,
     pub ignore_case: bool,
@@ -58,8 +65,10 @@ pub struct JsRegexSyntaxError;
 impl JsRegex {
     pub fn new(pattern: &str, flags: &str) -> Result<Self, JsRegexSyntaxError> {
         let parsed_flags = JsRegexFlags::parse(flags).ok_or(JsRegexSyntaxError)?;
-        let translated = translate(pattern, parsed_flags)?;
-        let compiled = fancy_regex::Regex::new(&translated).map_err(|_| JsRegexSyntaxError)?;
+        let compiled = COMPILED_PATTERNS.get_with((pattern.to_string(), parsed_flags), || {
+            let translated = translate(pattern, parsed_flags)?;
+            fancy_regex::Regex::new(&translated).map_err(|_| JsRegexSyntaxError)
+        })?;
         Ok(JsRegex {
             compiled,
             flags: parsed_flags,
@@ -131,7 +140,7 @@ fn count_capture_groups(pattern: &[char]) -> (usize, bool) {
                 if pattern.get(index + 1) != Some(&'?') {
                     count += 1;
                 } else if pattern.get(index + 2) == Some(&'<')
-                    && !matches!(pattern.get(index + 3), Some('=') | Some('!'))
+                    && !matches!(pattern.get(index + 3), Some('=' | '!'))
                 {
                     count += 1;
                     has_named_groups = true;
@@ -258,7 +267,7 @@ impl Translator<'_> {
                 '(' => {
                     if self.peek(1) == Some('?')
                         && self.peek(2) == Some('<')
-                        && !matches!(self.peek(3), Some('=') | Some('!'))
+                        && !matches!(self.peek(3), Some('=' | '!'))
                     {
                         self.output.push_str("(?P<");
                         self.position += 3;
@@ -362,13 +371,17 @@ impl Translator<'_> {
                 let translation = self.translate_common_escape()?;
                 match translation {
                     EscapeTranslation::Literal(character) => {
-                        self.output.push_str(&escape_literal(character))
+                        self.output.push_str(&escape_literal(character));
                     }
                     EscapeTranslation::ClassItems(items) => {
-                        self.output.push_str(&format!("[{items}]"))
+                        self.output.push('[');
+                        self.output.push_str(items);
+                        self.output.push(']');
                     }
                     EscapeTranslation::NegatedClass(items) => {
-                        self.output.push_str(&format!("[^{items}]"))
+                        self.output.push_str("[^");
+                        self.output.push_str(items);
+                        self.output.push(']');
                     }
                     EscapeTranslation::Raw(raw) => self.output.push_str(&raw),
                 }
@@ -578,7 +591,9 @@ impl Translator<'_> {
                             previous_was_class_escape = true;
                         }
                         EscapeTranslation::NegatedClass(items) => {
-                            class.push_str(&format!("[^{items}]"));
+                            class.push_str("[^");
+                            class.push_str(items);
+                            class.push(']');
                             previous_was_class_escape = true;
                         }
                         EscapeTranslation::Raw(raw) => {

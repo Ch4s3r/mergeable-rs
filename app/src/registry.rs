@@ -5,6 +5,7 @@ use crate::js;
 use crate::validators::{self, Validator};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -18,9 +19,12 @@ fn module_not_found(kind: &str, key: &str) -> JsError {
     JsError::error(format!("Cannot find module './{kind}/{key}'"))
 }
 
-fn for_each_entry(list: Option<&Value>, list_description: &str) -> JsResult<Vec<Value>> {
+fn for_each_entry<'list>(
+    list: Option<&'list Value>,
+    list_description: &str,
+) -> JsResult<&'list [Value]> {
     match list {
-        Some(Value::Array(items)) => Ok(items.clone()),
+        Some(Value::Array(items)) => Ok(items),
         None => Err(JsError::reading_property_of_undefined("forEach")),
         Some(Value::Null) => Err(JsError::type_error(
             "Cannot read properties of null (reading 'forEach')",
@@ -33,6 +37,25 @@ fn for_each_entry(list: Option<&Value>, list_description: &str) -> JsResult<Vec<
 
 fn entry_key(entry: &Value) -> JsResult<String> {
     Ok(js::to_js_string(js::read(Some(entry), "do")?))
+}
+
+fn register_entries<'entry, Module: ?Sized>(
+    registered: &Mutex<HashMap<String, Arc<Module>>>,
+    entries: impl IntoIterator<Item = &'entry Value>,
+    kind: &str,
+    create: impl Fn(&str) -> Option<Arc<Module>>,
+) -> JsResult<()> {
+    for entry in entries {
+        let key = entry_key(entry)?;
+        let mut registered = registered
+            .lock()
+            .map_err(|_| JsError::error("registry poisoned"))?;
+        if let Entry::Vacant(slot) = registered.entry(key) {
+            let module = create(slot.key()).ok_or_else(|| module_not_found(kind, slot.key()))?;
+            slot.insert(module);
+        }
+    }
+    Ok(())
 }
 
 impl Registry {
@@ -52,66 +75,41 @@ impl Registry {
         if !js::truthy(rule.get("filter")) {
             return Ok(());
         }
-        for entry in for_each_entry(rule.get("filter"), "rule.filter")? {
-            let key = entry_key(&entry)?;
-            let mut registered = self
-                .filters
-                .lock()
-                .map_err(|_| JsError::error("registry poisoned"))?;
-            if let std::collections::hash_map::Entry::Vacant(slot) = registered.entry(key.clone()) {
-                slot.insert(
-                    filters::create(&key).ok_or_else(|| module_not_found("filters", &key))?,
-                );
-            }
-        }
-        Ok(())
+        register_entries(
+            &self.filters,
+            for_each_entry(rule.get("filter"), "rule.filter")?,
+            "filters",
+            filters::create,
+        )
     }
 
     pub fn register_validators(&self, rule: &Value) -> JsResult<()> {
-        for entry in for_each_entry(rule.get("validate"), "rule.validate")? {
-            let key = entry_key(&entry)?;
-            let mut registered = self
-                .validators
-                .lock()
-                .map_err(|_| JsError::error("registry poisoned"))?;
-            if let std::collections::hash_map::Entry::Vacant(slot) = registered.entry(key.clone()) {
-                slot.insert(
-                    validators::create(&key).ok_or_else(|| module_not_found("validators", &key))?,
-                );
-            }
-        }
-        Ok(())
+        register_entries(
+            &self.validators,
+            for_each_entry(rule.get("validate"), "rule.validate")?,
+            "validators",
+            validators::create,
+        )
     }
 
     pub fn register_actions(&self, rule: &Value) -> JsResult<()> {
-        let mut possible_actions: Vec<Value> = Vec::new();
-        for outcome in ["pass", "fail", "error"] {
-            if let Some(actions) = rule.get(outcome).filter(|actions| js::is_truthy(actions)) {
-                possible_actions = js::concat(&possible_actions, actions);
-            }
-        }
-        for entry in possible_actions {
-            let key = entry_key(&entry)?;
-            let mut registered = self
-                .actions
-                .lock()
-                .map_err(|_| JsError::error("registry poisoned"))?;
-            if let std::collections::hash_map::Entry::Vacant(slot) = registered.entry(key.clone()) {
-                slot.insert(
-                    actions::create(&key).ok_or_else(|| module_not_found("actions", &key))?,
-                );
-            }
-        }
-        Ok(())
+        let possible_actions = ["pass", "fail", "error"]
+            .into_iter()
+            .filter_map(|outcome| rule.get(outcome).filter(|actions| js::is_truthy(actions)))
+            .flat_map(|actions| match actions {
+                Value::Array(items) => items.as_slice(),
+                single => std::slice::from_ref(single),
+            });
+        register_entries(&self.actions, possible_actions, "actions", actions::create)
     }
 
     pub fn register_all(&self, settings: &Value) -> JsResult<()> {
         for rule in for_each_entry(Some(settings), "settings")? {
-            self.register_filters(&rule)
+            self.register_filters(rule)
                 .map_err(|error| JsError::error(format!("Filters have thrown {error}")))?;
-            self.register_validators(&rule)
+            self.register_validators(rule)
                 .map_err(|error| JsError::error(format!("Validators have thrown {error}")))?;
-            self.register_actions(&rule)
+            self.register_actions(rule)
                 .map_err(|error| JsError::error(format!("Actions have thrown {error}")))?;
         }
         Ok(())

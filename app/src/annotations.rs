@@ -27,21 +27,16 @@ fn annotation_value(annotation: &str, payload: Option<&Value>, event: &Value) ->
     })
 }
 
-fn replace_first_unescaped(template: &str, annotation: &str, replacement: &str) -> String {
+fn replace_first_unescaped(text: &mut String, annotation: &str, replacement: &str) {
     let mut search_from = 0;
-    while let Some(offset) = template[search_from..].find(annotation) {
+    while let Some(offset) = text[search_from..].find(annotation) {
         let position = search_from + offset;
-        if position == 0 || !template[..position].ends_with('\\') {
-            return format!(
-                "{}{}{}",
-                &template[..position],
-                replacement,
-                &template[position + annotation.len()..]
-            );
+        if position == 0 || !text[..position].ends_with('\\') {
+            text.replace_range(position..position + annotation.len(), replacement);
+            return;
         }
         search_from = position + 1;
     }
-    template.to_string()
 }
 
 pub fn search_and_replace_special_annotations(
@@ -52,19 +47,12 @@ pub fn search_and_replace_special_annotations(
     let mut result = template.to_string();
     for annotation in ANNOTATIONS {
         let replacement = annotation_value(annotation, payload, event)?;
-        result = replace_first_unescaped(&result, annotation, &replacement);
-        let escaped = format!("\\{annotation}");
-        if let Some(position) = result.find(&escaped) {
-            result = format!(
-                "{}{}{}",
-                &result[..position],
-                annotation,
-                &result[position + escaped.len()..]
-            );
+        replace_first_unescaped(&mut result, annotation, &replacement);
+        if let Some(backslash_position) = result.find(&format!("\\{annotation}")) {
+            result.remove(backslash_position);
         }
-        let replacement = annotation_value(annotation, payload, event)?;
         if result.starts_with(annotation) {
-            result = format!("{}{}", replacement, &result[annotation.len()..]);
+            result.replace_range(..annotation.len(), &replacement);
         }
     }
     Ok(result)

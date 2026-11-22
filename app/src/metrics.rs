@@ -6,7 +6,7 @@ use prometheus_client::metrics::gauge::Gauge;
 use prometheus_client::metrics::histogram::{Histogram, exponential_buckets};
 use prometheus_client::registry::Registry;
 use regex::Regex;
-use std::collections::HashMap;
+use reqwest::header::HeaderMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -42,18 +42,19 @@ pub struct HttpRequestLabels {
 }
 
 pub fn normalize_path(path: &str) -> String {
-    let chunks: Vec<&str> = path
-        .split('/')
-        .filter(|chunk| !chunk.is_empty())
-        .map(|chunk| {
-            if PATH_VALUE_MASKS.iter().any(|mask| mask.is_match(chunk)) {
-                PATH_VALUE_PLACEHOLDER
-            } else {
-                chunk
-            }
-        })
-        .collect();
-    format!("/{}", chunks.join("/"))
+    let mut normalized = String::with_capacity(path.len() + 1);
+    for chunk in path.split('/').filter(|chunk| !chunk.is_empty()) {
+        normalized.push('/');
+        if PATH_VALUE_MASKS.iter().any(|mask| mask.is_match(chunk)) {
+            normalized.push_str(PATH_VALUE_PLACEHOLDER);
+        } else {
+            normalized.push_str(chunk);
+        }
+    }
+    if normalized.is_empty() {
+        normalized.push('/');
+    }
+    normalized
 }
 
 pub fn normalize_status_code(status: u16) -> &'static str {
@@ -65,8 +66,8 @@ pub fn normalize_status_code(status: u16) -> &'static str {
     }
 }
 
-fn header_number(header_value: Option<&String>) -> f64 {
-    header_value.map_or(f64::NAN, |text| crate::scheduler::js_number(text))
+fn header_number(headers: &HeaderMap, name: &str) -> f64 {
+    crate::github::client::header_text(headers, name).map_or(f64::NAN, crate::scheduler::js_number)
 }
 
 pub struct Metrics {
@@ -158,15 +159,15 @@ impl Metrics {
         }
     }
 
-    pub fn record_rate_limit(&self, installation_id: u64, headers: &HashMap<String, String>) {
+    pub fn record_rate_limit(&self, installation_id: u64, headers: &HeaderMap) {
         let labels: InstallationLabels =
             vec![("installationId".to_string(), installation_id.to_string())];
         self.rate_limit_remaining
             .get_or_create(&labels)
-            .set(header_number(headers.get("x-ratelimit-remaining")));
+            .set(header_number(headers, "x-ratelimit-remaining"));
         self.rate_limit_limit
             .get_or_create(&labels)
-            .set(header_number(headers.get("x-ratelimit-limit")));
+            .set(header_number(headers, "x-ratelimit-limit"));
     }
 
     pub fn record_http_request(&self, method: &str, path: &str, status: u16, seconds: f64) {
@@ -242,7 +243,11 @@ mod tests {
     #[test]
     fn rate_limit_gauges_are_labelled_by_installation_and_missing_headers_give_nan() {
         let metrics = Metrics::new();
-        let headers = HashMap::from([("x-ratelimit-remaining".to_string(), "4999".to_string())]);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-ratelimit-remaining",
+            reqwest::header::HeaderValue::from_static("4999"),
+        );
         metrics.record_rate_limit(4242, &headers);
         let rendered = metrics.render();
         assert!(

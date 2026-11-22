@@ -37,7 +37,7 @@ pub fn local_time(now: DateTime<Utc>, time_zone: Option<&str>) -> LocalTime {
     }
 }
 
-fn construct_stale_output(input: Value, settings: &Value, result: &Value) -> Value {
+fn construct_stale_output(input: &str, settings: &Value, result: &Value) -> Value {
     let mut output = Map::new();
     output.insert("validator".to_string(), Value::String("stale".to_string()));
     if let Some(status) = js::get(result, "status") {
@@ -57,7 +57,7 @@ fn craft_fail_output(settings: &Value) -> Value {
     json!({
         "status": "fail",
         "name": "stale",
-        "validations": construct_stale_output(Value::String("fail".to_string()), settings, settings),
+        "validations": construct_stale_output("fail", settings, settings),
     })
 }
 
@@ -102,28 +102,26 @@ pub fn outside_time_constraint(settings: &Value, now: DateTime<Utc>) -> JsResult
     Ok(false)
 }
 
+fn search_type_for(item: &Value) -> Option<&'static str> {
+    match item.as_str() {
+        Some("issues") => Some("issue"),
+        Some("pull_request") => Some("pr"),
+        _ => None,
+    }
+}
+
 pub fn requested_types(settings: &Value) -> Vec<Value> {
-    let type_setting = settings
-        .get("type")
-        .filter(|value| js::is_truthy(value))
-        .cloned()
-        .unwrap_or_else(|| json!(["issue", "pr"]));
-    let types: Vec<Value> = match &type_setting {
-        Value::Array(items) => items
+    match settings.get("type").filter(|value| js::is_truthy(value)) {
+        None => Vec::new(),
+        Some(Value::Array(items)) => items
             .iter()
-            .filter(|item| item.as_str() == Some("issues") || item.as_str() == Some("pull_request"))
-            .cloned()
+            .filter_map(search_type_for)
+            .map(|search_type| Value::String(search_type.to_string()))
             .collect(),
-        other => vec![other.clone()],
-    };
-    types
-        .iter()
-        .map(|item| match item.as_str() {
-            Some("issues") => Value::String("issue".to_string()),
-            Some("pull_request") => Value::String("pr".to_string()),
-            _ => Value::Null,
-        })
-        .collect()
+        Some(other) => vec![search_type_for(other).map_or(Value::Null, |search_type| {
+            Value::String(search_type.to_string())
+        })],
+    }
 }
 
 pub fn search_timestamp(now: DateTime<Utc>, days: f64) -> JsResult<String> {
@@ -186,7 +184,7 @@ pub fn search_query(
     Ok(lodash::js_trim(&query).to_string())
 }
 
-pub fn schedule_result(items: &Value, input: Value, settings: &Value) -> JsResult<Value> {
+pub fn schedule_result(items: &Value, input: &Value, settings: &Value) -> JsResult<Value> {
     let items = match items {
         Value::Array(items) => items,
         Value::Null => {
@@ -218,7 +216,7 @@ pub fn schedule_result(items: &Value, input: Value, settings: &Value) -> JsResul
     Ok(json!({
         "status": status,
         "name": "stale",
-        "validations": construct_stale_output(Value::String(status.to_string()), &input, settings),
+        "validations": construct_stale_output(status, input, settings),
         "schedule": {"issues": issues, "pulls": pulls},
     }))
 }
@@ -273,7 +271,7 @@ impl Validator for Stale {
             json!({"q": query, "sort": "updated", "order": "desc", "per_page": MAX_ISSUES}),
         )
         .await?;
-        schedule_result(&items, json!({"days": days, "types": types}), settings)
+        schedule_result(&items, &json!({"days": days, "types": types}), settings)
     }
 }
 
@@ -343,7 +341,7 @@ mod tests {
     fn issues_and_pulls_are_split_and_any_result_passes() {
         let result = schedule_result(
             &json!([{"number": 1}, {"number": 2, "pull_request": {}}]),
-            json!({"days": 10, "types": []}),
+            &json!({"days": 10, "types": []}),
             &json!({}),
         )
         .unwrap();
@@ -366,7 +364,7 @@ mod tests {
     fn nothing_stale_fails() {
         let result = schedule_result(
             &json!([]),
-            json!({"days": 10, "types": ["issue"]}),
+            &json!({"days": 10, "types": ["issue"]}),
             &json!({}),
         )
         .unwrap();

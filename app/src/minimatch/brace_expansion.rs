@@ -155,8 +155,7 @@ fn numeric(text: &str) -> i64 {
         Err(_) => text
             .chars()
             .next()
-            .map(|character| character as i64)
-            .unwrap_or(0),
+            .map_or(0, |character| i64::from(u32::from(character))),
     }
 }
 
@@ -230,10 +229,8 @@ fn expand(text: &str, is_top: bool) -> Vec<String> {
 
 fn sequence_items(parts: &[String], is_alpha_sequence: bool) -> Vec<String> {
     let start = numeric(&parts[0]);
-    let end = parts.get(1).map(|part| numeric(part)).unwrap_or(start);
-    let width = parts[0]
-        .len()
-        .max(parts.get(1).map(String::len).unwrap_or(0));
+    let end = parts.get(1).map_or(start, |part| numeric(part));
+    let width = parts[0].len().max(parts.get(1).map_or(0, String::len));
     let mut increment = if parts.len() == 3 {
         numeric(&parts[2]).abs()
     } else {

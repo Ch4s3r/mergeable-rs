@@ -2,9 +2,9 @@ use crate::context::Context;
 use crate::error::JsResult;
 use crate::event_aware;
 use crate::js;
-use crate::logging;
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::Value;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 pub mod assign;
@@ -53,15 +53,13 @@ pub fn is_event_supported(action: &dyn Action, event_name: &str) -> bool {
 }
 
 fn log_usage(action: &dyn Action, context: &Context, settings: &Value, log_type: &str) {
-    logging::info(&format!("action/{}", action.name()), || {
-        json!({
-            "logType": log_type,
-            "eventId": context.event_id,
-            "repo": context.repository_full_name(),
-            "actionName": action.name(),
-            "settings": js::stringify(settings),
-        })
-    });
+    tracing::info!(
+        event_id = %context.event_id,
+        repo = %context.repository_full_name(),
+        action = action.name(),
+        settings = %settings,
+        "{log_type}"
+    );
 }
 
 pub async fn process_before_validate(
@@ -87,7 +85,10 @@ pub async fn process_after_validate(
         .await
 }
 
-pub fn get_actionables(context: &Context, results: &Value) -> Vec<Value> {
+pub fn get_actionables<'context>(
+    context: &'context Context,
+    results: &Value,
+) -> Vec<Cow<'context, Value>> {
     let schedule_results = if context.event_name == "schedule" {
         js::get_path(results, &["validationSuites", "0", "schedule"])
             .filter(|schedule| js::is_truthy(schedule))
@@ -101,12 +102,13 @@ pub fn get_actionables(context: &Context, results: &Value) -> Vec<Value> {
                 .map(js::as_array_or_wrap)
                 .unwrap_or_default();
             js::concat(&issues, schedule.get("pulls").unwrap_or(&Value::Null))
+                .into_iter()
+                .map(Cow::Owned)
+                .collect()
         }
-        None => vec![
-            event_aware::get_payload(context)
-                .cloned()
-                .unwrap_or(Value::Null),
-        ],
+        None => {
+            vec![event_aware::get_payload(context).map_or(Cow::Owned(Value::Null), Cow::Borrowed)]
+        }
     }
 }
 

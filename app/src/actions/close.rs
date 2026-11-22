@@ -44,7 +44,7 @@ impl Action for Close {
         results: &Value,
     ) -> JsResult<()> {
         for issue in get_actionables(context, results) {
-            let issue_number = js::read(Some(&issue), "number")?
+            let issue_number = js::read(Some(&*issue), "number")?
                 .cloned()
                 .unwrap_or(Value::Null);
             let task_context = context.clone();

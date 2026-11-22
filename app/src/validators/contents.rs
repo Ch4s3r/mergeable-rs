@@ -19,15 +19,12 @@ fn validator_context() -> Value {
 }
 
 fn matches_ignored_patterns(file_name: &Value, patterns_to_ignore: &Value) -> JsResult<bool> {
-    let patterns = match patterns_to_ignore {
-        Value::Array(patterns) => patterns.clone(),
-        _ => {
-            return Err(JsError::type_error(
-                "patternsToIgnore.some is not a function",
-            ));
-        }
+    let Value::Array(patterns) = patterns_to_ignore else {
+        return Err(JsError::type_error(
+            "patternsToIgnore.some is not a function",
+        ));
     };
-    for pattern in &patterns {
+    for pattern in patterns {
         if minimatch::minimatch(file_name, pattern, false)? {
             return Ok(true);
         }
@@ -126,12 +123,13 @@ impl Validator for Contents {
                 .unwrap_or(Value::Null);
             let params = context.repo_params(json!({"path": file, "ref": head_sha}))?;
             let file_name = js::to_js_string(Some(file));
-            let Some(content) = api::get_content(context, params).await? else {
+            let Some(file_content) = api::get_content(context, params).await? else {
                 failed_files.push(format!("{file_name} (Not Found)"));
                 continue;
             };
             let processed =
-                validators::process_options(&parse_option, &Value::String(content), None).await?;
+                validators::process_options(&parse_option, &Value::String(file_content), None)
+                    .await?;
             match processed.get("status").and_then(Value::as_str) {
                 Some("error") => return Ok(processed),
                 Some("fail") => failed_files.push(file_name),

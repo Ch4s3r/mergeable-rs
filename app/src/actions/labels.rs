@@ -4,10 +4,9 @@ use crate::context::Context;
 use crate::error::{JsError, JsResult};
 use crate::github::api;
 use crate::js;
-use crate::logging;
 use async_trait::async_trait;
 use futures::future::join_all;
-use serde_json::{Value, json};
+use serde_json::Value;
 
 pub const SUPPORTED_EVENTS: [&str; 4] = [
     "pull_request.*",
@@ -87,10 +86,7 @@ fn labels_to_keep(current: Vec<Value>, patterns: Option<&Value>) -> JsResult<Vec
 }
 
 fn log_detached_failure(context: &Context, error: &JsError) {
-    logging::error(
-        "action/labels",
-        || json!({"eventId": context.event_id, "errors": error.to_string()}),
-    );
+    tracing::error!(event_id = %context.event_id, %error, "labels action failed");
 }
 
 async fn delete_matching_labels(
@@ -176,7 +172,7 @@ impl Action for Labels {
         let mut issue_numbers = Vec::new();
         let mut unreadable_issue = None;
         for issue in &items {
-            match js::read(Some(issue), "number") {
+            match js::read(Some(&**issue), "number") {
                 Ok(number) => issue_numbers.push(number.cloned().unwrap_or(Value::Null)),
                 Err(error) => {
                     unreadable_issue = Some(error);

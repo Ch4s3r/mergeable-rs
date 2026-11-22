@@ -100,21 +100,20 @@ async fn fetch_settings_file(context: &Context) -> JsResult<Value> {
     Ok(settings)
 }
 
-fn settings_from_file(settings: &Value) -> Value {
+fn settings_from_file(mut settings: Value) -> Value {
     if js::truthy(settings.get("version")) && !settings.get("version").is_some_and(Value::is_number)
     {
         return json!({});
     }
-    match settings.get("mergeable") {
-        Some(mergeable @ Value::Object(_)) => mergeable.clone(),
-        Some(mergeable @ Value::Array(_)) => mergeable.clone(),
+    match settings.get_mut("mergeable").map(Value::take) {
+        Some(mergeable @ (Value::Object(_) | Value::Array(_))) => mergeable,
         _ => json!({}),
     }
 }
 
 pub async fn instance_with_context(context: &Context) -> Value {
     match fetch_settings_file(context).await {
-        Ok(settings) => settings_from_file(&settings),
+        Ok(settings) => settings_from_file(settings),
         Err(_) => json!({}),
     }
 }
@@ -134,11 +133,11 @@ mod tests {
     #[test]
     fn non_numeric_version_discards_settings() {
         assert_eq!(
-            settings_from_file(&json!({"version": "1", "mergeable": {"a": 1}})),
+            settings_from_file(json!({"version": "1", "mergeable": {"a": 1}})),
             json!({})
         );
         assert_eq!(
-            settings_from_file(&json!({"version": 1, "mergeable": {"a": 1}})),
+            settings_from_file(json!({"version": 1, "mergeable": {"a": 1}})),
             json!({"a": 1})
         );
     }

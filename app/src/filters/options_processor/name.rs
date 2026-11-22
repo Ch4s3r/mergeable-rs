@@ -14,13 +14,13 @@ pub async fn process(
     filter_context: &Value,
     settings: &Value,
 ) -> JsResult<ProcessedOption> {
-    let repository_name = js::read_path(&context.payload, &["repository", "name"])?.cloned();
-    let input = repository_name.clone().unwrap_or(Value::Null);
-    let name_settings = settings.get("name").cloned().unwrap_or(Value::Null);
-    let result = options::process(context, filter_context, &input, &name_settings).await?;
+    let repository_name = js::read_path(&context.payload, &["repository", "name"])?;
+    let input = repository_name.unwrap_or(&Value::Null);
+    let name_settings = settings.get("name").unwrap_or(&Value::Null);
+    let result = options::process(context, filter_context, input, name_settings).await?;
     let mut described_input = Map::new();
     if let Some(name) = repository_name {
-        described_input.insert("name".to_string(), name);
+        described_input.insert("name".to_string(), name.clone());
     }
     Ok(ProcessedOption {
         input: Value::Object(described_input),

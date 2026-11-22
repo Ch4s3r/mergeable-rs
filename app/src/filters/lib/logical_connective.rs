@@ -30,16 +30,15 @@ fn negated_status(status: Option<&str>) -> Option<&'static str> {
     }
 }
 
-fn prefix_descriptions(result: &Value, option_number: usize) -> JsResult<Vec<Value>> {
-    let Some(Value::Array(sub_filters)) = result.get("filters") else {
+fn prefix_descriptions(mut result: Value, option_number: usize) -> JsResult<Vec<Value>> {
+    let result_name = js::to_js_string(result.get("name"));
+    let Some(Value::Array(sub_filters)) = result.get_mut("filters").map(Value::take) else {
         return Err(JsError::type_error("result.filters is not iterable"));
     };
-    let result_name = js::to_js_string(result.get("name"));
     Ok(sub_filters
-        .iter()
-        .map(|sub_filter| {
-            let mut described = sub_filter.clone();
-            if let Value::Object(fields) = &mut described {
+        .into_iter()
+        .map(|mut sub_filter| {
+            if let Value::Object(fields) = &mut sub_filter {
                 let description = js::to_js_string(fields.get("description"));
                 fields.insert(
                     "description".to_string(),
@@ -48,7 +47,7 @@ fn prefix_descriptions(result: &Value, option_number: usize) -> JsResult<Vec<Val
                     )),
                 );
             }
-            described
+            sub_filter
         })
         .collect())
 }
@@ -87,7 +86,13 @@ pub async fn process(
     let mut filters = Vec::new();
     let mut status = if name == "And" { "pass" } else { "fail" };
     let mut count = 0;
-    for result in &output {
+    let negated_first_status = negated_status(
+        output
+            .first()
+            .and_then(|only| only.get("status"))
+            .and_then(Value::as_str),
+    );
+    for result in output {
         let result_status = result.get("status").and_then(Value::as_str);
         if result_status == Some("error") {
             status = "error";
@@ -114,12 +119,7 @@ pub async fn process(
                 &json!({}),
             ));
         }
-        final_status = negated_status(
-            output
-                .first()
-                .and_then(|only| only.get("status"))
-                .and_then(Value::as_str),
-        );
+        final_status = negated_first_status;
     }
 
     let mut combined = Map::new();
