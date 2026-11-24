@@ -1,6 +1,6 @@
 # Module map
 
-| Area | Rust module (rust/app/src) |
+| Area | Rust module (app/src) |
 |---|---|
 | Entry point, environment | `main`, `app_config`, `logging` |
 | HTTP routes, webhook verification, metrics | `server`, `metrics` |
@@ -18,5 +18,5 @@
 | Scheduler | `scheduler` |
 | Errors | `error` |
 
-Contract tests: rust/app-cases (381 recorded webhook scenarios) replayed by rust/replay (ADR-005).
+Contract tests: app-cases (381 recorded webhook scenarios) replayed by replay (ADR-005).
 Gate: `cargo fmt --all --check`, `cargo clippy --all-targets`, `cargo test`, `replay check`.

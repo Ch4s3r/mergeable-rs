@@ -1,4 +1,7 @@
-# mergeable
+# mergeable-rs
+
+A Rust implementation of [mergeable](https://github.com/mergeability/mergeable), licensed under AGPL-3.0 like the
+original.
 
 A GitHub App that checks pull requests and issues against rules in `.github/mergeable.yml` and reports the
 result as check runs, comments, labels and assignees. One Rust binary, `mergeable`, serves the GitHub webhook
@@ -14,52 +17,64 @@ The workspace has two crates:
 Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.md). Terms:
 [GLOSSARY.md](GLOSSARY.md). Performance: [BENCHMARK.md](BENCHMARK.md).
 
-## Build
+## Development
+
+The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-edit, git-cliff, pack and
+redis.
 
 ```sh
-cd rust
+devenv shell
 cargo build --release -p mergeable
 ./target/release/mergeable
 ```
 
-Docker (build context is the `rust/` directory):
+## Container image
+
+The image is built with Cloud Native Buildpacks (Paketo Rust buildpack; configuration in `project.toml` and
+`Procfile`) through the devenv script `build-image <image> [pack options]`:
 
 ```sh
-docker build -t mergeable rust
+devenv shell -- build-image mergeable-rs
 docker run --rm -p 3000:3000 \
   -e APP_ID=12345 -e WEBHOOK_SECRET=... -e PRIVATE_KEY="$(base64 < private-key.pem)" \
-  mergeable
-```
-
-Cloud Native Buildpacks (Paketo; configuration in `rust/project.toml` and `rust/Procfile`):
-
-```sh
-cd rust
-pack build mergeable --path .            # or: --publish to push to a registry
-docker run --rm -p 3000:3000 -e APP_ID=... -e WEBHOOK_SECRET=... -e PRIVATE_KEY=... mergeable
+  mergeable-rs
 ```
 
 The builder `paketobuildpacks/ubuntu-noble-builder-buildpackless` is multi-arch, so it builds natively on
-Apple Silicon (the jammy builders are amd64-only and rustc crashes under qemu emulation). With Docker's
-containerd image store, `pack` cannot export multi-arch buildpacks into the local daemon
-(buildpacks/pack#2272); publish to a registry instead, e.g. a local one:
+Apple Silicon. With Docker's containerd image store, `pack` cannot export multi-arch buildpacks into the local
+daemon (buildpacks/pack#2272); publish to a registry instead, e.g. a local one:
 `docker run -d -p 5001:5000 registry:2` and
-`pack build localhost:5001/mergeable --path . --publish --insecure-registry localhost:5001 --network host`.
+`devenv shell -- build-image localhost:5001/mergeable-rs --publish --insecure-registry localhost:5001 --network host`.
+
+A plain `Dockerfile` (distroless) is kept as an alternative: `docker build -t mergeable-rs .`.
+
+## Releases
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org). Every push to `main` runs
+`.github/workflows/release.yml`:
+
+1. `devenv test` (format, clippy, unit and contract tests).
+2. `git cliff --bumped-version` computes the next semantic version from the commits since the last `v*` tag
+   (`feat` bumps the minor version, `fix`/`perf`/others the patch version, while below 1.0.0; the first release is
+   0.1.0). Without releasable commits nothing is published.
+3. `build-image` builds the image with Paketo and publishes `ghcr.io/<owner>/<repo>:<version>` and `:latest`.
+4. The tag `v<version>` and a GitHub release with the generated changelog are created.
+
+Pull requests and other branches run `.github/workflows/ci.yml` (`devenv test`).
 
 ## Test
 
 ```sh
-cd rust
+devenv test
+```
+
+or step by step inside `devenv shell`:
+
+```sh
 cargo fmt --all --check
 cargo clippy --all-targets
 cargo test
-```
-
-Contract tests (run from the repository root, where the case paths resolve):
-
-```sh
-cargo build --release --manifest-path rust/Cargo.toml -p mergeable -p replay
-rust/target/release/replay check --bin rust/target/release/mergeable --jobs 8
+contract-tests --jobs 8
 ```
 
 The Redis round trip test needs a local server and is ignored by default:

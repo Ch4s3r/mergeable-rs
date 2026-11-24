@@ -1,7 +1,7 @@
 # App cases
 
-Black-box contract tests. Each file `rust/app-cases/cases/<name>.json` is one recorded webhook scenario. The
-`replay` crate (rust/replay) starts an app process behind a mock GitHub API, sends the signed webhook and compares
+Black-box contract tests. Each file `app-cases/cases/<name>.json` is one recorded webhook scenario. The
+`replay` crate (replay) starts an app process behind a mock GitHub API, sends the signed webhook and compares
 the GitHub API calls the app makes and its HTTP response with the recorded expectation (ADR-005).
 
 - `replay check --bin <mergeable binary>` runs the cases against a build and fails on any difference.

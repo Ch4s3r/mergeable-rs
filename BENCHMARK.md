@@ -1,13 +1,13 @@
 # Benchmark
 
-Harness: `replay bench` (rust/replay) starts the app and a mock GitHub API that answers instantly, then fires N
+Harness: `replay bench` (replay) starts the app and a mock GitHub API that answers instantly, then fires N
 signed webhooks drawn round-robin from the listed recorded cases with C in flight. Apple Silicon, macOS, release
 build. Result files are produced with `--json`.
 
 ## Read path (2026-11-21)
 
 10 recorded cases whose rules make only GET calls (filters, merge blocked, no matching rule, ...).
-`replay bench --bin rust/target/release/mergeable --case <10 cases> --requests 2000 --concurrency 32`
+`replay bench --bin target/release/mergeable --case <10 cases> --requests 2000 --concurrency 32`
 
 | Metric | Value |
 |---|---|
@@ -34,7 +34,7 @@ engine's own capacity.
 
 ## Footprint
 
-Release binary 12.3 MB, no runtime dependencies (distroless image, rust/Dockerfile).
+Release binary 12.3 MB, no runtime dependencies (distroless image, Dockerfile).
 
 ## Release profile tuning (2026-11-22)
 

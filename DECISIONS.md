@@ -3,7 +3,7 @@
 ## ADR-001: One standalone HTTP server binary
 Status: accepted
 Context: mergeable receives GitHub webhooks and optionally serves /github-ratelimit/:installationId and /metrics.
-Decision: One binary `mergeable` (crate rust/app) built on axum and tokio serves the webhook endpoint and the
+Decision: One binary `mergeable` (crate app) built on axum and tokio serves the webhook endpoint and the
 optional routes. The library target exposes the engine so tests and the binary share it.
 Consequences: Deployment is a single executable in a distroless image or a buildpack image.
 
@@ -40,7 +40,7 @@ Status: accepted
 Context: The observable behaviour of the app is the GitHub API traffic it produces for a webhook and the HTTP
 response it gives.
 Decision: A case is a webhook plus stubbed GitHub responses plus the expected calls and status
-(rust/app-cases). The `replay` crate runs the binary behind a mock GitHub API and passes a case when the app
+(app-cases). The `replay` crate runs the binary behind a mock GitHub API and passes a case when the app
 makes the same calls (method, path, query, JSON body) in the same order and answers with the same status.
 Comment and check texts match byte for byte; ISO timestamps and the mock origin are normalised; logs are not
 compared. Expectations are written only by `replay record --reference-command <command>`, which records from
@@ -81,7 +81,7 @@ pure-Rust TLS provider exists, so this is accepted.
 Status: accepted
 Context: The template language, glob matching and YAML parsing have many edge cases whose output is visible in
 check texts.
-Decision: rust/app/tests/fixtures holds fixed golden data (templates.json, globs.json, yaml.json) asserted by
+Decision: app/tests/fixtures holds fixed golden data (templates.json, globs.json, yaml.json) asserted by
 the test suite.
 Consequences: A behaviour change in these engines fails a test before it reaches a recorded case.
 

@@ -4,7 +4,7 @@ id = "mergeable-rust"
 
 [io.buildpacks]
 builder = "paketobuildpacks/ubuntu-noble-builder-buildpackless"
-exclude = ["target", "app-cases", "*.md"]
+exclude = ["target", "app-cases", "*.md", ".devenv*", ".direnv", ".github"]
 
 [[io.buildpacks.group]]
 uri = "docker.io/paketocommunity/rust"
@@ -12,6 +12,17 @@ uri = "docker.io/paketocommunity/rust"
 [[io.buildpacks.group]]
 uri = "docker.io/paketobuildpacks/procfile"
 
+[[io.buildpacks.group]]
+uri = "docker.io/paketobuildpacks/image-labels"
+
 [[io.buildpacks.build.env]]
 name = "BP_CARGO_WORKSPACE_MEMBERS"
 value = "mergeable"
+
+[[io.buildpacks.build.env]]
+name = "BP_OCI_TITLE"
+value = "mergeable-rs"
+
+[[io.buildpacks.build.env]]
+name = "BP_OCI_LICENSES"
+value = "AGPL-3.0-only"

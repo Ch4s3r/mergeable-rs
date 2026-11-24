@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
-const LOG_DIRECTORY: &str = "rust/target/replay/logs";
+const LOG_DIRECTORY: &str = "target/replay/logs";
 
 #[derive(Parser)]
 #[command(
@@ -33,7 +33,7 @@ struct Cli {
 struct CaseSelection {
     #[arg(long = "case", value_name = "NAME")]
     names: Vec<String>,
-    #[arg(long, default_value = "rust/app-cases/cases")]
+    #[arg(long, default_value = "app-cases/cases")]
     cases_dir: PathBuf,
 }
 
