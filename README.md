@@ -236,7 +236,7 @@ or `redis` shares it between replicas through one Redis-protocol server (`CACHE_
 | Data | Switch | Key | Invalidation |
 |---|---|---|---|
 | Repository config (`.github/mergeable.yml`, merged) | `USE_CONFIG_CACHE` / `use_config_cache` | `owner/repo` | push changing the config file; `CACHE_TTL` |
-| Settings (`.github/mergeable.settings.yml`) | `USE_SETTINGS_CACHE` | `owner/repo/settings` | `CACHE_TTL` |
+| Settings (`.github/mergeable.settings.yml`) | `USE_SETTINGS_CACHE` | `owner/repo/settings` | push adding or modifying the settings file (organisation `.github` push: all `owner/` keys); `CACHE_TTL` |
 | Repository topics | `use_config_cache` | `owner/repo/topics` | `CACHE_TTL` |
 | Team members, team memberships, collaborators, repository topics | `USE_GITHUB_DATA_CACHE` | `github-data:<cache>:<id>` | `GITHUB_DATA_CACHE_TTL` |
 | Organisation default config (`USE_ORG_AS_DEFAULT_CONFIG`) | `USE_GITHUB_DATA_CACHE` | `github-data:organization_config:owner/.github/<file>` | push to `owner/.github` changing the file; `GITHUB_DATA_CACHE_TTL` |

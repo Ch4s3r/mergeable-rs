@@ -48,4 +48,38 @@ mod tests {
             json!({"id": 3, "eventName": "pull_request", "action": "opened"})
         );
     }
+
+    #[test]
+    fn deserialize_reads_the_metadata_embedded_in_a_check_run_text() {
+        let metadata = deserialize(
+            r#"
+    #### :x: Validator: TITLE * :x:
+      ***title must begins with "feat,test,chore"
+      *** Input : use-case: title Settings : ```{"begins_with":{"match":["feat","test","chore"]}}```
+      <!-- #mergeable-data { "id": 1, "eventName": "pull_request", "action": "unlabeled" } #mergeable-data -->
+  "#,
+        )
+        .unwrap();
+        assert_eq!(metadata["id"], 1);
+        assert_eq!(metadata["eventName"], "pull_request");
+        assert_eq!(metadata["action"], "unlabeled");
+    }
+
+    #[test]
+    fn serialize_wraps_the_metadata_in_an_html_comment_that_deserializes_back() {
+        let metadata = json!({"id": 1, "eventName": "issues", "action": "milestoned"});
+        let serialized = serialize(&metadata);
+        assert_eq!(serialized, METADATA_TEXT);
+        assert_eq!(deserialize(&serialized).unwrap(), metadata);
+    }
+
+    #[test]
+    fn exists_requires_both_metadata_markers() {
+        assert!(exists(Some(METADATA_TEXT)));
+        assert!(!exists(Some("abc <!-- #mergeable-data")));
+        assert!(!exists(Some("abc #mergeable-data -->")));
+        assert!(!exists(None));
+    }
+
+    const METADATA_TEXT: &str = r#"<!-- #mergeable-data {"id":1,"eventName":"issues","action":"milestoned"} #mergeable-data -->"#;
 }

@@ -130,7 +130,7 @@ backend (open source, protocol compatible with the existing `redis` client). Eve
 | Data | Switch | Key | Invalidation |
 |---|---|---|---|
 | Merged repository config | `use_config_cache` | `owner/repo` | push changing the config file (organisation `.github` push: all `owner/` keys); `CACHE_TTL` |
-| Settings file | `USE_SETTINGS_CACHE` | `owner/repo/settings` | `CACHE_TTL` |
+| Settings file | `USE_SETTINGS_CACHE` | `owner/repo/settings` | push adding or modifying the settings file (organisation `.github` push: all `owner/` keys); `CACHE_TTL` |
 | Repository topics (existing) | `use_config_cache` | `owner/repo/topics` | `CACHE_TTL` |
 | Team members (`GET /orgs/{org}/teams/{slug}/members`) | `USE_GITHUB_DATA_CACHE` | `github-data:team_members:org/slug` | `GITHUB_DATA_CACHE_TTL` (300 s) |
 | Team membership (`GET .../memberships/{user}`) | `USE_GITHUB_DATA_CACHE` | `github-data:team_memberships:org/slug/user` | `GITHUB_DATA_CACHE_TTL` |

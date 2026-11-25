@@ -11,10 +11,11 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 const TEST_SIGNING_KEY_SEED: u64 = 0x6d65_7267_6561_626c;
+const TEST_SIGNING_KEY_BITS: usize = 1024;
 
 static TEST_SIGNING_KEY_PEM: LazyLock<String> = LazyLock::new(|| {
     let mut seeded_rng = StdRng::seed_from_u64(TEST_SIGNING_KEY_SEED);
-    PrivateKey::new(&mut seeded_rng, 2048)
+    PrivateKey::new(&mut seeded_rng, TEST_SIGNING_KEY_BITS)
         .and_then(|key| key.to_pkcs1_pem(LineEnding::LF).map_err(Into::into))
         .map_or_else(
             |error| panic!("test signing key: {error}"),
@@ -24,8 +25,13 @@ static TEST_SIGNING_KEY_PEM: LazyLock<String> = LazyLock::new(|| {
 
 #[must_use]
 pub fn context_for(event_name: &str, payload: Value) -> Context {
+    context_with_github_at("http://127.0.0.1:9", event_name, payload)
+}
+
+#[must_use]
+pub fn context_with_github_at(github_base_url: &str, event_name: &str, payload: Value) -> Context {
     let settings = GithubAppSettings {
-        base_url: "http://127.0.0.1:9".to_string(),
+        base_url: github_base_url.to_string(),
         app_id: "1".to_string(),
         private_key_pem: TEST_SIGNING_KEY_PEM.clone(),
         retry_base_delay: Duration::from_millis(1),
@@ -84,6 +90,7 @@ pub fn pull_request_context(pull_request: &PullRequest<'_>) -> Context {
 
 #[cfg(test)]
 mod filter_base_tests {
+    use crate::event_aware;
     use crate::filters::{and_operator::And, author::Author, is_event_supported, payload::Payload};
     use crate::validators::validate_settings;
     use serde_json::json;
@@ -95,6 +102,49 @@ mod filter_base_tests {
         assert!(!is_event_supported(&Author, "issues.opened"));
         assert!(is_event_supported(&Payload, "issue_comment.created"));
         assert!(is_event_supported(&And, "schedule.repository"));
+    }
+
+    #[test]
+    fn one_supported_event_matches_only_that_event() {
+        let supported_events = ["issues.opened"];
+        assert!(!event_aware::is_event_supported(
+            &supported_events,
+            "pull_request.opened"
+        ));
+        assert!(event_aware::is_event_supported(
+            &supported_events,
+            "issues.opened"
+        ));
+    }
+
+    #[test]
+    fn several_supported_events_match_each_listed_event() {
+        let supported_events = ["issues.opened", "pull_request.opened"];
+        assert!(!event_aware::is_event_supported(
+            &supported_events,
+            "pull_request.labeled"
+        ));
+        assert!(event_aware::is_event_supported(
+            &supported_events,
+            "issues.opened"
+        ));
+        assert!(event_aware::is_event_supported(
+            &supported_events,
+            "pull_request.opened"
+        ));
+    }
+
+    #[test]
+    fn wildcard_supported_event_matches_every_action_of_the_event() {
+        let supported_events = ["issues.opened", "pull_request.*"];
+        assert!(event_aware::is_event_supported(
+            &supported_events,
+            "pull_request.labeled"
+        ));
+        assert!(!event_aware::is_event_supported(
+            &supported_events,
+            "issues.milestoned"
+        ));
     }
 
     #[test]
@@ -134,6 +184,15 @@ mod filter_base_tests {
         assert_eq!(
             error.message(),
             "filter/test: second option is not supported"
+        );
+        assert!(
+            validate_settings(
+                "filter/test",
+                &json!({"first": "string", "second": "number"}),
+                &json!({"first": "Test", "second": 32}),
+                &[]
+            )
+            .is_ok()
         );
     }
 
