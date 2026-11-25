@@ -31,6 +31,8 @@ implementation, including `NODE_ENV`. The source of truth is the configuration t
 | `CACHE_STORAGE` | `memory`, or `valkey` / `redis` for a shared Redis-protocol server (both use the `CACHE_REDIS_*` settings) | `memory` |
 | `CACHE_MEMORY_MAX`, `CACHE_TTL` | Memory cache size, entry time to live in seconds (also Redis `SETEX` ttl) | 500, none |
 | `CACHE_REDIS_HOST`, `CACHE_REDIS_PORT`, `CACHE_REDIS_DB` | Redis connection | `localhost`, `6379`, `0` |
+| `CACHE_REDIS_USERNAME`, `CACHE_REDIS_PASSWORD` | Redis `AUTH` user (ACL) and password; without `CACHE_REDIS_PASSWORD` the value of `CACHE_REDIS_HOST` is sent as password | -, `CACHE_REDIS_HOST` |
+| `CACHE_REDIS_TLS` | `true` connects over TLS (`rediss://`), verifying the server certificate against the system roots (`SSL_CERT_FILE` adds a CA bundle) | off |
 | `JIRA_HOST`, `JIRA_USERNAME`, `JIRA_PASSWORD`, `JIRA_PROTOCOL`, `JIRA_VERSION`, `JIRA_STRICT_SSL` | Jira option | - |
 | `MERGEABLE_SCHEDULER` | `true` emits `schedule.repository` events for every installed repository | off |
 | `MERGEABLE_SCHEDULER_INTERVAL` | Scheduler interval in seconds | `3600` |

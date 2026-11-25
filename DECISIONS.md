@@ -261,3 +261,16 @@ all commits since the last tag.
 Consequences: No failing release runs from merges in quick succession and no PAT or App token with `workflows`
 permission. If `main` moves during the image build, that version's image is published by the old run and published
 again by the newer run, which tags it.
+
+## ADR-021: Separate Redis credentials and TLS, host-as-password only as fallback
+Status: accepted
+Context: The original sends the value of `CACHE_REDIS_HOST` as the Redis `AUTH` password over plain TCP, so a cache
+server could only be protected by a password equal to its host name and cached configuration travelled unencrypted
+(issue #29).
+Decision: `CACHE_REDIS_PASSWORD` and `CACHE_REDIS_USERNAME` set the `AUTH` credentials; only without
+`CACHE_REDIS_PASSWORD` the host name is sent, and only that fallback is retried without a password when the server
+rejects it. `CACHE_REDIS_TLS=true` connects with `ConnectionAddr::TcpTls` through the `redis` crate's
+`tokio-rustls-comp` feature (rustls, tokio-rustls and rustls-native-certs were already in the dependency tree through
+reqwest), verifying the certificate and host name against the system roots (`SSL_CERT_FILE` for a private CA).
+Consequences: Defaults and the recorded cases are unchanged. A wrong configured password or an untrusted certificate is
+logged and every lookup is a cache miss, like any other Redis error.
