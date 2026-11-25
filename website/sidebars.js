@@ -125,6 +125,7 @@ const sidebars = {
       items: [
         'deployment/github-app',
         'deployment/container-image',
+        'deployment/supply-chain',
         'deployment/environment-variables',
         'deployment/running-locally',
       ],

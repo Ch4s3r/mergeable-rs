@@ -193,3 +193,16 @@ Consequences: The recorded cases are unchanged (none comes near the limits, all 
 `WEBHOOK_SECRET`). A deployment without `WEBHOOK_SECRET` no longer starts and must set it. Larger follow-ups (a
 separate Redis password and TLS, bounded concurrent webhook processing and outbound timeouts) are tracked as
 separate issues labelled `security`.
+
+## ADR-017: SBOMs and attestations for every release
+Status: accepted
+Context: The Paketo image embeds a buildpacks SBOM (crates from `Cargo.lock`, launcher), but nothing was published:
+no SBOM on the GitHub release, no SPDX document for the crates, no run-image OS packages and no attestation.
+Decision: `release.yml` resolves the digest of the published image with `crane digest` and scans the image by digest
+with `syft` and `--select-catalogers +sbom-cataloger`, so one SBOM covers the Ubuntu packages and the crates of the
+embedded buildpacks SBOM (an image scan alone finds no crates: the binary is not built with `cargo auditable`).
+Both CycloneDX and SPDX JSON are attached to the GitHub release. `actions/attest-build-provenance` and
+`actions/attest-sbom` (CycloneDX) sign attestations with Sigstore for the digest and push them to the registry.
+crane and syft come from the devenv packages, so their versions are pinned by `devenv.lock`.
+Consequences: Releases can be verified with `gh attestation verify`. The crate list is the whole `Cargo.lock`,
+including crates for other platforms. The release job needs `id-token: write` and `attestations: write`.
