@@ -194,7 +194,8 @@ file to use in the following order:
    If it originates from a fork it is not loaded for security reasons, see
    [mergeability/mergeable#406](https://github.com/mergeability/mergeable/issues/406). This applies to
    `pull_request` and `pull_request_review` events and can be turned off with `use_config_from_pull_request: false`
-   in the [settings file](./settings-file.md).
+   in the [settings file](./settings-file.md). Anyone who can push a branch to the repository can therefore change
+   the rules that check their own pull request, see [Security](../operations/security.md).
 2. A `.github/mergeable.yml` inside the repository the pull request is for.
 3. A `.github/mergeable.yml` at `<YOUR_ORG>/.github/.github/mergeable.yml`.
 
