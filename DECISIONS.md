@@ -245,3 +245,16 @@ the docs workflow before each build, so it is not checked in `devenv test` (Reno
 otherwise fail).
 Consequences: A new dependency under another license, or a new RustSec advisory, fails the gate until it is
 reviewed. `devenv test` needs network access to GitHub to update the advisory database.
+
+## ADR-020: A release run releases only the head of main
+Status: accepted
+Context: Release runs queue in one concurrency group. When main moved on while a run was queued or building, creating
+the tag and GitHub release for the older commit failed with HTTP 403 ("Resource not accessible by integration") as
+soon as the workflow files on main differed from that commit, because the `GITHUB_TOKEN` cannot hold the
+`workflows` permission.
+Decision: `release.yml` releases only when the commit of the run is still the head of main: the version step skips
+the release otherwise, and the release step checks again after the image build and exits with a warning. The run of
+the newer commit computes the same version (no tag was created) and releases all commits.
+Consequences: Release runs no longer fail when pull requests merge in quick succession. A run superseded during the
+build has already pushed the image tags and attestations; the newer run pushes the version tag again for its own
+digest, so the release names the digest that was attested last.

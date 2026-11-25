@@ -26,6 +26,8 @@ Every push to `main` runs `.github/workflows/release.yml`:
    commits are left out), the image name and digest, and the two SBOMs as assets are created.
 
 Because pull requests are squash-merged, the pull request title is the commit that decides the version bump.
+A run releases only the head of `main`: when `main` moved on while a run was queued or building, that run skips the
+release and the run of the newer commit releases all commits.
 
 ## Image tags
 

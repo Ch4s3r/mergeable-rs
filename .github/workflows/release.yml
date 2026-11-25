@@ -70,8 +70,12 @@ jobs:
         run: |
           version="$(devenv shell -- git cliff --bumped-version | tail -n 1)"
           version="${version#v}"
+          main_head="$(git ls-remote "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" refs/heads/main | cut -f1)"
           if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
             echo "v$version already released, no releasable commits since"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$main_head" != "$GITHUB_SHA" ]]; then
+            echo "main moved on to $main_head, its release run releases these commits too"
             echo "release=false" >> "$GITHUB_OUTPUT"
           else
             echo "release=true" >> "$GITHUB_OUTPUT"
@@ -139,6 +143,11 @@ jobs:
           IMAGE: ${{ steps.version.outputs.image }}
           DIGEST: ${{ steps.image.outputs.digest }}
         run: |
+          main_head="$(git ls-remote "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" refs/heads/main | cut -f1)"
+          if [[ "$main_head" != "$GITHUB_SHA" ]]; then
+            echo "::warning::main moved on to $main_head during the build; its release run publishes v$VERSION"
+            exit 0
+          fi
           devenv shell -- git cliff --unreleased --tag "v$VERSION" --output notes.md
           printf '\nImage: `%s:%s` (`%s`)\n' "$IMAGE" "$VERSION" "$DIGEST" >> notes.md
           gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md \

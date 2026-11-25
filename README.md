@@ -69,6 +69,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). Ever
    attestation for the image digest and push both to the registry.
 6. The tag `v<version>` and a GitHub release with the generated changelog, the image digest and the SBOMs
    (`mergeable-rs-<version>.cdx.json`, `mergeable-rs-<version>.spdx.json`) as assets are created.
+   A run releases only the head of `main`: if `main` moved on, the run of the newer commit releases all commits.
 
 ### Verifying a release
 
