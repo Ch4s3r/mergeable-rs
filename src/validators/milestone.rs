@@ -80,3 +80,42 @@ impl Validator for Milestone {
         Ok(output)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::filters::test_context::{PullRequest, pull_request_context};
+
+    async fn validate_with_milestone(milestone_title: Option<&str>, settings: &Value) -> Value {
+        let mut context = pull_request_context(&PullRequest::default());
+        context.payload.to_mut()["pull_request"]["milestone"] =
+            milestone_title.map_or(Value::Null, |title| json!({"title": title}));
+        validators::process_validate(&Milestone, &context, settings, &Registry::default())
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn fails_when_a_different_milestone_is_required() {
+        let settings = json!({"do": "milestone", "must_include": {"regex": "Version 2"}});
+        let validation = validate_with_milestone(Some("Version 1"), &settings).await;
+        assert_eq!(validation["status"], "fail");
+    }
+
+    #[tokio::test]
+    async fn fails_when_milestone_is_required_but_pull_request_has_none() {
+        let settings = json!({"do": "milestone", "must_include": {"regex": "Version 1"}});
+        let validation = validate_with_milestone(None, &settings).await;
+        assert_eq!(validation["status"], "fail");
+    }
+
+    #[tokio::test]
+    async fn description_names_the_missing_milestone() {
+        let settings = json!({"do": "milestone", "must_include": {"regex": "Version 1"}});
+        let validation = validate_with_milestone(None, &settings).await;
+        assert_eq!(
+            validation["validations"][0]["description"],
+            "milestone does not include \"Version 1\""
+        );
+    }
+}
