@@ -236,10 +236,11 @@ impl GithubApp {
         let authorization = HeaderValue::try_from(format!("token {token}"))
             .map_err(|error| Error::http(500, error.to_string()))?;
         let refresh_after = json_value::as_str(data.get("expires_at"))
-            .and_then(|expires| chrono::DateTime::parse_from_rfc3339(expires).ok())
+            .and_then(|expires| expires.parse::<jiff::Timestamp>().ok())
+            .and_then(|expires| SystemTime::try_from(expires).ok())
             .map_or_else(
                 || SystemTime::now() + INSTALLATION_TOKEN_FALLBACK_LIFETIME,
-                |expires| SystemTime::from(expires) - INSTALLATION_TOKEN_REFRESH_MARGIN,
+                |expires| expires - INSTALLATION_TOKEN_REFRESH_MARGIN,
             );
         Ok(CachedInstallationToken {
             authorization,

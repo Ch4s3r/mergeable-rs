@@ -2,7 +2,7 @@ use super::mock_context::mock_context;
 use serde_json::{Value, json};
 
 fn now_milliseconds() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    jiff::Timestamp::now().as_millisecond()
 }
 
 fn commit_by(date: i64, message: &str, author_email: &str, committer_email: &str) -> Value {

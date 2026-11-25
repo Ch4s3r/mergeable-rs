@@ -4,7 +4,7 @@ use super::mock_context::{
 use serde_json::{Value, json};
 
 fn now_milliseconds() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+    jiff::Timestamp::now().as_millisecond()
 }
 
 fn approvals_by_numbered_users(approval_count: usize) -> Vec<Value> {
