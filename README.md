@@ -2,7 +2,7 @@
 
 A Rust implementation of [mergeable](https://github.com/mergeability/mergeable), licensed under AGPL-3.0-only like the
 original (it is a port of the original, so it cannot be relicensed without the consent of the upstream copyright
-holders; see ADR-015).
+holders; see ADR-016).
 
 **Documentation: [ch4s3r.github.io/mergeable-rs](https://ch4s3r.github.io/mergeable-rs/)** (rules reference, recipes,
 deployment, operations). The site is built with Docusaurus from `website/` and deployed to GitHub Pages by
@@ -77,6 +77,13 @@ workflows and the module input in `devenv.yaml`) and the pinned `devenv-nixpkgs`
 lock file updates are squash-merged automatically once all checks pass, major updates wait for review. Renovate also
 opens PRs for direct dependencies with known vulnerabilities in the [OSV database](https://osv.dev) as soon as a fix
 is available; vulnerability-fix PRs always ignore the weekly schedule.
+
+Security fixes: [Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts)
+are enabled for the repository (`gh api -X PUT repos/Ch4s3r/mergeable-rs/vulnerability-alerts`), Dependabot security
+updates are not: Renovate reads the alerts (the [Mend Renovate app](https://github.com/apps/renovate) has `read`
+access to Dependabot alerts by default) and, together with the OSV alerts, opens the fix PRs. Vulnerability-fix PRs
+get the `security` label and are squash-merged automatically once all checks pass, including major updates
+(`vulnerabilityAlerts` in `renovate.json`).
 
 Dry run locally:
 

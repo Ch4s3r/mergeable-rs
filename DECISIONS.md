@@ -163,7 +163,19 @@ approving member no longer blocks approvals on its own. No recorded case (ADR-00
 the upstream test "returns proper error when team provided is not found" mocks a non-approving team member that
 the membership lookup cannot return, so its Rust port asserts the lifted limit instead.
 
-## ADR-015: License stays AGPL-3.0-only
+## ADR-015: Security fixes from Renovate, Dependabot only for alerts
+Status: accepted
+Context: Renovate already keeps the dependencies up to date and raises fix PRs for OSV vulnerabilities. Dependabot
+security updates would open a second, differently formatted PR for the same vulnerability.
+Decision: Dependabot alerts are enabled for the repository, Dependabot security updates stay disabled. Renovate reads
+the Dependabot alerts (the Mend Renovate app holds `read` on Dependabot alerts) next to `osvVulnerabilityAlerts` and
+opens the fix PRs. `vulnerabilityAlerts` labels them `security` and enables automerge, so a fix (also a major
+update) is squash-merged as soon as all required checks pass.
+Consequences: One PR per vulnerability, merged without waiting for review or the weekly schedule; the required
+checks are the only gate. A wrong alert could produce a bad automerged fix, which the release changelog makes
+visible.
+
+## ADR-016: License stays AGPL-3.0-only
 Status: accepted
 Context: Issue #17 asked whether mergeable-rs can move to MIT OR Apache-2.0. mergeable-rs was ported from
 mergeability/mergeable: modules translated from the original source, error and message texts reproduced verbatim,
@@ -182,12 +194,12 @@ tracking issue with a checklist (consent to "MIT OR Apache-2.0" for their contri
 or a signed-off statement); contributions of authors who decline or cannot be reached are rewritten clean-room
 before the switch. The decision whether to start this process stays with the owner (issue #17, label
 `needs-decision`). This is not legal advice.
-Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-016). Anyone running a modified mergeable-rs
+Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-017). Anyone running a modified mergeable-rs
 as a network service must offer its source to its users.
 
-## ADR-016: Dependency policy checked by cargo-deny
+## ADR-017: Dependency policy checked by cargo-deny
 Status: accepted
-Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-015), and known
+Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-016), and known
 vulnerable, unmaintained or yanked crates should not slip in through lock file updates.
 Decision: `cargo deny check` with `deny.toml` runs in `devenv test`, so in the required `test` check of every pull
 request and in the release workflow. Licenses: an allowlist of the licenses the dependency tree uses that are
@@ -202,3 +214,4 @@ otherwise fail).
 Consequences: A new dependency under another license, or a new RustSec advisory, fails the gate until it is
 reviewed. `devenv test` needs network access to GitHub to update the advisory database.
 ||||||| d753e54
+||||||| 9007066

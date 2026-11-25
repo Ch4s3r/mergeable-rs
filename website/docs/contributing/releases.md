@@ -40,3 +40,19 @@ version and the pinned `devenv-nixpkgs` commit) and the npm dependencies of this
 are squash-merged automatically once all checks pass, major updates wait for review. Renovate also opens pull requests
 for direct dependencies with known vulnerabilities in the [OSV database](https://osv.dev) as soon as a fix is available,
 regardless of the schedule.
+
+### Security fixes
+
+[Dependabot alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/about-dependabot-alerts) are
+enabled for the repository, Dependabot security updates are not, so there is a single source of fix pull requests:
+Renovate reads the Dependabot alerts (the [Mend Renovate app](https://github.com/apps/renovate) has `read` access to
+Dependabot alerts by default) and the OSV alerts and opens the fix pull requests immediately. They carry the
+`security` label and are squash-merged automatically once all checks pass, also when the fix is a major update
+(`vulnerabilityAlerts` in `renovate.json`).
+
+To enable the alerts on a fork:
+
+```sh
+gh api -X PUT repos/<owner>/<repo>/vulnerability-alerts
+gh api -i repos/<owner>/<repo>/vulnerability-alerts   # 204: enabled, 404: disabled
+```
