@@ -616,39 +616,48 @@ pub async fn handle_event(
 mod tests {
     use super::*;
 
-    const SECRET: &str = "It's a Secret to Everybody";
     const BODY: &[u8] = b"Hello, World!";
-    const SHA256_SIGNATURE: &str =
-        "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
 
-    fn sha1_signature() -> String {
-        let mut signer = Hmac::<sha1::Sha1>::new_from_slice(SECRET.as_bytes()).unwrap();
-        signer.update(BODY);
+    fn random_secret() -> String {
+        hex::encode(rand::random::<[u8; 32]>())
+    }
+
+    fn hex_digest<Signature: Mac + KeyInit>(secret: &str, body: &[u8]) -> String {
+        let mut signer = <Signature as KeyInit>::new_from_slice(secret.as_bytes()).unwrap();
+        signer.update(body);
         hex::encode(signer.finalize().into_bytes())
+    }
+
+    fn sha256_signature(secret: &str, body: &[u8]) -> String {
+        format!("sha256={}", hex_digest::<Hmac<Sha256>>(secret, body))
     }
 
     #[test]
     fn webhook_signed_with_the_secret_using_sha256_is_accepted() {
-        assert!(signature_matches(SECRET, BODY, SHA256_SIGNATURE));
+        let secret = random_secret();
+        assert!(signature_matches(
+            &secret,
+            BODY,
+            &sha256_signature(&secret, BODY)
+        ));
     }
 
     #[test]
     fn webhook_signed_with_another_secret_or_body_is_rejected() {
-        assert!(!signature_matches("another secret", BODY, SHA256_SIGNATURE));
-        assert!(!signature_matches(
-            SECRET,
-            b"Hello, World?",
-            SHA256_SIGNATURE
-        ));
-        assert!(!signature_matches(SECRET, BODY, ""));
-        assert!(!signature_matches(SECRET, BODY, "sha256=not-hex"));
+        let secret = random_secret();
+        let signature = sha256_signature(&secret, BODY);
+        assert!(!signature_matches(&random_secret(), BODY, &signature));
+        assert!(!signature_matches(&secret, b"Hello, World?", &signature));
+        assert!(!signature_matches(&secret, BODY, ""));
+        assert!(!signature_matches(&secret, BODY, "sha256=not-hex"));
     }
 
     #[test]
     fn sha1_signatures_are_rejected_even_when_they_match() {
-        let sha1 = sha1_signature();
-        assert!(!signature_matches(SECRET, BODY, &format!("sha1={sha1}")));
-        assert!(!signature_matches(SECRET, BODY, &sha1));
+        let secret = random_secret();
+        let sha1 = hex_digest::<Hmac<sha1::Sha1>>(&secret, BODY);
+        assert!(!signature_matches(&secret, BODY, &format!("sha1={sha1}")));
+        assert!(!signature_matches(&secret, BODY, &sha1));
     }
 
     #[test]
