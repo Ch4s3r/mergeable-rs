@@ -148,3 +148,16 @@ follow-up: they need the ETag stored next to the cached content and the mock to 
 Consequences: Repeated events on the same repository save the cached reads (measured by the integration tests and
 `cache_lookups_total`); team, collaborator and topic changes are seen after at most `GITHUB_DATA_CACHE_TTL`.
 Several replicas share one cache through Valkey (`CACHE_STORAGE=valkey`).
+
+## ADR-014: SBOMs and attestations for every release
+Status: accepted
+Context: The Paketo image embeds a buildpacks SBOM (crates from `Cargo.lock`, launcher), but nothing was published:
+no SBOM on the GitHub release, no SPDX document for the crates, no run-image OS packages and no attestation.
+Decision: `release.yml` resolves the digest of the published image with `crane digest` and scans the image by digest
+with `syft` and `--select-catalogers +sbom-cataloger`, so one SBOM covers the Ubuntu packages and the crates of the
+embedded buildpacks SBOM (an image scan alone finds no crates: the binary is not built with `cargo auditable`).
+Both CycloneDX and SPDX JSON are attached to the GitHub release. `actions/attest-build-provenance` and
+`actions/attest-sbom` (CycloneDX) sign attestations with Sigstore for the digest and push them to the registry.
+crane and syft come from the devenv packages, so their versions are pinned by `devenv.lock`.
+Consequences: Releases can be verified with `gh attestation verify`. The crate list is the whole `Cargo.lock`,
+including crates for other platforms. The release job needs `id-token: write` and `attestations: write`.

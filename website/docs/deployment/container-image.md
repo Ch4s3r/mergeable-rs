@@ -13,7 +13,7 @@ ghcr.io/ch4s3r/mergeable-rs:latest      # the most recent release
 
 Versions follow semantic versioning, see [Releases and versioning](../contributing/releases.md); the image of a
 release is named in its [GitHub release](https://github.com/Ch4s3r/mergeable-rs/releases) notes. Pin a version in
-production.
+production. Every release also publishes SBOMs and signed attestations, see [Supply chain](./supply-chain.md).
 
 ## Run
 
