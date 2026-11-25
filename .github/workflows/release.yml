@@ -70,7 +70,11 @@ jobs:
         run: |
           version="$(devenv shell -- git cliff --bumped-version | tail -n 1)"
           version="${version#v}"
-          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+          main_head="$(git ls-remote origin refs/heads/main | cut -f 1)"
+          if [[ "$main_head" != "$GITHUB_SHA" ]]; then
+            echo "main moved on to $main_head, the release run of that commit releases these commits too"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
             echo "v$version already released, no releasable commits since"
             echo "release=false" >> "$GITHUB_OUTPUT"
           else
@@ -131,8 +135,19 @@ jobs:
           subject-digest: ${{ steps.image.outputs.digest }}
           sbom-path: mergeable-rs-${{ steps.version.outputs.version }}.cdx.json
           push-to-registry: true
-      - name: Tag and create the GitHub release
+      - name: Check that the commit is still the head of main
+        id: head
         if: steps.version.outputs.release == 'true'
+        run: |
+          main_head="$(git ls-remote origin refs/heads/main | cut -f 1)"
+          if [[ "$main_head" == "$GITHUB_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::main moved on to $main_head during the release; its release run publishes and tags this version"
+            echo "current=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Tag and create the GitHub release
+        if: steps.version.outputs.release == 'true' && steps.head.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
