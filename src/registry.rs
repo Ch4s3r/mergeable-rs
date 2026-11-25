@@ -122,6 +122,23 @@ impl Registry {
 }
 
 #[cfg(test)]
+impl Registry {
+    pub fn replace_validator(&self, key: &str, validator: Arc<dyn Validator>) {
+        self.validators
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.to_string(), validator);
+    }
+
+    pub fn replace_action(&self, key: &str, action: Arc<dyn Action>) {
+        self.actions
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.to_string(), action);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;

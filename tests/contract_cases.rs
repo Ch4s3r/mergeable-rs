@@ -1,6 +1,7 @@
 mod contract;
 mod github_data_cache;
 mod installation_resync;
+mod upstream_filters_flex;
 mod upstream_validators_a_l;
 mod upstream_validators_m_z;
 

@@ -404,3 +404,556 @@ mod tests {
         assert_eq!(action_names(&rule), vec!["checks", "comment", "labels"]);
     }
 }
+
+#[cfg(test)]
+mod flex_tests {
+    use super::*;
+    use crate::actions::Action;
+    use crate::filters::test_context::context_with_github_at;
+    use crate::validators::Validator;
+    use crate::yaml;
+    use async_trait::async_trait;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const EVERY_EVENT: &[&str] = &["*"];
+    const NO_EVENT: &[&str] = &[];
+    const PULL_REQUEST_AND_REVIEW_EVENTS: &[&str] = &[
+        "pull_request.opened",
+        "pull_request.edited",
+        "pull_request_review.submitted",
+    ];
+
+    const TITLE_AND_LABEL_CONFIG: &str = "
+version: 2
+mergeable:
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: wip|work in progress|do not merge
+          message: 'a custom message'
+      - do: label
+        must_exclude:
+          regex: wip|work in progress
+";
+
+    const REVIEW_MILESTONE_RULE: &str = "
+  - when: pull_request_review.submitted
+    validate:
+      - do: milestone
+        no_empty:
+          enabled: true
+";
+
+    const TWO_RULES_FOR_PULL_REQUESTS_CONFIG: &str = "
+version: 2
+mergeable:
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: wip|work in progress|do not merge
+          message: 'a custom message'
+      - do: label
+        must_exclude:
+          regex: wip|work in progress
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: wip|work in progress|do not merge
+          message: 'a custom message'
+      - do: label
+        must_exclude:
+          regex: wip|work in progress
+";
+
+    const PULL_REQUEST_AND_ISSUE_RULES_CONFIG: &str = "
+version: 2
+mergeable:
+  - when: pull_request.opened
+    validate:
+      - do: title
+        must_exclude:
+          regex: 'wip'
+    pass:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+    fail:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+  - when: issues.opened
+    validate:
+      - do: label
+        must_exclude:
+          regex: 'wip'
+      - do: title
+    pass:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+    fail:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+";
+
+    struct CountingValidator {
+        supported_events: &'static [&'static str],
+        throws: bool,
+        validate_calls: AtomicUsize,
+        event_support_checks: AtomicUsize,
+    }
+
+    impl CountingValidator {
+        fn passing_for(supported_events: &'static [&'static str]) -> Arc<CountingValidator> {
+            Arc::new(CountingValidator {
+                supported_events,
+                throws: false,
+                validate_calls: AtomicUsize::new(0),
+                event_support_checks: AtomicUsize::new(0),
+            })
+        }
+
+        fn throwing() -> Arc<CountingValidator> {
+            Arc::new(CountingValidator {
+                supported_events: EVERY_EVENT,
+                throws: true,
+                validate_calls: AtomicUsize::new(0),
+                event_support_checks: AtomicUsize::new(0),
+            })
+        }
+
+        fn validate_calls(&self) -> usize {
+            self.validate_calls.load(Ordering::SeqCst)
+        }
+
+        fn event_support_checks(&self) -> usize {
+            self.event_support_checks.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl Validator for CountingValidator {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+
+        fn supported_events(&self) -> &'static [&'static str] {
+            self.event_support_checks.fetch_add(1, Ordering::SeqCst);
+            self.supported_events
+        }
+
+        fn supported_settings(&self) -> Value {
+            json!({})
+        }
+
+        fn checks_settings(&self) -> bool {
+            false
+        }
+
+        async fn validate(
+            &self,
+            _context: &Context,
+            _settings: &Value,
+            _registry: &Registry,
+        ) -> Result<Value> {
+            self.validate_calls.fetch_add(1, Ordering::SeqCst);
+            if self.throws {
+                return Err(Error::general("Uncaught error"));
+            }
+            Ok(json!({"status": "pass", "name": "counting", "validations": []}))
+        }
+    }
+
+    struct CountingAction {
+        supported_events: &'static [&'static str],
+        before_validate_calls: AtomicUsize,
+        after_validate_calls: AtomicUsize,
+    }
+
+    impl CountingAction {
+        fn supporting(supported_events: &'static [&'static str]) -> Arc<CountingAction> {
+            Arc::new(CountingAction {
+                supported_events,
+                before_validate_calls: AtomicUsize::new(0),
+                after_validate_calls: AtomicUsize::new(0),
+            })
+        }
+
+        fn before_validate_calls(&self) -> usize {
+            self.before_validate_calls.load(Ordering::SeqCst)
+        }
+
+        fn after_validate_calls(&self) -> usize {
+            self.after_validate_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl Action for CountingAction {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+
+        fn supported_events(&self) -> &'static [&'static str] {
+            self.supported_events
+        }
+
+        async fn before_validate(
+            &self,
+            _context: &Context,
+            _rule: &Value,
+            _rule_name: Option<&Value>,
+        ) -> Result<()> {
+            self.before_validate_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn after_validate(
+            &self,
+            _context: &Context,
+            _settings: &Value,
+            _rule_name: Option<&Value>,
+            _validation_report: &Value,
+        ) -> Result<()> {
+            self.after_validate_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    async fn github_answering_empty_lists() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = axum::Router::new().fallback(|uri: axum::http::Uri| async move {
+            if uri.path().ends_with("/access_tokens") {
+                (
+                    axum::http::StatusCode::CREATED,
+                    axum::Json(
+                        json!({"token": "test-token", "expires_at": "2099-01-01T00:00:00Z"}),
+                    ),
+                )
+            } else {
+                (axum::http::StatusCode::OK, axum::Json(json!([])))
+            }
+        });
+        tokio::spawn(async move { axum::serve(listener, router).await });
+        format!("http://{address}")
+    }
+
+    async fn event_context(event_name: &str, action: &str) -> Context {
+        context_with_github_at(
+            &github_answering_empty_lists().await,
+            event_name,
+            json!({
+                "action": action,
+                "repository": {"name": "repoName", "full_name": "fullRepoName", "owner": {"login": "owner"}},
+                "sender": {"login": "initiator"},
+                "pull_request": {
+                    "user": {"login": "creator"},
+                    "title": "title",
+                    "number": 1,
+                    "milestone": null,
+                    "base": {"repo": {"full_name": "owner/test", "private": false}, "ref": "baseRef", "sha": "sha2"},
+                    "head": {"ref": "test", "sha": "sha1", "repo": {"full_name": "owner/test"}},
+                },
+                "issue": {"user": {"login": "creator"}, "title": "title", "number": 1, "milestone": null, "pull_request": {}},
+            }),
+        )
+    }
+
+    fn set_event(context: &mut Context, event_name: &str, action: &str) {
+        context.event_name = event_name.to_string();
+        context.payload.to_mut()["action"] = json!(action);
+    }
+
+    fn configuration(config_text: &str) -> Configuration {
+        let parsed = yaml::parse(config_text).unwrap().unwrap();
+        let configuration = Configuration::from_settings(parsed).unwrap();
+        assert!(!configuration.has_errors(), "{:?}", configuration.errors);
+        configuration
+    }
+
+    async fn run_workflow(context: &Context, registry: &Registry, config_text: &str) {
+        if let Err(error) = process(context, registry, &configuration(config_text)).await {
+            tracing::debug!(%error, "workflow under test failed after the observed calls");
+        }
+    }
+
+    fn registry_with_checks_action() -> (Registry, Arc<CountingAction>) {
+        let registry = Registry::default();
+        let checks = CountingAction::supporting(PULL_REQUEST_AND_REVIEW_EVENTS);
+        registry.replace_action("checks", checks.clone());
+        (registry, checks)
+    }
+
+    #[tokio::test]
+    async fn event_in_configuration_runs_actions_before_and_after_validation() {
+        let (registry, checks) = registry_with_checks_action();
+        let context = event_context("pull_request", "opened").await;
+        run_workflow(&context, &registry, TITLE_AND_LABEL_CONFIG).await;
+        assert_eq!(checks.before_validate_calls(), 1);
+        assert_eq!(checks.after_validate_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn event_not_in_configuration_runs_no_actions() {
+        let (registry, checks) = registry_with_checks_action();
+        let context = event_context("pull_request_review", "submitted").await;
+        run_workflow(&context, &registry, TITLE_AND_LABEL_CONFIG).await;
+        assert_eq!(checks.before_validate_calls(), 0);
+        assert_eq!(checks.after_validate_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn event_matching_one_of_multiple_whens_runs_its_actions_once() {
+        let (registry, checks) = registry_with_checks_action();
+        let context = event_context("pull_request_review", "submitted").await;
+        let config = format!("{TITLE_AND_LABEL_CONFIG}{REVIEW_MILESTONE_RULE}");
+        run_workflow(&context, &registry, &config).await;
+        assert_eq!(checks.before_validate_calls(), 1);
+        assert_eq!(checks.after_validate_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn two_whens_with_the_same_event_run_actions_once_per_rule() {
+        let (registry, checks) = registry_with_checks_action();
+        let context = event_context("pull_request", "opened").await;
+        run_workflow(&context, &registry, TWO_RULES_FOR_PULL_REQUESTS_CONFIG).await;
+        assert_eq!(checks.before_validate_calls(), 2);
+        assert_eq!(checks.after_validate_calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn two_whens_with_the_same_event_prepare_each_rules_own_actions() {
+        let config = "
+version: 2
+mergeable:
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: wip|work in progress|do not merge
+          message: 'a custom message'
+      - do: label
+        must_exclude:
+          regex: wip|work in progress
+    fail:
+      - do: assign
+        assignees: ['test user']
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: wip|work in progress|do not merge
+          message: 'a custom message'
+      - do: label
+        must_exclude:
+          regex: wip|work in progress
+    pass:
+      - do: comment
+        payload:
+          body: 'test comment'
+";
+        let registry = Registry::default();
+        let comment = CountingAction::supporting(PULL_REQUEST_AND_REVIEW_EVENTS);
+        let assign = CountingAction::supporting(PULL_REQUEST_AND_REVIEW_EVENTS);
+        registry.replace_action("comment", comment.clone());
+        registry.replace_action("assign", assign.clone());
+        let context = event_context("pull_request", "opened").await;
+        run_workflow(&context, &registry, config).await;
+        assert_eq!(comment.before_validate_calls(), 1);
+        assert_eq!(assign.before_validate_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn validators_are_registered_dynamically_and_unsupported_actions_are_skipped() {
+        let config = "
+version: 2
+mergeable:
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_include:
+          regex: wip|work in progress|do not merge
+          message: 'a custom message'
+      - do: label
+        must_include:
+          regex: wip|work in progress
+    pass:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+    fail:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+";
+        let registry = Registry::default();
+        let context = event_context("pull_request", "opened").await;
+        run_workflow(&context, &registry, config).await;
+        assert!(registry.validator("title").is_some());
+        assert!(registry.validator("label").is_some());
+
+        let title = CountingValidator::passing_for(EVERY_EVENT);
+        let label = CountingValidator::passing_for(EVERY_EVENT);
+        let checks = CountingAction::supporting(NO_EVENT);
+        registry.replace_validator("title", title.clone());
+        registry.replace_validator("label", label.clone());
+        registry.replace_action("checks", checks.clone());
+        run_workflow(&context, &registry, config).await;
+
+        assert_eq!(title.validate_calls(), 1);
+        assert_eq!(label.validate_calls(), 1);
+        assert_eq!(checks.before_validate_calls(), 0);
+        assert_eq!(checks.after_validate_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn comma_separated_whens_run_only_event_supporting_validators_and_actions() {
+        let config = "
+version: 2
+mergeable:
+  - when: pull_request.opened, issues.opened
+    validate:
+      - do: title
+        must_include:
+          regex: wip|work in progress|do not merge
+      - do: issueOnly
+    pass:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+    fail:
+      - do: checks
+        status: success
+        payload:
+          title: Success!!
+          summary: You are ready to merge
+";
+        let registry = Registry::default();
+        let title = CountingValidator::passing_for(EVERY_EVENT);
+        let issue_only = CountingValidator::passing_for(&["issues.opened"]);
+        let checks = CountingAction::supporting(&["pull_request.opened"]);
+        registry.replace_validator("title", title.clone());
+        registry.replace_validator("issueOnly", issue_only.clone());
+        registry.replace_action("checks", checks.clone());
+
+        let mut context = event_context("pull_request", "opened").await;
+        run_workflow(&context, &registry, config).await;
+        assert_eq!(title.validate_calls(), 1);
+        assert_eq!(title.event_support_checks(), 1);
+        assert_eq!(issue_only.validate_calls(), 0);
+        assert_eq!(issue_only.event_support_checks(), 1);
+        assert_eq!(checks.before_validate_calls(), 1);
+        assert_eq!(checks.after_validate_calls(), 1);
+
+        set_event(&mut context, "issues", "opened");
+        run_workflow(&context, &registry, config).await;
+        assert_eq!(title.validate_calls(), 2);
+        assert_eq!(title.event_support_checks(), 2);
+        assert_eq!(issue_only.validate_calls(), 1);
+        assert_eq!(issue_only.event_support_checks(), 2);
+        assert_eq!(checks.before_validate_calls(), 1);
+        assert_eq!(checks.after_validate_calls(), 1);
+    }
+
+    fn registry_with_title_label_and_checks() -> (
+        Registry,
+        Arc<CountingValidator>,
+        Arc<CountingValidator>,
+        Arc<CountingAction>,
+    ) {
+        let registry = Registry::default();
+        let title = CountingValidator::passing_for(EVERY_EVENT);
+        let label = CountingValidator::passing_for(EVERY_EVENT);
+        let checks = CountingAction::supporting(EVERY_EVENT);
+        registry.replace_validator("title", title.clone());
+        registry.replace_validator("label", label.clone());
+        registry.replace_action("checks", checks.clone());
+        (registry, title, label, checks)
+    }
+
+    #[tokio::test]
+    async fn multiple_whens_run_only_the_rules_of_the_current_event() {
+        let (registry, title, label, checks) = registry_with_title_label_and_checks();
+        let mut context = event_context("pull_request", "opened").await;
+        run_workflow(&context, &registry, PULL_REQUEST_AND_ISSUE_RULES_CONFIG).await;
+        assert_eq!(title.validate_calls(), 1);
+        assert_eq!(label.validate_calls(), 0);
+        assert_eq!(checks.before_validate_calls(), 1);
+        assert_eq!(checks.after_validate_calls(), 1);
+
+        set_event(&mut context, "issues", "opened");
+        run_workflow(&context, &registry, PULL_REQUEST_AND_ISSUE_RULES_CONFIG).await;
+        assert_eq!(title.validate_calls(), 2);
+        assert_eq!(label.validate_calls(), 1);
+        assert_eq!(checks.before_validate_calls(), 2);
+        assert_eq!(checks.after_validate_calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn rules_run_only_for_the_event_in_the_context() {
+        let (registry, title, label, checks) = registry_with_title_label_and_checks();
+        let mut context = event_context("pull_request_review", "opened").await;
+        run_workflow(&context, &registry, PULL_REQUEST_AND_ISSUE_RULES_CONFIG).await;
+        assert_eq!(title.validate_calls(), 0);
+        assert_eq!(label.validate_calls(), 0);
+        assert_eq!(checks.before_validate_calls(), 0);
+        assert_eq!(checks.after_validate_calls(), 0);
+
+        set_event(&mut context, "pull_request", "opened");
+        run_workflow(&context, &registry, PULL_REQUEST_AND_ISSUE_RULES_CONFIG).await;
+        assert_eq!(title.validate_calls(), 1);
+        assert_eq!(label.validate_calls(), 0);
+        assert_eq!(checks.before_validate_calls(), 1);
+        assert_eq!(checks.after_validate_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn throwing_validator_runs_the_error_actions_but_not_the_pass_actions() {
+        let config = "
+version: 2
+mergeable:
+  - when: pull_request.opened
+    validate:
+      - do: error
+    pass:
+      - do: pass_action
+    error:
+      - do: error_action
+";
+        let registry = Registry::default();
+        let error_validator = CountingValidator::throwing();
+        let pass_action = CountingAction::supporting(EVERY_EVENT);
+        let error_action = CountingAction::supporting(EVERY_EVENT);
+        registry.replace_validator("error", error_validator.clone());
+        registry.replace_action("pass_action", pass_action.clone());
+        registry.replace_action("error_action", error_action.clone());
+
+        let context = event_context("pull_request", "opened").await;
+        run_workflow(&context, &registry, config).await;
+
+        assert_eq!(error_validator.validate_calls(), 1);
+        assert_eq!(error_action.before_validate_calls(), 1);
+        assert_eq!(error_action.after_validate_calls(), 1);
+        assert_eq!(pass_action.before_validate_calls(), 1);
+        assert_eq!(pass_action.after_validate_calls(), 0);
+    }
+}
