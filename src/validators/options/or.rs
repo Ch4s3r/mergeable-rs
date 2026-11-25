@@ -140,4 +140,64 @@ mod tests {
             "Cannot read properties of undefined (reading 'status')"
         );
     }
+
+    async fn upstream_or(input: &Value, rule: &Value) -> Result<OptionResult> {
+        process(
+            &option_context(),
+            input,
+            rule,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn return_pass_if_input_passes_one_of_the_or_conditions() {
+        let rule =
+            json!({"or": [{"must_include": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
+        assert_eq!(
+            upstream_or(&json!(["A", "C"]), &rule).await.unwrap().status,
+            Status::Pass
+        );
+    }
+
+    #[tokio::test]
+    async fn return_fail_if_none_of_the_input_passes_one_of_the_or_conditions() {
+        let rule = json!({"or": [{"required": {"reviewers": ["user1"]}}, {"required": {"reviewers": ["user2"]}}]});
+        let input = json!(["user0", "user5", "user3"]);
+        assert_eq!(
+            upstream_or(&input, &rule).await.unwrap().status,
+            Status::Fail
+        );
+    }
+
+    #[tokio::test]
+    async fn return_error_if_inputs_are_not_in_expected_format() {
+        let rule = json!({"and": {"must_include": {"regex": "A"}}});
+        let error = upstream_or(&json!("the test"), &rule).await.unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Input type invalid, expected array type as input"
+        );
+    }
+
+    #[tokio::test]
+    async fn return_error_if_option_is_not_valid() {
+        let rule =
+            json!({"or": [{"must_include": {"regexs": "A"}}, {"must_exclude": {"regex": "B"}}]});
+        assert_eq!(
+            upstream_or(&json!(["A"]), &rule).await.unwrap().status,
+            Status::Error
+        );
+    }
+
+    #[tokio::test]
+    async fn return_error_if_sub_option_is_not_valid() {
+        let rule =
+            json!({"or": [{"must_inclde": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
+        assert_eq!(
+            upstream_or(&json!(["A"]), &rule).await.unwrap().status,
+            Status::Error
+        );
+    }
 }

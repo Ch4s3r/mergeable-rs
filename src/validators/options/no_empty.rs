@@ -97,4 +97,61 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.message(), ENABLED_NOT_FOUND_ERROR);
     }
+
+    fn label_validator_context() -> Value {
+        json!({"name": "label", "supportedOptions": ["and", "or", "begins_with", "ends_with", "max", "min", "must_exclude", "must_include", "no_empty", "required"]})
+    }
+
+    fn verify(enabled: bool, input: Option<&Value>, list_input: &Value, expected: Status) {
+        let rule = json!({"no_empty": {"enabled": enabled}});
+        let absent_or_given = input.unwrap_or(&Value::Null);
+        assert_eq!(
+            process(&label_validator_context(), absent_or_given, &rule)
+                .unwrap()
+                .status,
+            expected
+        );
+        assert_eq!(
+            process(&label_validator_context(), list_input, &rule)
+                .unwrap()
+                .status,
+            expected
+        );
+    }
+
+    #[test]
+    fn return_pass_if_input_meets_the_criteria() {
+        verify(true, Some(&json!("NOT EMPTY")), &json!([""]), Status::Pass);
+        verify(false, Some(&json!("NOT EMPTY")), &json!([""]), Status::Pass);
+    }
+
+    #[test]
+    fn return_fail_if_input_does_not_meet_the_criteria() {
+        verify(true, Some(&json!("")), &json!([]), Status::Fail);
+        verify(true, Some(&Value::Null), &json!([]), Status::Fail);
+        verify(true, None, &json!([]), Status::Fail);
+        verify(false, Some(&json!("")), &json!([""]), Status::Pass);
+    }
+
+    #[test]
+    fn return_error_if_input_does_not_meet_the_criteria() {
+        let rule = json!({"no_empty": {"enabled": true}});
+        let error = process(&label_validator_context(), &json!(1), &rule).unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Input type invalid, expected string or Array as input"
+        );
+        let list_of_number = process(&label_validator_context(), &json!([1]), &rule);
+        assert!(list_of_number.is_ok());
+    }
+
+    #[test]
+    fn return_error_if_inputs_are_not_in_expected_format() {
+        let rule = json!({"no_empty": {"regex": true}});
+        let error = process(&label_validator_context(), &json!("the test"), &rule).unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Failed to run the test because 'enabled' is not provided for 'no_empty' option. Please check README for more information about configuration"
+        );
+    }
 }

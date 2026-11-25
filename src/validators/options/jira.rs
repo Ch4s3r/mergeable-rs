@@ -139,4 +139,85 @@ mod tests {
         assert!(!has_error_messages(&json!({"errorMessages": []})));
         assert!(!has_error_messages(&json!({"key": "ABC-1"})));
     }
+
+    fn head_ref_validator_context() -> Value {
+        json!({"name": "headRef", "supportedOptions": ["and", "or", "begins_with", "ends_with", "max", "min", "must_exclude", "must_include", "no_empty", "required", "jira"]})
+    }
+
+    fn unreachable_jira() -> JiraSettings {
+        JiraSettings {
+            protocol: "http".to_string(),
+            host: Some("127.0.0.1".to_string()),
+            api_version: "2".to_string(),
+            username: Some("user".to_string()),
+            password: Some("password".to_string()),
+        }
+    }
+
+    fn unconfigured_jira() -> JiraSettings {
+        JiraSettings {
+            host: None,
+            ..unreachable_jira()
+        }
+    }
+
+    #[tokio::test]
+    async fn return_false_with_wrong_ticket_with_find_issue() {
+        assert!(!check_ticket_status("wrong-ticket-number", &unreachable_jira()).await);
+    }
+
+    #[tokio::test]
+    async fn return_error_if_inputs_are_not_in_expected_format() {
+        let error = process(
+            &head_ref_validator_context(),
+            &json!("the test"),
+            &json!({"jira": {}}),
+            &unreachable_jira(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Failed to run the test because 'regex' is not provided for 'jira' option. Please check README for more information about configuration"
+        );
+    }
+
+    #[tokio::test]
+    async fn return_fail_if_input_does_not_meet_the_regex_criteria() {
+        let result = process(
+            &head_ref_validator_context(),
+            &json!("feature-123123"),
+            &json!({"jira": {"regex": "test"}}),
+            &unreachable_jira(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, Status::Fail);
+    }
+
+    #[tokio::test]
+    async fn return_fail_if_jira_ticket_id_could_not_be_found() {
+        let result = process(
+            &head_ref_validator_context(),
+            &json!("test-123123"),
+            &json!({"jira": {"regex": "test"}}),
+            &unreachable_jira(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, Status::Fail);
+    }
+
+    #[tokio::test]
+    async fn return_fail_if_jira_ticket_id_could_not_be_found_without_a_configured_jira_host() {
+        let result = process(
+            &head_ref_validator_context(),
+            &json!("test-123123"),
+            &json!({"jira": {"regex": "test"}}),
+            &unconfigured_jira(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status, Status::Fail);
+    }
 }

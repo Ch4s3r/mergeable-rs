@@ -92,4 +92,47 @@ mod tests {
             json!("title must begins with \"test1,test2\"")
         );
     }
+
+    fn label_validator_context() -> Value {
+        json!({"name": "label", "supportedOptions": ["and", "or", "begins_with", "ends_with", "max", "min", "must_exclude", "must_include", "no_empty", "required"]})
+    }
+
+    fn expect_match_to_be(match_value: &Value, input: &Value, expected: Status) {
+        let rule = json!({"begins_with": {"match": match_value}});
+        assert_eq!(
+            process(&label_validator_context(), input, &rule)
+                .unwrap()
+                .status,
+            expected
+        );
+    }
+
+    #[test]
+    fn return_pass_if_input_begins_with_the_rule_and_matches_is_an_array() {
+        let matches = json!(["feat", "core"]);
+        expect_match_to_be(&matches, &json!("feat: the test"), Status::Pass);
+        expect_match_to_be(&matches, &json!("core: the test"), Status::Pass);
+        expect_match_to_be(&matches, &json!("some title"), Status::Fail);
+    }
+
+    #[test]
+    fn return_pass_if_input_begins_with_the_rule() {
+        expect_match_to_be(&json!("the"), &json!("the test"), Status::Pass);
+        expect_match_to_be(&json!("the"), &json!(["A", "B", "the test"]), Status::Pass);
+    }
+
+    #[test]
+    fn return_fail_if_input_does_not_begins_with_the_rule() {
+        expect_match_to_be(&json!("the"), &json!("test the"), Status::Fail);
+    }
+
+    #[test]
+    fn return_error_if_inputs_are_not_in_expected_format() {
+        let rule = json!({"begins_with": {"regex": "the"}});
+        let error = process(&label_validator_context(), &json!("the test"), &rule).unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Failed to run the test because 'match' is not provided for 'begins_with' option. Please check README for more information about configuration"
+        );
+    }
 }

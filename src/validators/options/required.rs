@@ -172,4 +172,57 @@ mod tests {
             json!("ValidatorName: a(Code Owner) ,b(Assignee) ,c(Requested Reviewer) ,d required")
         );
     }
+
+    fn validator_name_context() -> Value {
+        json!({"name": "ValidatorName"})
+    }
+
+    fn required_result(rule: &Value, input: &Value) -> OptionResult {
+        process(&validator_name_context(), input, rule).unwrap()
+    }
+
+    #[test]
+    fn return_pass_if_input_meets_the_criteria() {
+        let rule = json!({"required": {"reviewers": ["shine2lay", "jusx"]}});
+        assert_eq!(
+            required_result(&rule, &json!(["shine2lay", "jusx"])).status,
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn return_fail_if_input_does_not_meet_the_criteria() {
+        let rule = json!({"required": {"reviewers": ["shine2lay", "jusx"]}});
+        assert_eq!(
+            required_result(&rule, &json!(["jusx"])).status,
+            Status::Fail
+        );
+    }
+
+    #[test]
+    fn return_pass_when_reviewers_list_not_provided() {
+        let rule = json!({"required": {"owners": true}});
+        assert_eq!(
+            required_result(&rule, &json!(["jusx"])).status,
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn case_sensitivity() {
+        let rule = json!({"required": {"reviewers": ["shine2lay", "jusxtest"]}});
+        assert_eq!(
+            required_result(&rule, &json!(["jusxTest"])).status,
+            Status::Fail
+        );
+    }
+
+    #[test]
+    fn case_sensitivity_with_correct_case_insensitivity() {
+        let rule = json!({"required": {"reviewers": ["camelCaseUser", "jusxtest"]}});
+        assert_eq!(
+            required_result(&rule, &json!(["jusxTest"])).description,
+            json!("ValidatorName: camelCaseUser required")
+        );
+    }
 }

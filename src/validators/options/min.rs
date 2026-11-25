@@ -81,4 +81,44 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.message(), UNKNOWN_INPUT_TYPE_ERROR);
     }
+
+    fn label_validator_context() -> Value {
+        json!({"name": "label", "supportedOptions": ["and", "or", "begins_with", "ends_with", "max", "min", "must_exclude", "must_include", "no_empty", "required"]})
+    }
+
+    #[test]
+    fn return_pass_if_input_meets_the_criteria() {
+        let result = process(
+            &label_validator_context(),
+            &json!(["A", "B", "C"]),
+            &json!({"min": {"count": 3}}),
+        )
+        .unwrap();
+        assert_eq!(result.status, Status::Pass);
+    }
+
+    #[test]
+    fn return_fail_if_input_does_not_meet_the_criteria() {
+        let result = process(
+            &label_validator_context(),
+            &json!(["A", "B"]),
+            &json!({"min": {"count": 3}}),
+        )
+        .unwrap();
+        assert_eq!(result.status, Status::Fail);
+    }
+
+    #[test]
+    fn return_error_if_inputs_are_not_in_expected_format() {
+        let error = process(
+            &label_validator_context(),
+            &json!(["the test"]),
+            &json!({"min": {"regex": 3}}),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Failed to run the test because 'count' is not provided for 'min' option. Please check README for more information about configuration"
+        );
+    }
 }
