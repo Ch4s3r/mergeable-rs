@@ -197,6 +197,7 @@ impl StubGithub {
             private_key_pem: STUB_SIGNING_KEY_PEM.clone(),
             retry_base_delay: Duration::from_millis(1),
             throttle: None,
+            http_timeouts: crate::app_config::OutgoingHttpTimeouts::default(),
         };
         let app = Arc::new(
             GithubApp::new(settings, None).unwrap_or_else(|error| panic!("stub app: {error}")),

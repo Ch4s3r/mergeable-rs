@@ -76,7 +76,7 @@ and unthrottled numbers separately.
 Status: accepted
 Decision: tokio, axum, reqwest (rustls), async-trait, serde_json (`preserve_order`), an own YAML loader (`yaml`) whose
 parse errors are part of the check output, an own template interpreter (`template`), regex + fancy-regex
-(lookbehind in user patterns), an own glob matcher (`glob`), jiff (ADR-021), moka (memory cache and
+(lookbehind in user patterns), an own glob matcher (`glob`), jiff (ADR-022), moka (memory cache and
 compiled pattern cache), redis, prometheus-client, jsonwebtoken, hmac, sha1, sha2, tracing + tracing-subscriber.
 Consequences: the rustls stack pulls in aws-lc-rs and ring (assembly/C crypto) for TLS; no equally mature
 pure-Rust TLS provider exists, so this is accepted.
@@ -262,7 +262,23 @@ Consequences: No failing release runs from merges in quick succession and no PAT
 permission. If `main` moves during the image build, that version's image is published by the old run and published
 again by the newer run, which tags it.
 
-## ADR-021: Dates and time zones with jiff
+## ADR-021: Bounded webhook concurrency and outgoing HTTP timeouts
+Status: accepted
+Context: Every signed webhook spawned its handler, and a handler still running after 9 s went on in the background
+after the `202` (ADR-007), with no limit on how many ran at once. The GitHub and Jira clients had no connect or
+request timeout, so a hanging upstream kept a handler, its payload and its memory alive indefinitely (issue #30).
+Decision: A `tokio::sync::Semaphore` with `MAX_CONCURRENT_WEBHOOKS` slots (default 64) bounds the webhook handlers.
+A handler holds its slot until it finishes, also after the `202`. A delivery without a free slot waits for one within
+the same 9 s answer window; if none frees up it is answered `503` and logged as `webhook.rejected.overloaded`, rather
+than queued without bound. Scheduler events are not limited. Both reqwest clients get a connect timeout
+(`OUTGOING_HTTP_CONNECT_TIMEOUT`, 10 s) and a whole-request timeout (`OUTGOING_HTTP_TIMEOUT`, 60 s); a timed-out
+GitHub request is a transport error (status 500) and is retried like other failures. Zero or invalid values use the
+defaults, so neither limit can be switched off.
+Consequences: The defaults are far above what the recorded cases and the retry timing need, so their webhook IO is
+unchanged. Under overload GitHub sees `503` for some deliveries; GitHub does not redeliver on its own, so they have
+to be redelivered from the App's advanced settings. A Jira request that times out counts as an invalid ticket.
+
+## ADR-022: Dates and time zones with jiff
 Status: accepted
 Context: RustSec marks chrono (RUSTSEC-2026-0543) and chrono-tz (RUSTSEC-2026-0555) as unmaintained without a safe
 upgrade (issue #24). Dates are read in the `age` validator, the `stale` validator (`time_constraint`, search

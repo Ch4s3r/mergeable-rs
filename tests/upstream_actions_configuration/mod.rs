@@ -94,6 +94,7 @@ impl MockedGithub {
             private_key_pem: unused_signing_key_pem()?,
             retry_base_delay: Duration::from_millis(1),
             throttle: None,
+            http_timeouts: mergeable::app_config::OutgoingHttpTimeouts::default(),
         };
         let app = Arc::new(GithubApp::new(settings, None)?);
         Ok(MockedGithub { server, app })

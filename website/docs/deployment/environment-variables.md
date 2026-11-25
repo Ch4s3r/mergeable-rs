@@ -41,6 +41,8 @@ implementation, including `NODE_ENV`. The source of truth is the configuration t
 | `ENABLE_METRICS_ENDPOINT` | `true` serves `GET /metrics` | off |
 | `GITHUB_THROTTLE` | `false` disables the GitHub request throttling (ADR-007) | on |
 | `GITHUB_RETRY_BASE_MS` | Base delay of the retry back-off for failed GitHub requests | `1000` |
+| `MAX_CONCURRENT_WEBHOOKS` | Webhooks processed at the same time; a further webhook waits for a free slot and is answered `503` if none frees up within 9 s (zero or invalid values use the default) | `64` |
+| `OUTGOING_HTTP_CONNECT_TIMEOUT`, `OUTGOING_HTTP_TIMEOUT` | Connect timeout and whole-request timeout in seconds of the requests to GitHub and Jira (zero or invalid values use the default) | `10`, `60` |
 
 A variable that is set but empty counts as unset. Switches are on only for the exact value `true`, except
 `LOG_CONFIG` and `DISABLE_DELAY` (any non-empty value) and `GITHUB_THROTTLE` (on unless it is `false`).

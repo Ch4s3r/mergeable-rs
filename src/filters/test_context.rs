@@ -36,6 +36,7 @@ pub fn context_with_github_at(github_base_url: &str, event_name: &str, payload: 
         private_key_pem: TEST_SIGNING_KEY_PEM.clone(),
         retry_base_delay: Duration::from_millis(1),
         throttle: None,
+        http_timeouts: crate::app_config::OutgoingHttpTimeouts::default(),
     };
     let app = Arc::new(
         GithubApp::new(settings, None).unwrap_or_else(|error| panic!("test app: {error}")),
