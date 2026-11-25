@@ -256,6 +256,10 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
 
+    fn random_password() -> String {
+        hex::encode(rand::random::<[u8; 16]>())
+    }
+
     fn settings_from(variables: &[(&str, &str)]) -> RedisSettings {
         let variables: HashMap<String, String> = variables
             .iter()
@@ -320,16 +324,14 @@ mod tests {
 
     #[test]
     fn configured_redis_password_and_username_replace_the_host_fallback() {
+        let password = random_password();
         let settings = settings_from(&[
             ("CACHE_REDIS_HOST", "redis.internal"),
             ("CACHE_REDIS_USERNAME", "mergeable"),
-            ("CACHE_REDIS_PASSWORD", "s3cret"),
+            ("CACHE_REDIS_PASSWORD", &password),
         ]);
         assert_eq!(settings.username.as_deref(), Some("mergeable"));
-        assert_eq!(
-            settings.password,
-            Some(RedisPassword::Configured("s3cret".to_string()))
-        );
+        assert_eq!(settings.password, Some(RedisPassword::Configured(password)));
     }
 
     #[test]
@@ -337,7 +339,7 @@ mod tests {
         let host_fallback = settings_from(&[("CACHE_REDIS_HOST", "redis.internal")]);
         let configured = settings_from(&[
             ("CACHE_REDIS_HOST", "redis.internal"),
-            ("CACHE_REDIS_PASSWORD", "s3cret"),
+            ("CACHE_REDIS_PASSWORD", &random_password()),
         ]);
         assert!(host_fallback.may_retry_without_password());
         assert!(!configured.may_retry_without_password());
@@ -369,8 +371,9 @@ mod tests {
         let debug_output = format!("{settings:?}");
         assert!(debug_output.contains("<redacted>"));
         assert_eq!(debug_output.matches("secret-host").count(), 1);
-        let configured = settings_from(&[("CACHE_REDIS_PASSWORD", "configured-secret")]);
-        assert!(!format!("{configured:?}").contains("configured-secret"));
+        let password = random_password();
+        let configured = settings_from(&[("CACHE_REDIS_PASSWORD", &password)]);
+        assert!(!format!("{configured:?}").contains(&password));
     }
 
     #[test]
