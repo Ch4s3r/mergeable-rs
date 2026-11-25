@@ -296,5 +296,5 @@ installation's repositories fails, that installation's repositories stay schedul
 - The App-authenticated requests of the scheduler (`GET /app/installations`) are not throttled or retried.
 - `approvals` with `limit`: when the allowed set (`limit.teams` members who approved, `limit.users`, CODEOWNERS of
   `limit.owners`) is empty, for example because the repository has no CODEOWNERS file, all approvals count, the
-  same way `required.owners` passes without a CODEOWNERS file (ADR-015, upstream
+  same way `required.owners` passes without a CODEOWNERS file (ADR-014, upstream
   Ch4s3r/mergeable@5286915).
