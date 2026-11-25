@@ -96,9 +96,9 @@ ${countTable('License', countBy(npmPackages, (npmPackage) => npmPackage.license)
 
 ## Container image
 
-The image is built by Paketo buildpacks (\`project.toml\`) on the Paketo Ubuntu base and run images. Their operating
-system packages keep their own licenses (mostly GPL, LGPL, MIT and BSD) and are aggregated with mergeable, not linked
-into it. The image carries the label \`org.opencontainers.image.licenses=AGPL-3.0-only\` for mergeable itself.
+The image is built by Paketo buildpacks (\`project.toml\`) on the Paketo Ubuntu build image and the Paketo tiny run
+image. Their operating system packages keep their own licenses (mostly GPL, LGPL, MIT and BSD) and are aggregated with
+mergeable, not linked into it. The image carries the label \`org.opencontainers.image.licenses=AGPL-3.0-only\` for mergeable itself.
 `;
 }
 

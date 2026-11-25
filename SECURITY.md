@@ -41,7 +41,8 @@ fixes. Releases are cut automatically from `main`, so a fix is available as soon
   only, never from repository configuration. The Jira ticket id taken from a pull request is percent-encoded as one
   path segment.
 - The container image runs as a non-root user (Paketo `cnb` user, distroless `nonroot` for the `Dockerfile`) and
-  listens only on `PORT`.
+  listens only on `PORT`. Its run image is the Paketo tiny run image (glibc, CA certificates, tzdata; no shell, no
+  package manager), pinned in `project.toml` and updated by Renovate, and every update releases a new image.
 
 Limits on input from repositories (configuration files and pull requests): YAML nesting depth and alias expansion are
 bounded, templates may nest blocks and subexpressions at most 100 levels deep, a glob brace expansion yields at most
@@ -60,7 +61,9 @@ hanging upstream cannot keep a handler alive indefinitely.
 - [OpenSSF Scorecard](https://scorecard.dev) on `main` and weekly (`.github/workflows/scorecard.yml`), results
   published and uploaded to code scanning.
 - [Grype](https://github.com/anchore/grype) scans `ghcr.io/ch4s3r/mergeable-rs:latest` weekly and after every
-  release run (`.github/workflows/image-scan.yml`) and uploads the findings to code scanning.
+  release run (`.github/workflows/image-scan.yml`) and uploads the findings to code scanning. Findings in packages
+  the binary does not load (for example `openssl`/`libssl3t64`: the binary uses rustls and links only `libc`,
+  `libm` and `libgcc_s`) are dismissed as "won't fix" with that reason.
 - Secret scanning with push protection is enabled for the repository.
 - [Renovate](https://docs.renovatebot.com) pins every GitHub Action to a commit digest
   (`helpers:pinGitHubActionDigests`) and opens pull requests for dependencies with known vulnerabilities; every

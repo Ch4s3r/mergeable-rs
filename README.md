@@ -45,6 +45,11 @@ docker run --rm -p 3000:3000 \
   mergeable-rs
 ```
 
+The run image is the Paketo *tiny* run image `paketobuildpacks/ubuntu-noble-run-tiny` (pinned as
+`run-image` in `project.toml`, passed to `pack build --run-image`): glibc, CA certificates and tzdata, no shell and no
+package manager. The binary uses rustls, not OpenSSL. `BP_DIRECT_PROCESS=true` starts the `web` process of the
+`Procfile` without a shell; CI starts the built image and waits for `/ping`.
+
 The builder `paketobuildpacks/ubuntu-noble-builder-buildpackless` is multi-arch, so it builds natively on
 Apple Silicon. With Docker's containerd image store, `pack` cannot export multi-arch buildpacks into the local
 daemon (buildpacks/pack#2272); publish to a registry instead, e.g. a local one:
@@ -96,7 +101,8 @@ request with a passing `test` check and is squash-merged, so the pull request ti
 
 [Renovate](https://docs.renovatebot.com) (`renovate.json`, built from presets) tracks Cargo crates, GitHub Actions (pinned to
 commit digests with the version as a comment, `helpers:pinGitHubActionDigests`), the
-Paketo builder and buildpacks in `project.toml`, the Dockerfile images, the npm dependencies of the documentation
+Paketo builder, buildpacks and run image in `project.toml` (grouped, committed as `build(deps)` so every update
+releases an image with the patched run image), the Dockerfile images, the npm dependencies of the documentation
 site (`website/package.json`), and devenv: the devenv version (CLI in the
 workflows and the module input in `devenv.yaml`) and the pinned `devenv-nixpkgs` commit. devenv re-locks
 `devenv.lock` when `devenv.yaml` changes. Updates are opened on Mondays before 04:00 UTC; patch, minor, digest and

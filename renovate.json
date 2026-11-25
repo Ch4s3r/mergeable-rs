@@ -49,6 +49,16 @@
       ],
       "depNameTemplate": "cachix/devenv",
       "datasourceTemplate": "github-releases"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)project\\.toml$/"
+      ],
+      "matchStrings": [
+        "run-image = \"(?<depName>[^:\"]+):(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [
@@ -58,6 +68,13 @@
         "devenv-nixpkgs"
       ],
       "groupName": "devenv"
+    },
+    {
+      "matchFileNames": [
+        "project.toml"
+      ],
+      "groupName": "Paketo",
+      "semanticCommitType": "build"
     }
   ]
 }

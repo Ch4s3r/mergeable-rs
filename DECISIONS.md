@@ -306,3 +306,24 @@ jiff's more lenient ISO 8601 parser.
 Consequences: No ignored advisories remain in `deny.toml`. `time_zone` names are matched case-insensitively (jiff),
 where chrono-tz needed the exact spelling and fell back to UTC otherwise. A `stale` search more than about 8000
 years in the past fails with "Invalid time value" (jiff's range) instead of formatting a year beyond 9999.
+
+## ADR-024: Paketo tiny run image, updated through releases
+Status: accepted
+Context: The first Grype scan of the published image (issue #33) reported 97 findings, all in Ubuntu packages of the
+Paketo run image `ubuntu-noble-run` (shell, coreutils, util-linux, systemd libraries, tar, dpkg, gnutls, expat,
+OpenSSL, glibc, ...), none in the binary. The binary needs only glibc (`libc`, `libm`, `libgcc_s`) and CA
+certificates; TLS is rustls. The run image was the builder's floating `ubuntu-noble-run:latest`, so patched run
+images reached users only when a code change happened to be released.
+Decision: Build on the Paketo tiny run image `paketobuildpacks/ubuntu-noble-run-tiny` (glibc, OpenSSL libraries,
+CA certificates, tzdata; no shell, no package manager; same stack id as the builder). The project descriptor has no
+run image field, so the reference is pinned as `run-image` in its free-form `[_.metadata]` table and the devenv
+script `build-image` passes it to `pack build --run-image`. Without a shell the `Procfile` process is started directly
+(`BP_DIRECT_PROCESS=true`), and the CI `image` check starts the built image and waits for `/ping`. Renovate tracks
+the run image with a regex manager and groups it with the builder and buildpacks; these updates are committed as
+`build(deps)`, which git-cliff counts as releasable, so each weekly update publishes a patch release on the newest run
+image. A static binary on the Paketo static run image or distroless/static was not chosen: it needs a musl build of
+`aws-lc-sys` in the Rust buildpack and an allocator change for a few more packages. Remaining findings in packages
+the binary does not load (OpenSSL) are dismissed in code scanning as "won't fix" with that reason.
+Consequences: About a third of the findings remain (glibc and OpenSSL of noble) until Ubuntu ships fixes, which the
+weekly run image update picks up. No `docker exec ... sh` into the container; debug with an ephemeral debug
+container. A Paketo update releases a new patch version even without code changes.

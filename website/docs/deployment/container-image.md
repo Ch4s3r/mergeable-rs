@@ -31,7 +31,8 @@ docker run --rm -p 3000:3000 \
 Check that it is up with `curl http://localhost:3000/ping` (answers `PONG`). Put the server behind HTTPS and point the
 GitHub App's webhook URL at `https://<your-host>/api/github/webhooks`.
 
-The image contains the single `mergeable` binary (no Node.js runtime) and runs as a non-root user. For health checks,
+The image contains the single `mergeable` binary (no Node.js runtime) on a minimal run image without a shell and runs
+as a non-root user. For health checks,
 metrics, logs and scaling see [Operations](../operations/overview.md).
 
 :::note
@@ -53,6 +54,13 @@ docker run --rm -p 3000:3000 \
   -e APP_ID=12345 -e WEBHOOK_SECRET=... -e PRIVATE_KEY="$(base64 < private-key.pem)" \
   mergeable-rs
 ```
+
+The run image is the Paketo *tiny* run image `paketobuildpacks/ubuntu-noble-run-tiny` (pinned as `run-image` in
+`project.toml` and passed to `pack build --run-image`). It contains glibc, CA certificates and tzdata, but no shell and
+no package manager, so the image has far fewer operating system packages that can carry vulnerabilities; the binary
+uses rustls, not OpenSSL. `BP_DIRECT_PROCESS=true` starts the `web` process of the `Procfile` without a shell, and
+CI starts every built image and waits for `/ping`. To debug inside a running container, use an ephemeral debug
+container (`kubectl debug`, `docker debug`) instead of `docker exec ... sh`.
 
 The builder `paketobuildpacks/ubuntu-noble-builder-buildpackless` is multi-arch, so it builds natively on Apple
 Silicon. With Docker's containerd image store, `pack` cannot export multi-arch buildpacks into the local daemon

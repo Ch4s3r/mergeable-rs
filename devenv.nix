@@ -17,7 +17,8 @@
   ];
 
   scripts.build-image.exec = ''
-    pack build "''${1:-mergeable-rs}" --path "$DEVENV_ROOT" "''${@:2}"
+    run_image="$(sed -n 's/^run-image = "\(.*\)"$/\1/p' "$DEVENV_ROOT/project.toml")"
+    pack build "''${1:-mergeable-rs}" --path "$DEVENV_ROOT" --run-image "$run_image" "''${@:2}"
   '';
 
   scripts.license-inventory.exec = ''
