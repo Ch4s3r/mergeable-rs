@@ -17,8 +17,8 @@ the module map is [MAP.md](https://github.com/Ch4s3r/mergeable-rs/blob/main/MAP.
 
 ## Development environment
 
-The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-edit, cargo-nextest, git-cliff, pack,
-Redis, Valkey and Node.js (for this documentation site).
+The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-deny, cargo-edit, cargo-nextest,
+git-cliff, pack, Redis, Valkey and Node.js (for this documentation site).
 
 ```bash
 devenv shell
@@ -39,6 +39,7 @@ runs the whole gate, the same as CI. Step by step inside `devenv shell`:
 ```bash
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
+cargo deny check                  # licenses, RustSec advisories, duplicate crates, sources (see Licenses)
 cargo nextest run                 # unit tests, the ported upstream unit tests and the 381 recorded webhook cases
 cargo test --doc
 ```

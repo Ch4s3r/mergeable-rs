@@ -141,6 +141,7 @@ const sidebars = {
         'contributing/contributing',
         'contributing/releases',
         'contributing/changelog',
+        'contributing/licenses',
         'contributing/original-project-history',
       ],
     },
