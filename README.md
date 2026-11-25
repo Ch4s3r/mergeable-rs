@@ -3,6 +3,11 @@
 A Rust implementation of [mergeable](https://github.com/mergeability/mergeable), licensed under AGPL-3.0 like the
 original.
 
+**Documentation: [ch4s3r.github.io/mergeable-rs](https://ch4s3r.github.io/mergeable-rs/)** (rules reference, recipes,
+deployment, operations). The site is built with Docusaurus from `website/` and deployed to GitHub Pages by
+`.github/workflows/docs.yml`; preview it with `devenv shell -- docs-serve`. The [configuration table](#configuration)
+below stays the source of truth for the environment variables.
+
 A GitHub App that checks pull requests and issues against rules in `.github/mergeable.yml` and reports the
 result as check runs, comments, labels and assignees. One Rust binary, `mergeable`, serves the GitHub webhook
 endpoint and the optional rate-limit and Prometheus routes. It reads `.github/mergeable.yml` and
@@ -18,7 +23,7 @@ Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.m
 ## Development
 
 The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-edit, cargo-nextest, git-cliff,
-pack, redis and valkey.
+pack, redis, valkey and Node.js (for the documentation site in `website/`).
 
 ```sh
 devenv shell
@@ -64,7 +69,8 @@ request with a passing `test` check and is squash-merged, so the pull request ti
 ## Dependency updates
 
 [Renovate](https://docs.renovatebot.com) (`renovate.json`, built from presets) tracks Cargo crates, GitHub Actions, the
-Paketo builder and buildpacks in `project.toml`, the Dockerfile images, and devenv: the devenv version (CLI in the
+Paketo builder and buildpacks in `project.toml`, the Dockerfile images, the npm dependencies of the documentation
+site (`website/package.json`), and devenv: the devenv version (CLI in the
 workflows and the module input in `devenv.yaml`) and the pinned `devenv-nixpkgs` commit. devenv re-locks
 `devenv.lock` when `devenv.yaml` changes. Updates are opened on Mondays before 04:00 UTC; patch, minor, digest and
 lock file updates are squash-merged automatically once all checks pass, major updates wait for review. Renovate also
