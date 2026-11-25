@@ -1,6 +1,7 @@
 mod contract;
 mod github_data_cache;
 mod installation_resync;
+mod opentelemetry_export;
 mod upstream_actions_configuration;
 mod upstream_filters_flex;
 mod upstream_validators_a_l;

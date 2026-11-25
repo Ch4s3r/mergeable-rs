@@ -4,6 +4,7 @@ use crate::github::app_auth::{AppSigner, build_http_client};
 use crate::github::throttle::RequestThrottle;
 use crate::json_value;
 use crate::metrics::Metrics;
+use crate::telemetry;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use reqwest::Method;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
@@ -12,6 +13,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, PoisonError};
 use std::time::{Duration, SystemTime};
+use tracing::Instrument;
 
 const URI_COMPONENT_SAFE: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
@@ -218,16 +220,32 @@ impl GithubApp {
             "{}/app/installations/{installation_id}/access_tokens",
             self.base_url
         );
-        let response = self
-            .http
-            .post(&url)
-            .header(AUTHORIZATION, self.signer.bearer_authorization()?)
-            .header(ACCEPT, DEFAULT_ACCEPT)
-            .send()
-            .await
-            .map_err(|error| transport_error(&error))?;
-        let status = response.status().as_u16();
-        let data: Value = response.json().await.unwrap_or(Value::Null);
+        let request_span = telemetry::github_request_span(
+            &Method::POST,
+            &format!("/app/installations/{installation_id}/access_tokens"),
+        );
+        let mut trace_headers = HeaderMap::new();
+        telemetry::propagate_trace(&request_span, &mut trace_headers);
+        let (status, data) = async {
+            let response = self
+                .http
+                .post(&url)
+                .header(AUTHORIZATION, self.signer.bearer_authorization()?)
+                .header(ACCEPT, DEFAULT_ACCEPT)
+                .headers(trace_headers)
+                .send()
+                .await
+                .map_err(|error| transport_error(&error))?;
+            let status = response.status().as_u16();
+            let data: Value = response.json().await.unwrap_or(Value::Null);
+            Ok::<_, Error>((status, data))
+        }
+        .instrument(request_span.clone())
+        .await
+        .inspect_err(|error| {
+            telemetry::record_response_status(&request_span, error.status(), true);
+        })?;
+        telemetry::record_response_status(&request_span, Some(status), status >= 400);
         if status >= 400 {
             return Err(Error::http(status, api_error_message(&data)));
         }
@@ -450,18 +468,47 @@ impl InstallationClient {
             .strip_prefix(self.app.base_path.as_str())
             .filter(|rest| rest.starts_with('/'))
             .unwrap_or(full_path);
+        let request_span = telemetry::github_request_span(&prepared.method, pathname);
+        let outcome = self
+            .send_once_traced(prepared, parsed_url.as_ref().ok(), pathname, &request_span)
+            .instrument(request_span.clone())
+            .await;
+        match &outcome {
+            Ok(response) => {
+                telemetry::record_response_status(&request_span, Some(response.status), false);
+            }
+            Err(error) => telemetry::record_response_status(
+                &request_span,
+                error.status(),
+                !error.has_status(NOT_MODIFIED),
+            ),
+        }
+        outcome
+    }
+
+    async fn send_once_traced(
+        &self,
+        prepared: &PreparedRequest,
+        parsed_url: Option<&reqwest::Url>,
+        pathname: &str,
+        request_span: &tracing::Span,
+    ) -> Result<GithubResponse> {
         let _concurrency_permit = match &self.app.throttle {
             Some(throttle) => throttle.acquire(&prepared.method, pathname).await,
             None => None,
         };
         let builder = match parsed_url {
-            Ok(url) => self.app.http.request(prepared.method.clone(), url),
-            Err(_) => self
+            Some(url) => self.app.http.request(prepared.method.clone(), url.clone()),
+            None => self
                 .app
                 .http
                 .request(prepared.method.clone(), prepared.url.as_str()),
         };
-        let mut builder = builder.header(ACCEPT, prepared.accept.as_ref());
+        let mut trace_headers = HeaderMap::new();
+        telemetry::propagate_trace(request_span, &mut trace_headers);
+        let mut builder = builder
+            .header(ACCEPT, prepared.accept.as_ref())
+            .headers(trace_headers);
         if let Some(installation_id) = self.installation_id {
             builder = builder.header(
                 AUTHORIZATION,

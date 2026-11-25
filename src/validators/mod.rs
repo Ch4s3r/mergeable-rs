@@ -101,6 +101,7 @@ pub fn is_event_supported(validator: &dyn Validator, event_name: &str) -> bool {
     crate::event_aware::is_event_supported(validator.supported_events(), event_name)
 }
 
+#[tracing::instrument(name = "validator", skip_all, fields(validator.name = validator.name()))]
 pub async fn process_validate(
     validator: &dyn Validator,
     context: &Context,

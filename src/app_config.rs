@@ -1,5 +1,6 @@
 use crate::cache::CacheSettings;
 use crate::scheduler::SchedulerOptions;
+use crate::telemetry::TelemetrySettings;
 use base64::Engine as _;
 use std::collections::BTreeMap;
 use std::fmt;
@@ -260,6 +261,7 @@ pub struct AppConfig {
     pub github_retry_base_delay: Duration,
     pub max_concurrent_webhooks: usize,
     pub outgoing_http_timeouts: OutgoingHttpTimeouts,
+    pub telemetry: TelemetrySettings,
     pub behavior: BehaviorSettings,
 }
 
@@ -359,6 +361,7 @@ impl AppConfig {
                     limit.min(tokio::sync::Semaphore::MAX_PERMITS)
                 }),
             outgoing_http_timeouts: OutgoingHttpTimeouts::from_environment(environment),
+            telemetry: TelemetrySettings::from_environment(environment),
             behavior: BehaviorSettings::from_environment(environment),
         })
     }

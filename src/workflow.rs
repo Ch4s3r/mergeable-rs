@@ -12,6 +12,7 @@ use crate::validators;
 use futures::future::join_all;
 use serde_json::{Value, json};
 use std::sync::Arc;
+use tracing::Instrument;
 
 const DOCUMENTATION_FOOTER: &str = "See the [documentation](https://github.com/mergeability/mergeable) for details on configuration.";
 
@@ -290,7 +291,14 @@ async fn applicable_rules<'rules>(
         if !rule_applies_to_event(rule.get("when"), context)? {
             continue;
         }
-        match filter_results(context, registry, rule).await {
+        let filtering_span = tracing::info_span!(
+            "rule.filter",
+            rule.name = %checks::check_name(rule.get("name")),
+        );
+        match filter_results(context, registry, rule)
+            .instrument(filtering_span)
+            .await
+        {
             Err(error) => {
                 tracing::error!(
                     %error,
@@ -316,6 +324,52 @@ async fn applicable_rules<'rules>(
     Ok(applicable)
 }
 
+async fn evaluate_rule(
+    context: &Context,
+    registry: &Registry,
+    rule: &Value,
+    event_name: &str,
+) -> Result<()> {
+    let validation_results = match validator_results(context, registry, rule).await {
+        Ok(outputs) => outputs,
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "workflow.validator.failed"
+            );
+            vec![internal_error_result(&error)]
+        }
+    };
+    let summary = results::summarize_validations(validation_results);
+    tracing::Span::current().record("rule.outcome", summary.status.as_str());
+    let Some(action_outcome) = run_outcome_actions(context, registry, rule, &summary).await? else {
+        return Ok(());
+    };
+    match action_outcome {
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "workflow.action.failed"
+            );
+            if comment::is_supported(event_name) {
+                let body = format!(
+                    "####  :x: Error Occurred while executing an Action \n\n If you believe this is an unexpected error, please report it on our issue tracker: https://github.com/mergeability/mergeable/issues/new \n##### Error Details \n-------------------- \n{error}"
+                );
+                let task_context = context.clone();
+                spawn_detached("workflow/error_comment", async move {
+                    comment::handle_error(&task_context, &body).await
+                });
+            }
+        }
+        Ok(()) => {
+            if comment::is_supported(event_name) {
+                comment::remove_error_comments(context).await?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub async fn process(
     context: &Context,
     registry: &Registry,
@@ -337,43 +391,14 @@ pub async fn process(
     prepare_actions(context, registry, &rules).await?;
 
     for &rule in &rules {
-        let validation_results = match validator_results(context, registry, rule).await {
-            Ok(outputs) => outputs,
-            Err(error) => {
-                tracing::error!(
-                    %error,
-                    "workflow.validator.failed"
-                );
-                vec![internal_error_result(&error)]
-            }
-        };
-        let summary = results::summarize_validations(validation_results);
-        let Some(action_outcome) = run_outcome_actions(context, registry, rule, &summary).await?
-        else {
-            continue;
-        };
-        match action_outcome {
-            Err(error) => {
-                tracing::error!(
-                    %error,
-                    "workflow.action.failed"
-                );
-                if comment::is_supported(&event_name) {
-                    let body = format!(
-                        "####  :x: Error Occurred while executing an Action \n\n If you believe this is an unexpected error, please report it on our issue tracker: https://github.com/mergeability/mergeable/issues/new \n##### Error Details \n-------------------- \n{error}"
-                    );
-                    let task_context = context.clone();
-                    spawn_detached("workflow/error_comment", async move {
-                        comment::handle_error(&task_context, &body).await
-                    });
-                }
-            }
-            Ok(()) => {
-                if comment::is_supported(&event_name) {
-                    comment::remove_error_comments(context).await?;
-                }
-            }
-        }
+        let rule_span = tracing::info_span!(
+            "rule",
+            rule.name = %checks::check_name(rule.get("name")),
+            rule.outcome = tracing::field::Empty,
+        );
+        evaluate_rule(context, registry, rule, &event_name)
+            .instrument(rule_span)
+            .await?;
     }
     Ok(())
 }
