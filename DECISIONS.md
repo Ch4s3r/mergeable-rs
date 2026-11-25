@@ -149,7 +149,21 @@ Consequences: Repeated events on the same repository save the cached reads (meas
 `cache_lookups_total`); team, collaborator and topic changes are seen after at most `GITHUB_DATA_CACHE_TTL`.
 Several replicas share one cache through Valkey (`CACHE_STORAGE=valkey`).
 
-## ADR-014: License stays AGPL-3.0-only
+## ADR-014: An empty approvals limit does not filter approvals
+Status: accepted
+Context: With `limit` set, the `approvals` validator only counts approvals from the allowed set (`limit.teams`
+members, `limit.users`, CODEOWNERS of `limit.owners`). When that set is empty, for example `limit.owners: true`
+in a repository without a CODEOWNERS file, every approval was dropped and `min.count` failed, while
+`required.owners` already passes without a CODEOWNERS file. Upstream changed this in
+Ch4s3r/mergeable@528691515800307ac14685d05d68c1b4c63507ca.
+Decision: Follow upstream: `approvals::only_allowed_reviewers` narrows the approvals down to the allowed set only
+when the set is not empty; the info output "Only approvals from following sources are counted" stays.
+Consequences: A `limit` that resolves to nobody behaves like no `limit`. A team that does not exist or has no
+approving member no longer blocks approvals on its own. No recorded case (ADR-005) covers an empty allowed set;
+the upstream test "returns proper error when team provided is not found" mocks a non-approving team member that
+the membership lookup cannot return, so its Rust port asserts the lifted limit instead.
+
+## ADR-015: License stays AGPL-3.0-only
 Status: accepted
 Context: Issue #17 asked whether mergeable-rs can move to MIT OR Apache-2.0. mergeable-rs was ported from
 mergeability/mergeable: modules translated from the original source, error and message texts reproduced verbatim,
@@ -168,12 +182,12 @@ tracking issue with a checklist (consent to "MIT OR Apache-2.0" for their contri
 or a signed-off statement); contributions of authors who decline or cannot be reached are rewritten clean-room
 before the switch. The decision whether to start this process stays with the owner (issue #17, label
 `needs-decision`). This is not legal advice.
-Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-015). Anyone running a modified mergeable-rs
+Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-016). Anyone running a modified mergeable-rs
 as a network service must offer its source to its users.
 
-## ADR-015: Dependency policy checked by cargo-deny
+## ADR-016: Dependency policy checked by cargo-deny
 Status: accepted
-Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-014), and known
+Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-015), and known
 vulnerable, unmaintained or yanked crates should not slip in through lock file updates.
 Decision: `cargo deny check` with `deny.toml` runs in `devenv test`, so in the required `test` check of every pull
 request and in the release workflow. Licenses: an allowlist of the licenses the dependency tree uses that are
@@ -187,3 +201,4 @@ the docs workflow before each build, so it is not checked in `devenv test` (Reno
 otherwise fail).
 Consequences: A new dependency under another license, or a new RustSec advisory, fails the gate until it is
 reviewed. `devenv test` needs network access to GitHub to update the advisory database.
+||||||| d753e54

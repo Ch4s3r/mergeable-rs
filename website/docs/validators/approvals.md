@@ -37,6 +37,12 @@ In the `limit` option, if more than one sub-option is present, the union of the 
 
 :::note
 
+If the `limit` option resolves to nobody, all approvals count as if `limit` were not set. For example, `limit.owners: true` in a repository without a CODEOWNERS file does not filter out any approval, the same way `required.owners` passes when the CODEOWNERS file is missing. The info output "Only approvals from following sources are counted" is still shown.
+
+:::
+
+:::note
+
 If you receive the error `Resource not accessible by integration` for the owners file, the GitHub App lacks read permission for repository contents.
 
 :::
