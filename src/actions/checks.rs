@@ -52,7 +52,7 @@ pub fn check_name(name: Option<&Value>) -> String {
 
 #[must_use]
 pub fn current_timestamp() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    format!("{:.3}", jiff::Timestamp::now())
 }
 
 #[must_use]
@@ -276,5 +276,17 @@ impl Action for Checks {
             payload,
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_timestamp_is_utc_with_milliseconds() {
+        let timestamp = current_timestamp();
+        let pattern = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$").unwrap();
+        assert!(pattern.is_match(&timestamp), "{timestamp}");
     }
 }

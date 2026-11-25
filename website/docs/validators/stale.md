@@ -17,7 +17,7 @@ Searches for issues and pull requests that have not been updated for a number of
     match: ['label1_to_match', 'label2_to_match'] # only items with matching labels will be actioned upon and marked as stale
     ignore: ['label1_to_ignore', 'label2_to_ignore'] # items with these labels will be ignored and not marked as stale
   time_constraint: # Optional, run the validator only if it is within the time constraint
-    time_zone: 'America/Los_Angeles' # Optional, UTC by default, an IANA time zone name
+    time_zone: 'America/Los_Angeles' # Optional, UTC by default, an IANA time zone name (case-insensitive)
     hours_between: ['9', '17'] # Optional, 24 hours by default, run only if [0] >= Hour Now <= [1]
     days_of_week: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'] # Optional, 7 days a week by default, specify the days of the week in which to run the validator
 ```

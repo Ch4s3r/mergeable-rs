@@ -4,10 +4,6 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = [
-  { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained without a safe upgrade; replacing it with jiff needs a new crate (issue #24)" },
-  { id = "RUSTSEC-2026-0555", reason = "chrono-tz is unmaintained without a safe upgrade; replaced together with chrono (issue #24)" },
-]
 
 [licenses]
 version = 2

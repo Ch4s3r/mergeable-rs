@@ -18,12 +18,11 @@ path = "src/main.rs"
 async-trait = "0.1"
 axum = "0.8"
 base64 = "0.23"
-chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10.4"
 fancy-regex = "0.20"
 futures = "0.3"
 hex = "0.4"
 hmac = "0.13"
+jiff = { version = "1.0.1", default-features = false, features = ["std", "tz-system", "tz-fat", "tzdb-bundle-always", "perf-inline"] }
 jsonwebtoken = { version = "12", default-features = false, features = ["rust_crypto", "use_pem"] }
 moka = { version = "0.12", features = ["future", "sync"] }
 percent-encoding = "2"

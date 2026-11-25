@@ -1,9 +1,8 @@
 use crate::annotations;
 use crate::error::{Error, ErrorKind, Result};
 use crate::json_value;
-use chrono::{
-    DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
-};
+use jiff::Timestamp;
+use jiff::tz::{AmbiguousOffset, TimeZone};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::rc::Rc;
@@ -30,6 +29,12 @@ const MONTH_ABBREVIATIONS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 const MAXIMUM_DATE_MILLISECONDS: i64 = 8_640_000_000_000_000;
+const MILLISECONDS_PER_SECOND: i64 = 1_000;
+const MILLISECONDS_PER_MINUTE: i64 = 60_000;
+const MILLISECONDS_PER_HOUR: i64 = 3_600_000;
+const MILLISECONDS_PER_DAY: i64 = 86_400_000;
+const DAYS_PER_FOUR_HUNDRED_YEARS: i64 = 146_097;
+const DAYS_FROM_YEAR_ZERO_MARCH_FIRST_TO_UNIX_EPOCH: i64 = 719_468;
 const MAXIMUM_NESTING_DEPTH: usize = 100;
 
 pub fn render(template: &str, data: &Value) -> Result<String> {
@@ -2433,9 +2438,9 @@ fn format_date_helper<'data>(params: &[TemplateValue<'data>]) -> TemplateValue<'
         Argument::Value(TemplateValue::Missing) | Argument::Missing => TemplateValue::Missing,
         Argument::Value(value) => match value.value() {
             Some(Value::String(text)) => TemplateValue::text(format_date(text)),
-            _ => TemplateValue::text(format_instant(Utc::now())),
+            _ => TemplateValue::text(format_instant(Timestamp::now().as_millisecond())),
         },
-        Argument::Options => TemplateValue::text(format_instant(Utc::now())),
+        Argument::Options => TemplateValue::text(format_instant(Timestamp::now().as_millisecond())),
     }
 }
 
@@ -2532,10 +2537,63 @@ fn format_date(text: &str) -> String {
     }
 }
 
-fn format_instant(instant: DateTime<Utc>) -> String {
-    let year = instant.year();
-    let displayed_year = if year <= 0 { 1 - year } else { year };
-    let hour = instant.hour();
+struct CivilDate {
+    year: i64,
+    month: i64,
+    day: i64,
+}
+
+fn civil_date_from_days_since_epoch(days_since_epoch: i64) -> CivilDate {
+    let days_since_year_zero_march_first =
+        days_since_epoch + DAYS_FROM_YEAR_ZERO_MARCH_FIRST_TO_UNIX_EPOCH;
+    let era = days_since_year_zero_march_first.div_euclid(DAYS_PER_FOUR_HUNDRED_YEARS);
+    let day_of_era = days_since_year_zero_march_first.rem_euclid(DAYS_PER_FOUR_HUNDRED_YEARS);
+    let year_of_era =
+        (day_of_era - day_of_era / 1460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_march_based_year =
+        day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let march_based_month = (5 * day_of_march_based_year + 2) / 153;
+    let day = day_of_march_based_year - (153 * march_based_month + 2) / 5 + 1;
+    let month = if march_based_month < 10 {
+        march_based_month + 3
+    } else {
+        march_based_month - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    CivilDate { year, month, day }
+}
+
+fn days_since_epoch_from_civil_date(date: &CivilDate) -> i64 {
+    let march_based_year = date.year - i64::from(date.month <= 2);
+    let era = march_based_year.div_euclid(400);
+    let year_of_era = march_based_year.rem_euclid(400);
+    let march_based_month = if date.month > 2 {
+        date.month - 3
+    } else {
+        date.month + 9
+    };
+    let day_of_march_based_year = (153 * march_based_month + 2) / 5 + date.day - 1;
+    let day_of_era =
+        year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_march_based_year;
+    era * DAYS_PER_FOUR_HUNDRED_YEARS + day_of_era - DAYS_FROM_YEAR_ZERO_MARCH_FIRST_TO_UNIX_EPOCH
+}
+
+fn format_instant(epoch_milliseconds: i64) -> String {
+    let date =
+        civil_date_from_days_since_epoch(epoch_milliseconds.div_euclid(MILLISECONDS_PER_DAY));
+    let millisecond_of_day = epoch_milliseconds.rem_euclid(MILLISECONDS_PER_DAY);
+    let displayed_year = if date.year <= 0 {
+        1 - date.year
+    } else {
+        date.year
+    };
+    let hour = millisecond_of_day / MILLISECONDS_PER_HOUR;
+    let minute = millisecond_of_day % MILLISECONDS_PER_HOUR / MILLISECONDS_PER_MINUTE;
+    let month_abbreviation = usize::try_from(date.month - 1)
+        .ok()
+        .and_then(|month_index| MONTH_ABBREVIATIONS.get(month_index))
+        .copied()
+        .unwrap_or_default();
     let (twelve_hour, meridiem) = match hour {
         0 => (12, "AM"),
         1..=11 => (hour, "AM"),
@@ -2543,23 +2601,50 @@ fn format_instant(instant: DateTime<Utc>) -> String {
         _ => (hour - 12, "PM"),
     };
     format!(
-        "{} {}, {}, {}:{:02} {}",
-        MONTH_ABBREVIATIONS[instant.month0() as usize],
-        instant.day(),
-        displayed_year,
-        twelve_hour,
-        instant.minute(),
-        meridiem
+        "{month_abbreviation} {}, {displayed_year}, {twelve_hour}:{minute:02} {meridiem}",
+        date.day
     )
 }
 
-fn parse_date_text(text: &str) -> Option<DateTime<Utc>> {
-    let instant = parse_iso_date(text).or_else(|| {
-        DateTime::parse_from_rfc2822(text)
+fn parse_date_text(text: &str) -> Option<i64> {
+    let epoch_milliseconds = parse_iso_date(text).or_else(|| {
+        jiff::fmt::rfc2822::DateTimeParser::new()
+            .parse_timestamp(text)
             .ok()
-            .map(|parsed| parsed.with_timezone(&Utc))
+            .map(Timestamp::as_millisecond)
     })?;
-    (instant.timestamp_millis().abs() <= MAXIMUM_DATE_MILLISECONDS).then_some(instant)
+    (epoch_milliseconds.abs() <= MAXIMUM_DATE_MILLISECONDS).then_some(epoch_milliseconds)
+}
+
+fn earliest_instant_of_local_wall_clock(
+    time_zone: &TimeZone,
+    wall_clock_milliseconds: i64,
+) -> Option<i64> {
+    let offset = match Timestamp::from_millisecond(wall_clock_milliseconds) {
+        Ok(wall_clock) => {
+            let civil_wall_clock = wall_clock.to_zoned_datetime(TimeZone::UTC).datetime();
+            match time_zone.to_ambiguous_timestamp(civil_wall_clock).offset() {
+                AmbiguousOffset::Unambiguous { offset }
+                | AmbiguousOffset::Fold { before: offset, .. } => offset,
+                AmbiguousOffset::Gap { .. } => return None,
+            }
+        }
+        Err(_) if wall_clock_milliseconds < 0 => time_zone.to_offset(Timestamp::MIN),
+        Err(_) => time_zone.to_offset(Timestamp::MAX),
+    };
+    Some(wall_clock_milliseconds - i64::from(offset.seconds()) * MILLISECONDS_PER_SECOND)
+}
+
+fn local_wall_clock_to_epoch_milliseconds(
+    time_zone: &TimeZone,
+    wall_clock_milliseconds: i64,
+) -> Option<i64> {
+    earliest_instant_of_local_wall_clock(time_zone, wall_clock_milliseconds).or_else(|| {
+        earliest_instant_of_local_wall_clock(
+            time_zone,
+            wall_clock_milliseconds + MILLISECONDS_PER_HOUR,
+        )
+    })
 }
 
 struct DigitReader<'text> {
@@ -2593,7 +2678,7 @@ impl DigitReader<'_> {
     }
 }
 
-fn parse_iso_date(text: &str) -> Option<DateTime<Utc>> {
+fn parse_iso_date(text: &str) -> Option<i64> {
     let mut reader = DigitReader {
         bytes: text.as_bytes(),
         position: 0,
@@ -2660,33 +2745,29 @@ fn parse_iso_date(text: &str) -> Option<DateTime<Utc>> {
             return None;
         }
         time = Some(
-            Duration::hours(hour)
-                + Duration::minutes(minute)
-                + Duration::seconds(second)
-                + Duration::milliseconds(millisecond),
+            hour * MILLISECONDS_PER_HOUR
+                + minute * MILLISECONDS_PER_MINUTE
+                + second * MILLISECONDS_PER_SECOND
+                + millisecond,
         );
     }
     if reader.position != text.len() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let first_of_month =
-        NaiveDate::from_ymd_opt(i32::try_from(year).ok()?, u32::try_from(month).ok()?, 1)?;
-    let midnight: NaiveDateTime = first_of_month
-        .checked_add_signed(Duration::days(day - 1))?
-        .and_hms_opt(0, 0, 0)?;
+    let first_of_month = CivilDate {
+        year,
+        month,
+        day: 1,
+    };
+    let midnight =
+        (days_since_epoch_from_civil_date(&first_of_month) + day - 1) * MILLISECONDS_PER_DAY;
     match (time, offset_minutes) {
-        (None, _) => Some(Utc.from_utc_datetime(&midnight)),
+        (None, _) => Some(midnight),
         (Some(time_of_day), Some(offset)) => {
-            Some(Utc.from_utc_datetime(&(midnight + time_of_day - Duration::minutes(offset))))
+            Some(midnight + time_of_day - offset * MILLISECONDS_PER_MINUTE)
         }
         (Some(time_of_day), None) => {
-            let local = midnight + time_of_day;
-            let resolved = Local.from_local_datetime(&local).earliest().or_else(|| {
-                Local
-                    .from_local_datetime(&(local + Duration::hours(1)))
-                    .earliest()
-            })?;
-            Some(resolved.with_timezone(&Utc))
+            local_wall_clock_to_epoch_milliseconds(&TimeZone::system(), midnight + time_of_day)
         }
     }
 }
@@ -2802,9 +2883,73 @@ mod tests {
     }
 
     #[test]
+    fn civil_dates_round_trip_through_days_since_epoch() {
+        for days_since_epoch in [
+            -100_000_000,
+            -719_468,
+            -1,
+            0,
+            1,
+            11_016,
+            19_737,
+            2_932_896,
+            100_000_000,
+        ] {
+            let date = civil_date_from_days_since_epoch(days_since_epoch);
+            assert_eq!(days_since_epoch_from_civil_date(&date), days_since_epoch);
+        }
+        let leap_day = civil_date_from_days_since_epoch(19_782);
+        assert_eq!((leap_day.year, leap_day.month, leap_day.day), (2024, 2, 29));
+    }
+
+    #[test]
+    fn format_date_supports_the_full_javascript_date_range() {
+        assert_eq!(
+            format_date("+010000-01-01T00:00:00Z"),
+            "Jan 1, 10000, 12:00 AM"
+        );
+        assert_eq!(
+            format_date("-000001-12-31T23:59:00Z"),
+            "Dec 31, 2, 11:59 PM"
+        );
+        assert_eq!(
+            format_date("+275760-09-13T00:00:00Z"),
+            "Sep 13, 275760, 12:00 AM"
+        );
+        assert_eq!(format_date("+275760-09-13T00:00:01Z"), "Invalid Date");
+    }
+
+    #[test]
+    fn format_date_reads_rfc_2822_dates() {
+        assert_eq!(
+            format_date("Tue, 16 Jan 2024 18:30:00 +0200"),
+            "Jan 16, 2024, 4:30 PM"
+        );
+    }
+
+    #[test]
+    fn local_wall_clock_in_a_fold_resolves_to_the_earlier_instant() {
+        let vienna = TimeZone::get("Europe/Vienna").unwrap();
+        let second_time_half_past_two = parse_iso_date("2024-10-27T02:30:00Z").unwrap();
+        let resolved =
+            local_wall_clock_to_epoch_milliseconds(&vienna, second_time_half_past_two).unwrap();
+        assert_eq!(format_instant(resolved), "Oct 27, 2024, 12:30 AM");
+    }
+
+    #[test]
+    fn local_wall_clock_in_a_gap_moves_one_hour_forward() {
+        let vienna = TimeZone::get("Europe/Vienna").unwrap();
+        let skipped_half_past_two = parse_iso_date("2024-03-31T02:30:00Z").unwrap();
+        let resolved =
+            local_wall_clock_to_epoch_milliseconds(&vienna, skipped_half_past_two).unwrap();
+        assert_eq!(format_instant(resolved), "Mar 31, 2024, 1:30 AM");
+    }
+
+    #[test]
     fn format_date_without_argument_renders_the_current_time() {
         let rendered = render("{{formatDate}}", &json!({})).unwrap();
-        let expected_prefix = MONTH_ABBREVIATIONS[Utc::now().month0() as usize];
+        let current_month = Timestamp::now().to_zoned_datetime(TimeZone::UTC).month();
+        let expected_prefix = MONTH_ABBREVIATIONS[usize::try_from(current_month - 1).unwrap()];
         assert!(rendered.starts_with(expected_prefix), "{rendered}");
         assert!(
             rendered.ends_with(" AM") || rendered.ends_with(" PM"),

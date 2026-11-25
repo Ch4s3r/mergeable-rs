@@ -6,7 +6,9 @@ use crate::registry::Registry;
 use crate::results::Status;
 use crate::validators::Validator;
 use async_trait::async_trait;
-use chrono::{DateTime, Datelike, Timelike, Utc, Weekday};
+use jiff::Timestamp;
+use jiff::civil::Weekday;
+use jiff::tz::TimeZone;
 use serde_json::{Map, Value, json};
 
 const MAX_ISSUES: u64 = 20;
@@ -16,24 +18,31 @@ pub struct Stale;
 
 pub struct LocalTime {
     pub weekday: Weekday,
-    pub hour: u32,
+    pub hour: i8,
 }
 
 #[must_use]
-pub fn local_time(now: DateTime<Utc>, time_zone: Option<&str>) -> LocalTime {
-    let zoned = time_zone.and_then(|name| name.parse::<chrono_tz::Tz>().ok());
-    match zoned {
-        Some(zone) => {
-            let local = now.with_timezone(&zone);
-            LocalTime {
-                weekday: local.weekday(),
-                hour: local.hour(),
-            }
-        }
-        None => LocalTime {
-            weekday: now.weekday(),
-            hour: now.hour(),
-        },
+pub fn local_time(now: Timestamp, time_zone: Option<&str>) -> LocalTime {
+    let zone = time_zone
+        .and_then(|name| TimeZone::get(name).ok())
+        .unwrap_or(TimeZone::UTC);
+    let local = now.to_zoned_datetime(zone);
+    LocalTime {
+        weekday: local.weekday(),
+        hour: local.hour(),
+    }
+}
+
+#[must_use]
+pub fn weekday_abbreviation(weekday: Weekday) -> &'static str {
+    match weekday {
+        Weekday::Monday => "Mon",
+        Weekday::Tuesday => "Tue",
+        Weekday::Wednesday => "Wed",
+        Weekday::Thursday => "Thu",
+        Weekday::Friday => "Fri",
+        Weekday::Saturday => "Sat",
+        Weekday::Sunday => "Sun",
     }
 }
 
@@ -61,7 +70,7 @@ fn craft_fail_output(settings: &Value) -> Value {
     })
 }
 
-pub fn outside_time_constraint(settings: &Value, now: DateTime<Utc>) -> Result<bool> {
+pub fn outside_time_constraint(settings: &Value, now: Timestamp) -> Result<bool> {
     let Some(time_options) = settings
         .get("time_constraint")
         .filter(|value| json_value::is_truthy(value))
@@ -75,7 +84,7 @@ pub fn outside_time_constraint(settings: &Value, now: DateTime<Utc>) -> Result<b
     if let Some(days_of_week) = json_value::read(Some(time_options), "days_of_week")?
         .filter(|value| json_value::is_truthy(value))
     {
-        let today = Value::String(local.weekday.to_string());
+        let today = Value::String(weekday_abbreviation(local.weekday).to_string());
         if !json_value::includes(Some(days_of_week), &today)? {
             return Ok(true);
         }
@@ -131,18 +140,18 @@ pub fn requested_types(settings: &Value) -> Vec<Value> {
     clippy::cast_possible_truncation,
     reason = "the finite, already truncated millisecond timestamp maps to i64 exactly"
 )]
-pub fn search_timestamp(now: DateTime<Utc>, days: f64) -> Result<String> {
+pub fn search_timestamp(now: Timestamp, days: f64) -> Result<String> {
     let offset_milliseconds = days * MILLISECONDS_PER_DAY;
     let target_milliseconds =
-        (json_value::number_from_timestamp_milliseconds(now.timestamp_millis())
+        (json_value::number_from_timestamp_milliseconds(now.as_millisecond())
             - offset_milliseconds)
             .trunc();
     if !target_milliseconds.is_finite() {
         return Err(Error::new(ErrorKind::OutOfRange, "Invalid time value"));
     }
-    let target = DateTime::<Utc>::from_timestamp_millis(target_milliseconds as i64)
-        .ok_or_else(|| Error::new(ErrorKind::OutOfRange, "Invalid time value"))?;
-    Ok(target.format("%Y-%m-%dT%H:%M:%S").to_string())
+    let target = Timestamp::from_millisecond(target_milliseconds as i64)
+        .map_err(|_| Error::new(ErrorKind::OutOfRange, "Invalid time value"))?;
+    Ok(target.strftime("%Y-%m-%dT%H:%M:%S").to_string())
 }
 
 fn label_query_parts(label: &Value, key: &str, prefix: &str) -> Result<Vec<String>> {
@@ -275,13 +284,13 @@ impl Validator for Stale {
         settings: &Value,
         _registry: &Registry,
     ) -> Result<Value> {
-        let now = Utc::now();
+        let now = Timestamp::now();
         if outside_time_constraint(settings, now)? {
             return Ok(craft_fail_output(settings));
         }
         let days = days_setting(settings);
         let types = requested_types(settings);
-        let timestamp = search_timestamp(Utc::now(), json_value::to_number(Some(&days)))?;
+        let timestamp = search_timestamp(Timestamp::now(), json_value::to_number(Some(&days)))?;
         let repository = context.repository_name()?;
         let query = search_query(
             &repository.owner,
@@ -302,12 +311,8 @@ impl Validator for Stale {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-
-    fn monday_eight_utc() -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2024, 1, 15, 8, 30, 0)
-            .single()
-            .unwrap_or_default()
+    fn monday_eight_utc() -> Timestamp {
+        "2024-01-15T08:30:00Z".parse().unwrap()
     }
 
     fn query_for(settings: &Value) -> String {
@@ -415,14 +420,16 @@ mod tests {
 
     #[test]
     fn time_zone_shifts_the_local_day_and_hour() {
-        let late_sunday_utc = Utc
-            .with_ymd_and_hms(2024, 1, 14, 23, 30, 0)
-            .single()
-            .unwrap_or_default();
+        let late_sunday_utc: Timestamp = "2024-01-14T23:30:00Z".parse().unwrap();
         let tokyo = local_time(late_sunday_utc, Some("Asia/Tokyo"));
-        assert_eq!((tokyo.weekday, tokyo.hour), (Weekday::Mon, 8));
+        assert_eq!((tokyo.weekday, tokyo.hour), (Weekday::Monday, 8));
+        let lower_case_tokyo = local_time(late_sunday_utc, Some("asia/tokyo"));
+        assert_eq!(
+            (lower_case_tokyo.weekday, lower_case_tokyo.hour),
+            (Weekday::Monday, 8)
+        );
         let unknown = local_time(late_sunday_utc, Some("Not/AZone"));
-        assert_eq!((unknown.weekday, unknown.hour), (Weekday::Sun, 23));
+        assert_eq!((unknown.weekday, unknown.hour), (Weekday::Sunday, 23));
     }
 
     #[test]
@@ -438,16 +445,16 @@ mod tests {
     #[test]
     fn weekdays_are_named_by_their_three_letter_abbreviation() {
         let names: Vec<String> = [
-            Weekday::Sun,
-            Weekday::Mon,
-            Weekday::Tue,
-            Weekday::Wed,
-            Weekday::Thu,
-            Weekday::Fri,
-            Weekday::Sat,
+            Weekday::Sunday,
+            Weekday::Monday,
+            Weekday::Tuesday,
+            Weekday::Wednesday,
+            Weekday::Thursday,
+            Weekday::Friday,
+            Weekday::Saturday,
         ]
-        .iter()
-        .map(ToString::to_string)
+        .into_iter()
+        .map(|weekday| weekday_abbreviation(weekday).to_string())
         .collect();
         assert_eq!(names, ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]);
     }
@@ -458,6 +465,11 @@ mod tests {
             search_timestamp(monday_eight_utc(), 10.0).unwrap(),
             "2024-01-05T08:30:00"
         );
+    }
+
+    #[test]
+    fn search_timestamp_beyond_the_supported_range_is_an_invalid_time_value() {
+        assert!(search_timestamp(monday_eight_utc(), 1.0e9).is_err());
     }
 
     #[test]
