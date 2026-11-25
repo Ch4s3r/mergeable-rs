@@ -37,7 +37,7 @@ pub async fn check_ticket_status(ticket_id: &str, jira: &JiraSettings) -> bool {
     let Some(url) = ticket_url(ticket_id, jira) else {
         return false;
     };
-    let Ok(client) = reqwest::Client::builder().build() else {
+    let Ok(client) = jira.timeouts.apply_to(reqwest::Client::builder()).build() else {
         return false;
     };
     let mut request = client
@@ -182,6 +182,7 @@ mod tests {
             api_version: "2".to_string(),
             username: Some("user".to_string()),
             password: Some("password".to_string()),
+            timeouts: crate::app_config::OutgoingHttpTimeouts::default(),
         }
     }
 

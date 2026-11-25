@@ -11,6 +11,9 @@ const DEFAULT_SETTINGS_PATH: &str = "mergeable.settings.yml";
 const DEFAULT_CONFIG_FILE_NAME: &str = "mergeable.yml";
 const DEFAULT_GITHUB_DATA_CACHE_TTL_SECONDS: u64 = 300;
 const DEVELOPMENT_WEBHOOK_SECRET: &str = "development";
+const DEFAULT_MAX_CONCURRENT_WEBHOOKS: usize = 64;
+const DEFAULT_OUTGOING_HTTP_CONNECT_TIMEOUT_SECONDS: u64 = 10;
+const DEFAULT_OUTGOING_HTTP_REQUEST_TIMEOUT_SECONDS: u64 = 60;
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Environment {
@@ -73,6 +76,48 @@ pub enum RunMode {
     Production,
 }
 
+fn positive_whole_number(environment: &Environment, name: &str) -> Option<u64> {
+    environment
+        .non_empty(name)
+        .and_then(|number| number.trim().parse::<u64>().ok())
+        .filter(|number| *number > 0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutgoingHttpTimeouts {
+    pub connect: Duration,
+    pub request: Duration,
+}
+
+impl Default for OutgoingHttpTimeouts {
+    fn default() -> Self {
+        OutgoingHttpTimeouts::from_environment(&Environment::default())
+    }
+}
+
+impl OutgoingHttpTimeouts {
+    #[must_use]
+    pub fn from_environment(environment: &Environment) -> Self {
+        let seconds = |name: &str, default: u64| {
+            Duration::from_secs(positive_whole_number(environment, name).unwrap_or(default))
+        };
+        OutgoingHttpTimeouts {
+            connect: seconds(
+                "OUTGOING_HTTP_CONNECT_TIMEOUT",
+                DEFAULT_OUTGOING_HTTP_CONNECT_TIMEOUT_SECONDS,
+            ),
+            request: seconds(
+                "OUTGOING_HTTP_TIMEOUT",
+                DEFAULT_OUTGOING_HTTP_REQUEST_TIMEOUT_SECONDS,
+            ),
+        }
+    }
+
+    pub fn apply_to(self, builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+        builder.connect_timeout(self.connect).timeout(self.request)
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct JiraSettings {
     pub protocol: String,
@@ -80,6 +125,7 @@ pub struct JiraSettings {
     pub api_version: String,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub timeouts: OutgoingHttpTimeouts,
 }
 
 impl fmt::Debug for JiraSettings {
@@ -91,6 +137,7 @@ impl fmt::Debug for JiraSettings {
             .field("api_version", &self.api_version)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("timeouts", &self.timeouts)
             .finish()
     }
 }
@@ -111,6 +158,7 @@ impl JiraSettings {
             api_version: owned("JIRA_VERSION").unwrap_or_else(|| "2".to_string()),
             username: owned("JIRA_USERNAME"),
             password: owned("JIRA_PASSWORD"),
+            timeouts: OutgoingHttpTimeouts::from_environment(environment),
         }
     }
 }
@@ -210,6 +258,8 @@ pub struct AppConfig {
     pub metrics_endpoint_enabled: bool,
     pub github_throttle_enabled: bool,
     pub github_retry_base_delay: Duration,
+    pub max_concurrent_webhooks: usize,
+    pub outgoing_http_timeouts: OutgoingHttpTimeouts,
     pub behavior: BehaviorSettings,
 }
 
@@ -303,6 +353,12 @@ impl AppConfig {
                     .and_then(|millis| millis.parse().ok())
                     .unwrap_or(1000),
             ),
+            max_concurrent_webhooks: positive_whole_number(environment, "MAX_CONCURRENT_WEBHOOKS")
+                .and_then(|limit| usize::try_from(limit).ok())
+                .map_or(DEFAULT_MAX_CONCURRENT_WEBHOOKS, |limit| {
+                    limit.min(tokio::sync::Semaphore::MAX_PERMITS)
+                }),
+            outgoing_http_timeouts: OutgoingHttpTimeouts::from_environment(environment),
             behavior: BehaviorSettings::from_environment(environment),
         })
     }
@@ -377,6 +433,85 @@ mod tests {
         assert_eq!(config.github_base_url, "http://127.0.0.1:9/api/v3");
         assert_eq!(config.port, 0);
         assert!(config.scheduler.is_none());
+    }
+
+    #[test]
+    fn webhook_concurrency_and_outgoing_timeouts_have_generous_defaults() {
+        let environment = Environment::from_iter([
+            ("APP_ID", "7"),
+            ("PRIVATE_KEY", "-----BEGIN KEY-----"),
+            ("WEBHOOK_SECRET", "hunter2"),
+        ]);
+        let config =
+            AppConfig::from_environment(&environment).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(config.max_concurrent_webhooks, 64);
+        assert_eq!(
+            config.outgoing_http_timeouts,
+            OutgoingHttpTimeouts {
+                connect: Duration::from_secs(10),
+                request: Duration::from_secs(60),
+            }
+        );
+        assert_eq!(config.behavior.jira.timeouts, config.outgoing_http_timeouts);
+    }
+
+    #[test]
+    fn webhook_concurrency_and_outgoing_timeouts_can_be_changed_but_not_disabled() {
+        let environment = Environment::from_iter([
+            ("APP_ID", "7"),
+            ("PRIVATE_KEY", "-----BEGIN KEY-----"),
+            ("WEBHOOK_SECRET", "hunter2"),
+            ("MAX_CONCURRENT_WEBHOOKS", "8"),
+            ("OUTGOING_HTTP_CONNECT_TIMEOUT", "3"),
+            ("OUTGOING_HTTP_TIMEOUT", "0"),
+        ]);
+        let config =
+            AppConfig::from_environment(&environment).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(config.max_concurrent_webhooks, 8);
+        assert_eq!(
+            config.outgoing_http_timeouts.connect,
+            Duration::from_secs(3)
+        );
+        assert_eq!(
+            config.outgoing_http_timeouts.request,
+            Duration::from_secs(60)
+        );
+        let unlimited_attempt = Environment::from_iter([
+            ("APP_ID", "7"),
+            ("PRIVATE_KEY", "-----BEGIN KEY-----"),
+            ("WEBHOOK_SECRET", "hunter2"),
+            ("MAX_CONCURRENT_WEBHOOKS", "0"),
+        ]);
+        let config = AppConfig::from_environment(&unlimited_attempt)
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(config.max_concurrent_webhooks, 64);
+    }
+
+    #[tokio::test]
+    async fn outgoing_request_to_a_host_that_never_answers_times_out() {
+        let silent_server = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        let address = silent_server
+            .local_addr()
+            .unwrap_or_else(|error| panic!("{error}"));
+        let held_connections = tokio::spawn(async move {
+            let mut connections = Vec::new();
+            while let Ok((connection, _)) = silent_server.accept().await {
+                connections.push(connection);
+            }
+        });
+        let timeouts = OutgoingHttpTimeouts {
+            connect: Duration::from_secs(1),
+            request: Duration::from_millis(200),
+        };
+        let client = timeouts
+            .apply_to(reqwest::Client::builder())
+            .build()
+            .unwrap_or_else(|error| panic!("{error}"));
+        let outcome = client.get(format!("http://{address}/")).send().await;
+        held_connections.abort();
+        assert!(outcome.is_err_and(|error| error.is_timeout()));
     }
 
     #[test]

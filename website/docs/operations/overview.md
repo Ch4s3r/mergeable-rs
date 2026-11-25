@@ -11,7 +11,10 @@ See also [Caching](./caching.md) (including scaling to several replicas) and [Sc
 
 - `POST <WEBHOOK_PATH>` (default `/api/github/webhooks`): GitHub webhooks (headers `X-GitHub-Event`,
   `X-GitHub-Delivery`, `X-Hub-Signature-256`). Other methods answer `404 {"error":"Unknown route: ..."}`. A webhook
-  still being processed after 9 s is answered `202` and finishes in the background.
+  still being processed after 9 s is answered `202` and finishes in the background. At most
+  `MAX_CONCURRENT_WEBHOOKS` (64) webhooks are processed at once; a further one waits for a free slot and is
+  answered `503 {"error":"Too many webhooks are being processed, try again later"}` if none frees up within 9 s.
+  GitHub does not retry failed deliveries on its own: redeliver them from the GitHub App's advanced settings.
 - `GET /ping`: answers `PONG`. Use it for liveness and readiness probes.
 - `GET /probot` (landing page) and `GET /` (redirect to `/probot`), kept from the original.
 - `GET /github-ratelimit/:installationId` with `ENABLE_GITHUB_RATELIMIT_ENDPOINT=true`: `resources.core` of GitHub's
@@ -59,7 +62,9 @@ configuration.
 The GitHub client spaces write requests 1 s apart per process (2 s for `/search`, 3 s for notification-triggering
 writes on github.com), allows at most 10 concurrent requests, and retries failed requests (any status `>= 400` except
 400, 401, 403, 404, 422 and 451) three times after 1 s, 4 s and 9 s. `GITHUB_THROTTLE=false` disables the throttle
-and `GITHUB_RETRY_BASE_MS` changes the retry base delay. The App-authenticated requests of the scheduler
+and `GITHUB_RETRY_BASE_MS` changes the retry base delay. Requests to GitHub and Jira give up after 10 s without a
+connection (`OUTGOING_HTTP_CONNECT_TIMEOUT`) and after 60 s per request (`OUTGOING_HTTP_TIMEOUT`); a timed-out GitHub
+request counts as a failed request with status 500 and is retried like one. The App-authenticated requests of the scheduler
 (`GET /app/installations`) are not throttled or retried.
 
 Watch `github_ratelimit_remaining_total` on `/metrics`, or ask `/github-ratelimit/:installationId` for one

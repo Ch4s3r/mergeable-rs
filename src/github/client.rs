@@ -1,3 +1,4 @@
+use crate::app_config::OutgoingHttpTimeouts;
 use crate::error::{Error, Result};
 use crate::github::app_auth::{AppSigner, build_http_client};
 use crate::github::throttle::RequestThrottle;
@@ -134,6 +135,7 @@ pub struct GithubAppSettings {
     pub private_key_pem: String,
     pub retry_base_delay: Duration,
     pub throttle: Option<RequestThrottle>,
+    pub http_timeouts: OutgoingHttpTimeouts,
 }
 
 pub struct GithubApp {
@@ -159,7 +161,7 @@ impl GithubApp {
             .map(|url| url.path().trim_end_matches('/').to_string())
             .unwrap_or_default();
         Ok(GithubApp {
-            http: build_http_client()?,
+            http: build_http_client(settings.http_timeouts)?,
             base_url,
             base_path,
             signer,

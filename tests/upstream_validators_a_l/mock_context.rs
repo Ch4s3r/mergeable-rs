@@ -86,6 +86,7 @@ pub async fn mock_context_with(options: &Value, extra_stubs: Vec<Value>) -> Mock
                 private_key_pem: UNUSED_SIGNING_KEY_PEM.clone(),
                 retry_base_delay: Duration::from_millis(1),
                 throttle: None,
+                http_timeouts: mergeable::app_config::OutgoingHttpTimeouts::default(),
             },
             None,
         )
