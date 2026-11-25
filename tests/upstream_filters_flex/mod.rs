@@ -105,6 +105,7 @@ impl MockedGithub {
                     private_key_pem: self.config.private_key_pem.clone(),
                     retry_base_delay: Duration::from_millis(1),
                     throttle: None,
+                    http_timeouts: mergeable::app_config::OutgoingHttpTimeouts::default(),
                 },
                 None,
             )

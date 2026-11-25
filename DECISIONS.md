@@ -262,7 +262,23 @@ Consequences: No failing release runs from merges in quick succession and no PAT
 permission. If `main` moves during the image build, that version's image is published by the old run and published
 again by the newer run, which tags it.
 
-## ADR-021: Paketo tiny run image, updated through releases
+## ADR-021: Bounded webhook concurrency and outgoing HTTP timeouts
+Status: accepted
+Context: Every signed webhook spawned its handler, and a handler still running after 9 s went on in the background
+after the `202` (ADR-007), with no limit on how many ran at once. The GitHub and Jira clients had no connect or
+request timeout, so a hanging upstream kept a handler, its payload and its memory alive indefinitely (issue #30).
+Decision: A `tokio::sync::Semaphore` with `MAX_CONCURRENT_WEBHOOKS` slots (default 64) bounds the webhook handlers.
+A handler holds its slot until it finishes, also after the `202`. A delivery without a free slot waits for one within
+the same 9 s answer window; if none frees up it is answered `503` and logged as `webhook.rejected.overloaded`, rather
+than queued without bound. Scheduler events are not limited. Both reqwest clients get a connect timeout
+(`OUTGOING_HTTP_CONNECT_TIMEOUT`, 10 s) and a whole-request timeout (`OUTGOING_HTTP_TIMEOUT`, 60 s); a timed-out
+GitHub request is a transport error (status 500) and is retried like other failures. Zero or invalid values use the
+defaults, so neither limit can be switched off.
+Consequences: The defaults are far above what the recorded cases and the retry timing need, so their webhook IO is
+unchanged. Under overload GitHub sees `503` for some deliveries; GitHub does not redeliver on its own, so they have
+to be redelivered from the App's advanced settings. A Jira request that times out counts as an invalid ticket.
+
+## ADR-022: Paketo tiny run image, updated through releases
 Status: accepted
 Context: The first Grype scan of the published image (issue #33) reported 97 findings, all in Ubuntu packages of the
 Paketo run image `ubuntu-noble-run` (shell, coreutils, util-linux, systemd libraries, tar, dpkg, gnutls, expat,
