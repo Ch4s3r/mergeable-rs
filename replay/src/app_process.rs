@@ -1,14 +1,36 @@
-use anyhow::{Context as _, Result, bail};
+use anyhow::{Context as _, Result, anyhow, bail};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rsa::PrivateKey;
+use rsa::pkcs1::{EncodeRsaPrivateKey, LineEnding};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::process::{Child, Command};
 
 pub const WEBHOOK_SECRET: &str = "replay-secret";
 const DEFAULT_WEBHOOK_PATH: &str = "/api/github/webhooks";
-const TEST_PRIVATE_KEY: &str = include_str!("../test-key.pem");
 const PASSED_THROUGH_VARIABLES: [&str; 3] = ["PATH", "HOME", "TMPDIR"];
+const TEST_SIGNING_KEY_SEED: u64 = 0x6d65_7267_6561_626c;
+
+static TEST_SIGNING_KEY_PEM: LazyLock<Result<String, String>> = LazyLock::new(|| {
+    let mut seeded_rng = StdRng::seed_from_u64(TEST_SIGNING_KEY_SEED);
+    PrivateKey::new(&mut seeded_rng, 2048)
+        .map_err(|error| error.to_string())
+        .and_then(|key| {
+            key.to_pkcs1_pem(LineEnding::LF)
+                .map(|pem| pem.to_string())
+                .map_err(|error| error.to_string())
+        })
+});
+
+fn test_signing_key_pem() -> Result<&'static str> {
+    TEST_SIGNING_KEY_PEM
+        .as_deref()
+        .map_err(|error| anyhow!("generating the test signing key: {error}"))
+}
 
 #[derive(Debug, Clone)]
 pub enum AppProgram {
@@ -104,7 +126,7 @@ impl AppProcess {
         command
             .env("PORT", port.to_string())
             .env("APP_ID", "1")
-            .env("PRIVATE_KEY", TEST_PRIVATE_KEY)
+            .env("PRIVATE_KEY", test_signing_key_pem()?)
             .env("WEBHOOK_SECRET", WEBHOOK_SECRET)
             .env("GHE_HOST", format!("127.0.0.1:{mock_port}"))
             .env("GHE_PROTOCOL", "http")

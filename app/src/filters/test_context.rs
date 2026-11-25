@@ -1,17 +1,32 @@
 use crate::context::Context;
 use crate::github::client::{GithubApp, GithubAppSettings};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+use rsa::PrivateKey;
+use rsa::pkcs1::{EncodeRsaPrivateKey, LineEnding};
 use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 
-const REPLAY_TEST_SIGNING_KEY: &str = include_str!("../../../replay/test-key.pem");
+const TEST_SIGNING_KEY_SEED: u64 = 0x6d65_7267_6561_626c;
+
+static TEST_SIGNING_KEY_PEM: LazyLock<String> = LazyLock::new(|| {
+    let mut seeded_rng = StdRng::seed_from_u64(TEST_SIGNING_KEY_SEED);
+    PrivateKey::new(&mut seeded_rng, 2048)
+        .and_then(|key| key.to_pkcs1_pem(LineEnding::LF).map_err(Into::into))
+        .map_or_else(
+            |error| panic!("test signing key: {error}"),
+            |pem| pem.to_string(),
+        )
+});
 
 #[must_use]
 pub fn context_for(event_name: &str, payload: Value) -> Context {
     let settings = GithubAppSettings {
         base_url: "http://127.0.0.1:9".to_string(),
         app_id: "1".to_string(),
-        private_key_pem: REPLAY_TEST_SIGNING_KEY.to_string(),
+        private_key_pem: TEST_SIGNING_KEY_PEM.clone(),
         retry_base_delay: Duration::from_millis(1),
         throttle: None,
     };

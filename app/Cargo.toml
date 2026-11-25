@@ -41,6 +41,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 [dev-dependencies]
+rsa = { version = "0.10", features = ["encoding"] }
 pretty_assertions = "1"
 
 [lints]
