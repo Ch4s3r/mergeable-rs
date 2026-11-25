@@ -148,3 +148,15 @@ follow-up: they need the ETag stored next to the cached content and the mock to 
 Consequences: Repeated events on the same repository save the cached reads (measured by the integration tests and
 `cache_lookups_total`); team, collaborator and topic changes are seen after at most `GITHUB_DATA_CACHE_TTL`.
 Several replicas share one cache through Valkey (`CACHE_STORAGE=valkey`).
+
+## ADR-014: Security fixes from Renovate, Dependabot only for alerts
+Status: accepted
+Context: Renovate already keeps the dependencies up to date and raises fix PRs for OSV vulnerabilities. Dependabot
+security updates would open a second, differently formatted PR for the same vulnerability.
+Decision: Dependabot alerts are enabled for the repository, Dependabot security updates stay disabled. Renovate reads
+the Dependabot alerts (the Mend Renovate app holds `read` on Dependabot alerts) next to `osvVulnerabilityAlerts` and
+opens the fix PRs. `vulnerabilityAlerts` labels them `security` and enables automerge, so a fix (also a major
+update) is squash-merged as soon as all required checks pass.
+Consequences: One PR per vulnerability, merged without waiting for review or the weekly schedule; the required
+checks are the only gate. A wrong alert could produce a bad automerged fix, which the release changelog makes
+visible.
