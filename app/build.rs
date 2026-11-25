@@ -26,6 +26,9 @@ fn test_function_name(case_name: &str) -> String {
 
 fn case_names(cases_directory: &Path) -> Result<Vec<String>, Box<dyn Error>> {
     let mut names = Vec::new();
+    if !cases_directory.is_dir() {
+        return Ok(names);
+    }
     for entry in std::fs::read_dir(cases_directory)? {
         let path = entry?.path();
         if path
