@@ -9,7 +9,8 @@
     ":automergeRequireAllStatusChecks",
     "schedule:weekly",
     "schedule:automergeWeekly",
-    ":maintainLockFilesWeekly"
+    ":maintainLockFilesWeekly",
+    "helpers:pinGitHubActionDigests"
   ],
   "automergeStrategy": "squash",
   "osvVulnerabilityAlerts": true,

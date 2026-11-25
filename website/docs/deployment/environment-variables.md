@@ -13,12 +13,12 @@ implementation, including `NODE_ENV`. The source of truth is the configuration t
 | `APP_ID` | GitHub App id | required |
 | `PRIVATE_KEY` | App private key: PEM text (`\n` escapes allowed) or base64-encoded PEM | - |
 | `PRIVATE_KEY_PATH` | Path to the PEM file, used when `PRIVATE_KEY` is unset | - |
-| `WEBHOOK_SECRET` | Webhook secret (`X-Hub-Signature-256` is verified) | `development` |
+| `WEBHOOK_SECRET` | Webhook secret (the HMAC-SHA256 `X-Hub-Signature-256` is verified) | required; `development` with `NODE_ENV=development` |
 | `WEBHOOK_PATH` | Webhook route | `/api/github/webhooks` |
 | `HOST`, `PORT` | Listen address | `0.0.0.0`, `3000` |
 | `GHE_HOST`, `GHE_PROTOCOL` | GitHub Enterprise host (API at `<protocol>://<host>/api/v3`) | api.github.com, `https` |
 | `APP_NAME` | Name used for checks and the `@bot` annotation | `Mergeable` |
-| `NODE_ENV` | `development` sets the scheduler interval to 2 seconds | production |
+| `NODE_ENV` | `development` sets the scheduler interval to 2 seconds and allows a missing `WEBHOOK_SECRET` | production |
 | `LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `LOG_FORMAT` | `pretty` for human-readable logs instead of JSON | JSON |
 | `LOG_CONFIG` | Log the loaded configuration | off |

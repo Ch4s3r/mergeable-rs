@@ -15,8 +15,11 @@ See also [Caching](./caching.md) (including scaling to several replicas) and [Sc
 - `GET /ping`: answers `PONG`. Use it for liveness and readiness probes.
 - `GET /probot` (landing page) and `GET /` (redirect to `/probot`), kept from the original.
 - `GET /github-ratelimit/:installationId` with `ENABLE_GITHUB_RATELIMIT_ENDPOINT=true`: `resources.core` of GitHub's
-  `GET /rate_limit` for that installation, or the JSON string `installation error: <message>`.
+  `GET /rate_limit` for that installation, or the JSON string `installation error: <message>`; ids that are not numbers
+  are rejected without calling GitHub.
 - `GET /metrics` with `ENABLE_METRICS_ENDPOINT=true`: Prometheus metrics, see below.
+
+Both optional routes are unauthenticated; expose them only on an internal network, see [Security](./security.md).
 
 ## Health
 

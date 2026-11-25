@@ -17,6 +17,7 @@ The repository is a single Cargo package, `mergeable` (`src/`): the server, the 
 The black-box contract tests (recorded webhook scenarios in `tests/cases`) are ordinary Rust integration tests
 (`tests/contract_cases.rs`, support code in `tests/contract/`); see [Contract tests](#contract-tests).
 
+Security policy, reporting and security-relevant settings: [SECURITY.md](SECURITY.md).
 Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.md). Terms:
 [GLOSSARY.md](GLOSSARY.md). Performance: [BENCHMARK.md](BENCHMARK.md).
 
@@ -81,12 +82,15 @@ pack sbom download ghcr.io/ch4s3r/mergeable-rs:<version> --remote --output-dir s
 The first `gh attestation verify` checks the build provenance (built by `release.yml` in this repository), the
 second the signed SBOM. `pack sbom download` fetches the SBOM the buildpacks embed in the image itself.
 
-Pull requests run `.github/workflows/ci.yml` (`devenv test`). `main` is protected: every change goes through a pull
+Pull requests run `.github/workflows/ci.yml` (`devenv test`) and CodeQL (`codeql.yml`); OpenSSF Scorecard
+(`scorecard.yml`) and a Grype scan of the published image (`image-scan.yml`) run weekly, see
+[SECURITY.md](SECURITY.md#automated-checks). `main` is protected: every change goes through a pull
 request with a passing `test` check and is squash-merged, so the pull request title becomes the conventional commit.
 
 ## Dependency updates
 
-[Renovate](https://docs.renovatebot.com) (`renovate.json`, built from presets) tracks Cargo crates, GitHub Actions, the
+[Renovate](https://docs.renovatebot.com) (`renovate.json`, built from presets) tracks Cargo crates, GitHub Actions (pinned to
+commit digests with the version as a comment, `helpers:pinGitHubActionDigests`), the
 Paketo builder and buildpacks in `project.toml`, the Dockerfile images, the npm dependencies of the documentation
 site (`website/package.json`), and devenv: the devenv version (CLI in the
 workflows and the module input in `devenv.yaml`) and the pinned `devenv-nixpkgs` commit. devenv re-locks
@@ -214,12 +218,12 @@ recording new cases and the benchmark harness are no longer part of the reposito
 | `APP_ID` | GitHub App id | required |
 | `PRIVATE_KEY` | App private key: PEM text (`\n` escapes allowed) or base64-encoded PEM | - |
 | `PRIVATE_KEY_PATH` | Path to the PEM file, used when `PRIVATE_KEY` is unset | - |
-| `WEBHOOK_SECRET` | Webhook secret (`X-Hub-Signature-256` is verified) | `development` |
+| `WEBHOOK_SECRET` | Webhook secret (the HMAC-SHA256 `X-Hub-Signature-256` is verified) | required; `development` with `NODE_ENV=development` |
 | `WEBHOOK_PATH` | Webhook route | `/api/github/webhooks` |
 | `HOST`, `PORT` | Listen address | `0.0.0.0`, `3000` |
 | `GHE_HOST`, `GHE_PROTOCOL` | GitHub Enterprise host (API at `<protocol>://<host>/api/v3`) | api.github.com, `https` |
 | `APP_NAME` | Name used for checks and the `@bot` annotation | `Mergeable` |
-| `NODE_ENV` | `development` sets the scheduler interval to 2 seconds | production |
+| `NODE_ENV` | `development` sets the scheduler interval to 2 seconds and allows a missing `WEBHOOK_SECRET` | production |
 | `LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `LOG_FORMAT` | `pretty` for human-readable logs instead of JSON | JSON |
 | `LOG_CONFIG` | Log the loaded configuration | off |
@@ -250,7 +254,9 @@ recording new cases and the benchmark harness are no longer part of the reposito
   processed after 9 s is answered `202` and finishes in the background.
 - `GET /ping` (`PONG`), `GET /probot` (landing page), `GET /` (redirect to `/probot`).
 - `GET /github-ratelimit/:installationId`: `resources.core` of `GET /rate_limit` for that installation, or the
-  JSON string `installation error: <message>`.
+  JSON string `installation error: <message>`; an id that is not a number answers
+  `installation error: \`installationId\` must be a number` without calling GitHub. Unauthenticated, see
+  [SECURITY.md](SECURITY.md).
 - `GET /metrics`: `github_ratelimit_remaining_total` / `github_ratelimit_limit_total` gauges (label
   `installationId`, set from the `x-ratelimit-*` headers of every GitHub response), and the HTTP metrics
   `http_requests_total`, `http_request_duration_seconds`, `http_request_length_bytes`,
