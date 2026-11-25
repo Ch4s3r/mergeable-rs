@@ -130,9 +130,13 @@ impl Validator for Contents {
                 failed_files.push(format!("{file_name} (Not Found)"));
                 continue;
             };
-            let processed =
-                validators::process_options(&parse_option, &Value::String(file_content), None)
-                    .await?;
+            let processed = validators::process_options(
+                &parse_option,
+                &Value::String(file_content),
+                None,
+                &context.app.behavior.jira,
+            )
+            .await?;
             match Status::of(&processed) {
                 Some(Status::Error) => return Ok(processed),
                 Some(Status::Fail) => failed_files.push(file_name),

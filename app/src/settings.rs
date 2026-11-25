@@ -1,52 +1,25 @@
-use crate::cache::ConfigCache;
+use crate::app_config::SettingsFileDefaults;
 use crate::context::Context;
 use crate::error::{Error, ErrorKind, Result};
 use crate::github::api;
 use crate::json_value;
 use crate::yaml;
 use serde_json::{Value, json};
-use std::sync::LazyLock;
 
-static SETTINGS_CACHE: LazyLock<ConfigCache> = LazyLock::new(ConfigCache::from_env);
-
-#[must_use]
-pub fn settings_path() -> String {
-    match std::env::var("SETTINGS_PATH") {
-        Ok(path) if !path.is_empty() => path,
-        _ => "mergeable.settings.yml".to_string(),
-    }
-}
-
-fn env_is_true(name: &str) -> bool {
-    std::env::var(name).as_deref() == Ok("true")
-}
-
-fn use_settings_cache() -> bool {
-    env_is_true("USE_SETTINGS_CACHE")
-}
-
-#[must_use]
-pub fn default_config_path() -> String {
-    std::env::var("CONFIG_PATH").unwrap_or_default()
-}
-
-fn apply_version_one_defaults(settings: &mut Value) {
+fn apply_version_one_defaults(settings: &mut Value, defaults: &SettingsFileDefaults) {
     let Some(Value::Object(mergeable)) = settings.get_mut("mergeable") else {
         return;
     };
-    let defaults = [
+    let default_values = [
         ("use_config_from_pull_request", Value::Bool(true)),
-        (
-            "use_config_cache",
-            Value::Bool(env_is_true("USE_CONFIG_CACHE")),
-        ),
+        ("use_config_cache", Value::Bool(defaults.use_config_cache)),
         (
             "use_org_as_default_config",
-            Value::Bool(env_is_true("USE_ORG_AS_DEFAULT_CONFIG")),
+            Value::Bool(defaults.use_org_as_default_config),
         ),
-        ("config_path", Value::String(default_config_path())),
+        ("config_path", Value::String(defaults.config_path.clone())),
     ];
-    for (key, default_value) in defaults {
+    for (key, default_value) in default_values {
         if !mergeable.contains_key(key) {
             mergeable.insert(key.to_string(), default_value);
         }
@@ -55,10 +28,12 @@ fn apply_version_one_defaults(settings: &mut Value) {
 
 async fn fetch_settings_file(context: &Context) -> Result<Value> {
     let repository = context.repository_name()?;
-    let settings_path = settings_path();
+    let behavior = &context.app.behavior;
+    let settings_cache = &context.app.settings_cache;
+    let settings_path = &behavior.settings_path;
     let cache_key = format!("{repository}/settings");
-    if use_settings_cache()
-        && let Some(cached) = SETTINGS_CACHE.get(&cache_key).await
+    if behavior.use_settings_cache
+        && let Some(cached) = settings_cache.get(&cache_key).await
         && json_value::is_truthy(&cached)
     {
         return Ok(cached);
@@ -97,9 +72,9 @@ async fn fetch_settings_file(context: &Context) -> Result<Value> {
             "unsupported settings version {version}"
         )));
     }
-    apply_version_one_defaults(&mut settings);
-    if use_settings_cache() {
-        SETTINGS_CACHE.set(&cache_key, settings.clone()).await;
+    apply_version_one_defaults(&mut settings, &behavior.settings_file_defaults);
+    if behavior.use_settings_cache {
+        settings_cache.set(&cache_key, settings.clone()).await;
     }
     Ok(settings)
 }
@@ -133,7 +108,10 @@ mod tests {
     #[test]
     fn version_one_defaults_fill_only_missing_keys() {
         let mut settings = json!({"mergeable": {"config_path": "custom.yml"}});
-        apply_version_one_defaults(&mut settings);
+        apply_version_one_defaults(
+            &mut settings,
+            &SettingsFileDefaults::from_environment(&crate::app_config::Environment::default()),
+        );
         assert_eq!(settings["mergeable"]["config_path"], "custom.yml");
         assert_eq!(settings["mergeable"]["use_config_from_pull_request"], true);
     }

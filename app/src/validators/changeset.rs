@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::context::Context;
 use crate::error::Result;
 use crate::event_aware;
@@ -40,7 +41,11 @@ pub fn file_names(files: Vec<Value>) -> Result<Vec<Value>> {
         .collect()
 }
 
-pub async fn evaluate(mut files: Vec<Value>, settings: &Value) -> Result<Value> {
+pub async fn evaluate(
+    mut files: Vec<Value>,
+    settings: &Value,
+    jira: &JiraSettings,
+) -> Result<Value> {
     let mut remaining_settings = Cow::Borrowed(settings);
     if let Some(file_status_settings) = settings
         .get("files")
@@ -52,7 +57,7 @@ pub async fn evaluate(mut files: Vec<Value>, settings: &Value) -> Result<Value> 
         }
     }
     let changed_files = Value::Array(file_names(files)?);
-    validators::process_options(&remaining_settings, &changed_files, None).await
+    validators::process_options(&remaining_settings, &changed_files, None, jira).await
 }
 
 #[async_trait]
@@ -91,7 +96,7 @@ impl Validator for Changeset {
             context.repo_params(json!({"pull_number": pull_number}))?,
         )
         .await?;
-        evaluate(files, settings).await
+        evaluate(files, settings, &context.app.behavior.jira).await
     }
 }
 
@@ -126,7 +131,10 @@ mod tests {
     }
 
     async fn status_of(names: &[&str], settings: Value) -> Value {
-        evaluate(modified(names), &settings).await.unwrap()["status"].clone()
+        evaluate(modified(names), &settings, &JiraSettings::default())
+            .await
+            .unwrap()["status"]
+            .clone()
     }
 
     #[tokio::test]
@@ -204,6 +212,11 @@ mod tests {
             "must_include": {"regex": "added-file.rs"},
             "must_exclude": {"regex": "(modified-file.py)|(deleted-file.go)"},
         });
-        assert_eq!(evaluate(files, &settings).await.unwrap()["status"], "pass");
+        assert_eq!(
+            evaluate(files, &settings, &JiraSettings::default())
+                .await
+                .unwrap()["status"],
+            "pass"
+        );
     }
 }

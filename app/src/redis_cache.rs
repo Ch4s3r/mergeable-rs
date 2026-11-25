@@ -30,13 +30,10 @@ impl fmt::Debug for RedisSettings {
     }
 }
 
-fn non_empty_variable(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
-}
-
 impl RedisSettings {
-    pub fn from_env() -> Self {
-        Self::from_variables(non_empty_variable)
+    #[must_use]
+    pub fn from_environment(environment: &crate::app_config::Environment) -> Self {
+        Self::from_variables(|name| environment.non_empty(name).map(str::to_string))
     }
 
     pub fn from_variables(variable: impl Fn(&str) -> Option<String>) -> Self {
@@ -89,11 +86,6 @@ fn log_cache_error(operation: &str, error: impl std::fmt::Display) {
 }
 
 impl RedisCache {
-    #[must_use]
-    pub fn from_env() -> Self {
-        Self::new(RedisSettings::from_env())
-    }
-
     #[must_use]
     pub fn new(settings: RedisSettings) -> Self {
         RedisCache {

@@ -112,11 +112,14 @@ async fn push(context: &mut Context) -> Result<()> {
     else {
         return Ok(());
     };
-    let config_path = match std::env::var("CONFIG_PATH") {
-        Ok(path) if !path.is_empty() => path,
-        _ => "mergeable.yml".to_string(),
-    };
-    let config_file = Value::String(format!(".github/{config_path}"));
+    let config_file = Value::String(format!(
+        ".github/{}",
+        context
+            .app
+            .behavior
+            .settings_file_defaults
+            .config_file_name()
+    ));
     let changed = json_value::includes(head_commit.get("added"), &config_file)?
         || json_value::includes(head_commit.get("modified"), &config_file)?;
     if !changed {

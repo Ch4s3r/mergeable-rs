@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::event_aware;
@@ -16,6 +17,7 @@ pub struct BaseRef;
 async fn validate_pull_requests(
     pull_requests: impl IntoIterator<Item = &Value>,
     settings: &Value,
+    jira: &JiraSettings,
 ) -> Result<Value> {
     let validator_context = json!({"name": "baseRef"});
     let base_refs: Vec<&Value> = pull_requests
@@ -40,7 +42,7 @@ async fn validate_pull_requests(
     let outputs: Vec<Value> = join_all(
         base_refs
             .iter()
-            .map(|base_ref| validators::process_options(settings, base_ref, None)),
+            .map(|base_ref| validators::process_options(settings, base_ref, None, jira)),
     )
     .await
     .into_iter()
@@ -93,7 +95,7 @@ async fn validate_status(
     let open_pull_requests = pull_requests
         .iter()
         .filter(|pull_request| json_value::as_str(pull_request.get("state")) == Some("open"));
-    validate_pull_requests(open_pull_requests, settings).await
+    validate_pull_requests(open_pull_requests, settings, &context.app.behavior.jira).await
 }
 
 #[async_trait]
@@ -139,14 +141,25 @@ impl Validator for BaseRef {
                 json_value::read(payload, "pull_requests")?,
                 "payload.pull_requests",
             )?;
-            return validate_pull_requests(pull_requests, &validation_settings).await;
+            return validate_pull_requests(
+                pull_requests,
+                &validation_settings,
+                &context.app.behavior.jira,
+            )
+            .await;
         }
         if context.event_name == "status" {
             return validate_status(context, &validation_settings, media_type).await;
         }
         let base_ref =
             json_value::read(json_value::read(payload, "base")?, "ref")?.unwrap_or(&Value::Null);
-        validators::process_options(&validation_settings, base_ref, None).await
+        validators::process_options(
+            &validation_settings,
+            base_ref,
+            None,
+            &context.app.behavior.jira,
+        )
+        .await
     }
 }
 
@@ -157,7 +170,10 @@ mod tests {
     #[tokio::test]
     async fn event_without_pull_requests_fails() {
         let settings = json!({"do": "baseRef", "must_include": {"regex": "main"}});
-        let result = validate_pull_requests(&[], &settings).await.unwrap();
+        let result =
+            validate_pull_requests(&[], &settings, &crate::app_config::JiraSettings::default())
+                .await
+                .unwrap();
         assert_eq!(
             result,
             json!({"validator": {"name": "baseRef"}, "status": "fail", "description": "No pull requests associated with event", "details": {"settings": settings}})
@@ -171,9 +187,13 @@ mod tests {
             json!({"base": {"ref": "main"}}),
             json!({"base": {"ref": "develop"}}),
         ];
-        let result = validate_pull_requests(&pull_requests, &settings)
-            .await
-            .unwrap();
+        let result = validate_pull_requests(
+            &pull_requests,
+            &settings,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result["status"], "fail");
         assert_eq!(result["validations"][0]["status"], "pass");
         assert_eq!(result["validations"][1]["status"], "fail");

@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::context::Context;
 use crate::error::{Error, ErrorKind, Result};
 use crate::json_value;
@@ -223,12 +224,13 @@ pub async fn process_options(
     settings: &Value,
     input: &Value,
     supported_options: Option<&[&str]>,
+    jira: &JiraSettings,
 ) -> Result<Value> {
     let validator_context = options_context(
         settings,
         supported_options.unwrap_or(&DEFAULT_SUPPORTED_OPTIONS),
     );
-    options::process(&validator_context, input, settings, false).await
+    options::process(&validator_context, input, settings, false, jira).await
 }
 
 #[cfg(test)]

@@ -40,6 +40,12 @@ impl Validator for Assignee {
     ) -> Result<Value> {
         let assignees = json_value::read(event_aware::payload(context), "assignees")?;
         let logins = map_logins(assignees, "assignees")?;
-        validators::process_options(settings, &Value::Array(logins), None).await
+        validators::process_options(
+            settings,
+            &Value::Array(logins),
+            None,
+            &context.app.behavior.jira,
+        )
+        .await
     }
 }

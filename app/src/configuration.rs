@@ -1,4 +1,3 @@
-use crate::cache::ConfigCache;
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::github::api;
@@ -33,8 +32,6 @@ pub struct ConfigurationError {
     pub code: ErrorCode,
     pub message: String,
 }
-
-static CONFIG_CACHE: LazyLock<ConfigCache> = LazyLock::new(ConfigCache::from_env);
 
 #[derive(Debug, Clone, Default)]
 pub struct Configuration {
@@ -339,13 +336,17 @@ pub async fn reset_cache(context: &Context) -> Result<()> {
     let repository = context.repository_name()?;
     if repository.name == ".github" {
         let owner_prefix = format!("{}/", repository.owner);
-        for key in CONFIG_CACHE.keys().await {
+        for key in context.app.configuration_cache.keys().await {
             if key.starts_with(&owner_prefix) {
-                CONFIG_CACHE.delete(&key).await;
+                context.app.configuration_cache.delete(&key).await;
             }
         }
     } else {
-        CONFIG_CACHE.delete(&repository.to_string()).await;
+        context
+            .app
+            .configuration_cache
+            .delete(&repository.to_string())
+            .await;
     }
     Ok(())
 }
@@ -416,7 +417,7 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
             }
             .in_current_span(),
         );
-        if let Some(cached) = CONFIG_CACHE.get(&cache_key).await
+        if let Some(cached) = context.app.configuration_cache.get(&cache_key).await
             && json_value::is_truthy(&cached)
         {
             return Ok(cached);
@@ -437,7 +438,11 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
         _ => return Err(FetchError::NotFound),
     };
     if use_cache {
-        CONFIG_CACHE.set(&cache_key, config.clone()).await;
+        context
+            .app
+            .configuration_cache
+            .set(&cache_key, config.clone())
+            .await;
     }
     Ok(config)
 }

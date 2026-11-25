@@ -43,6 +43,6 @@ impl Validator for Title {
     ) -> Result<Value> {
         let title =
             json_value::read(event_aware::payload(context), "title")?.unwrap_or(&Value::Null);
-        validators::process_options(settings, title, None).await
+        validators::process_options(settings, title, None, &context.app.behavior.jira).await
     }
 }

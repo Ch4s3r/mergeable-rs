@@ -47,6 +47,6 @@ impl Validator for Description {
             Some(present) if json_value::is_truthy(present) => present,
             _ => &empty_description,
         };
-        validators::process_options(settings, description, None).await
+        validators::process_options(settings, description, None, &context.app.behavior.jira).await
     }
 }

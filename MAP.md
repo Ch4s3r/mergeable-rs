@@ -2,7 +2,8 @@
 
 | Area | Rust module (app/src) |
 |---|---|
-| Entry point, environment | `main`, `app_config`, `logging` |
+| Entry point, environment snapshot, server startup | `main`, `app_config` (`Environment`), `server::start`, `logging` |
+| Per-instance state (behaviour settings, caches) | `app_state` |
 | HTTP routes, webhook verification, metrics | `server`, `metrics` |
 | Event context | `context`, `event_aware` |
 | GitHub client: requests, pagination, throttle, App auth | `github` |
@@ -18,5 +19,7 @@
 | Scheduler | `scheduler` |
 | Errors | `error` |
 
-Contract tests: app-cases (381 recorded webhook scenarios) replayed by replay (ADR-005).
-Gate: `cargo fmt --all --check`, `cargo clippy --all-targets`, `cargo test`, `replay check`.
+Contract tests: app-cases (381 recorded webhook scenarios), one generated Rust test each in
+`app/tests/contract_cases.rs` (app/build.rs), run in-process with the `replay` library (ADR-005).
+Gate: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run --workspace`,
+`cargo test --doc --workspace`.

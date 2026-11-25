@@ -23,7 +23,7 @@ pub async fn execute(mut context: Context) -> Result<()> {
     if configuration.has_errors() {
         return report_configuration_errors(&context, &configuration).await;
     }
-    if std::env::var("LOG_CONFIG").is_ok_and(|value| !value.is_empty()) {
+    if context.app.behavior.log_config {
         tracing::info!(
             settings = %configuration.settings,
             "configuration.loaded"

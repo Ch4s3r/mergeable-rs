@@ -1,3 +1,4 @@
+use crate::app_state::AppState;
 use crate::context::Context;
 use crate::github::client::{GithubApp, GithubAppSettings};
 use rand::SeedableRng;
@@ -38,6 +39,7 @@ pub fn context_for(event_name: &str, payload: Value) -> Context {
         event_name.to_string(),
         payload,
         app.installation(Some(1)),
+        Arc::new(AppState::default()),
     );
     context.global_settings = Some(Arc::new(json!({})));
     context

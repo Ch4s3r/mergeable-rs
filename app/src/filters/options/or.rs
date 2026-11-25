@@ -4,10 +4,11 @@ use crate::validators::options::output::OptionResult;
 use serde_json::Value;
 
 pub async fn process(
-    _context: &Context,
+    context: &Context,
     filter_context: &Value,
     input: &Value,
     rule: &Value,
 ) -> Result<OptionResult> {
-    crate::validators::options::or::process(filter_context, input, rule).await
+    crate::validators::options::or::process(filter_context, input, rule, &context.app.behavior.jira)
+        .await
 }

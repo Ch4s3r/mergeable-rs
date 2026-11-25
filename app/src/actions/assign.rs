@@ -160,7 +160,7 @@ mod tests {
             vec![
                 "creator".to_string(),
                 "initiator".to_string(),
-                annotations::bot_name()
+                annotations::bot_name(None)
             ]
         );
     }

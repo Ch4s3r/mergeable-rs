@@ -20,6 +20,7 @@ impl RecordedValueNormalizer {
         })
     }
 
+    #[must_use]
     pub fn normalize_text(&self, text: &str) -> String {
         let without_origin = text.replace(&self.mock_origin, MOCK_ORIGIN_PLACEHOLDER);
         self.iso_timestamp
@@ -27,6 +28,7 @@ impl RecordedValueNormalizer {
             .into_owned()
     }
 
+    #[must_use]
     pub fn normalize(&self, value: Value) -> Value {
         match value {
             Value::String(text) => Value::String(self.normalize_text(&text)),
@@ -49,6 +51,7 @@ static REQUIRE_STACK: std::sync::LazyLock<Option<Regex>> =
 static STACK_FRAMES: std::sync::LazyLock<Option<Regex>> =
     std::sync::LazyLock::new(|| Regex::new(r"(?:\n {4}at [^\n]*)+").ok());
 
+#[must_use]
 pub fn without_stack_traces(text: &str) -> String {
     let mut stripped = text.to_owned();
     for pattern in [&*REQUIRE_STACK, &*STACK_FRAMES].into_iter().flatten() {
@@ -76,6 +79,7 @@ pub fn with_sorted_keys(value: &Value) -> Value {
     }
 }
 
+#[must_use]
 pub fn canonical_text(value: &Value) -> String {
     with_sorted_keys(value).to_string()
 }

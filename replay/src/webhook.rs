@@ -1,8 +1,9 @@
-use crate::app_process::WEBHOOK_SECRET;
 use anyhow::Result;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use std::time::Duration;
+
+pub const WEBHOOK_SECRET: &str = "replay-secret";
 
 pub struct Webhook {
     pub event: String,

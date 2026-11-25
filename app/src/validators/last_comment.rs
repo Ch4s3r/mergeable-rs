@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::event_aware;
@@ -86,13 +87,14 @@ async fn comment_author_filter(context: &Context, settings: &Value) -> Result<Co
 async fn filter_by_comment_author<'comment>(
     comments: &'comment [Value],
     filter: &CommentAuthorFilter,
+    jira: &JiraSettings,
 ) -> Result<Vec<&'comment Value>> {
     let candidates = without_bot_comments(comments, filter.exclude_bots)?;
     let mut kept = Vec::new();
     for comment in candidates {
         let login = json_value::read(json_value::read(Some(comment), "user")?, "login")?
             .unwrap_or(&Value::Null);
-        let result = validators::process_options(&filter.author_option, login, None).await?;
+        let result = validators::process_options(&filter.author_option, login, None, jira).await?;
         if Status::of(&result) != Some(Status::Fail) {
             kept.push(comment);
         }
@@ -104,9 +106,16 @@ pub async fn evaluate(
     comments: &[Value],
     filter: &CommentAuthorFilter,
     remaining_settings: &Value,
+    jira: &JiraSettings,
 ) -> Result<Value> {
-    let comments = filter_by_comment_author(comments, filter).await?;
-    validators::process_options(remaining_settings, last_comment_body(&comments)?, None).await
+    let comments = filter_by_comment_author(comments, filter, jira).await?;
+    validators::process_options(
+        remaining_settings,
+        last_comment_body(&comments)?,
+        None,
+        jira,
+    )
+    .await
 }
 
 #[async_trait]
@@ -161,7 +170,13 @@ impl Validator for LastComment {
             listed_comments.as_slice()
         };
 
-        evaluate(comments, &filter, &remaining_settings).await
+        evaluate(
+            comments,
+            &filter,
+            &remaining_settings,
+            &context.app.behavior.jira,
+        )
+        .await
     }
 }
 
@@ -229,9 +244,14 @@ mod tests {
         filter: CommentAuthorFilter,
         settings: Value,
     ) -> Value {
-        evaluate(&comments(bodies, authors), &filter, &settings)
-            .await
-            .unwrap()
+        evaluate(
+            &comments(bodies, authors),
+            &filter,
+            &settings,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]

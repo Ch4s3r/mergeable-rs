@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::error::{Error, Result};
 use crate::json_value;
 use crate::validators::options::output::{self, OptionResult};
@@ -8,31 +9,19 @@ const REGEX_NOT_FOUND_ERROR: &str = "Failed to run the test because 'regex' is n
 const SUCCESS_DESCRIPTION: &str = "The JIRA TICKET is valid";
 const FAILURE_DESCRIPTION: &str = "The JIRA TICKET is not valid";
 
-fn environment_or(name: &str, default_value: &str) -> String {
-    match std::env::var(name) {
-        Ok(value) if !value.is_empty() => value,
-        _ => default_value.to_string(),
-    }
-}
-
-fn non_empty_environment(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|value| !value.is_empty())
-}
-
 #[must_use]
-pub fn ticket_url(ticket_id: &str) -> Option<String> {
-    let protocol = environment_or("JIRA_PROTOCOL", "https");
-    let host = non_empty_environment("JIRA_HOST")?;
-    let api_version = environment_or("JIRA_VERSION", "2");
+pub fn ticket_url(ticket_id: &str, jira: &JiraSettings) -> Option<String> {
+    let host = jira.host.as_deref()?;
     let host_part = if host.contains(':') {
         format!("[{host}]")
     } else {
-        host
+        host.to_string()
     };
     let escaped_ticket = ticket_id.replace('#', "%23").replace('?', "%3F");
     Some(format!(
-        "{}://{host_part}/rest/api/{api_version}/issue/{escaped_ticket}?expand=&fields=*all&properties=*all&fieldsByKeys=false",
-        protocol.trim_end_matches(':')
+        "{}://{host_part}/rest/api/{}/issue/{escaped_ticket}?expand=&fields=*all&properties=*all&fieldsByKeys=false",
+        jira.protocol.trim_end_matches(':'),
+        jira.api_version
     ))
 }
 
@@ -40,8 +29,8 @@ fn has_error_messages(body: &Value) -> bool {
     matches!(body.get("errorMessages"), Some(Value::Array(messages)) if !messages.is_empty())
 }
 
-pub async fn check_ticket_status(ticket_id: &str) -> bool {
-    let Some(url) = ticket_url(ticket_id) else {
+pub async fn check_ticket_status(ticket_id: &str, jira: &JiraSettings) -> bool {
+    let Some(url) = ticket_url(ticket_id, jira) else {
         return false;
     };
     let Ok(client) = reqwest::Client::builder().build() else {
@@ -50,10 +39,7 @@ pub async fn check_ticket_status(ticket_id: &str) -> bool {
     let mut request = client
         .get(url)
         .header(reqwest::header::ACCEPT, "application/json");
-    if let (Some(username), Some(password)) = (
-        non_empty_environment("JIRA_USERNAME"),
-        non_empty_environment("JIRA_PASSWORD"),
-    ) {
+    if let (Some(username), Some(password)) = (&jira.username, &jira.password) {
         request = request.basic_auth(username, Some(password));
     }
     let Ok(response) = request.send().await else {
@@ -71,6 +57,7 @@ pub async fn process(
     _validator_context: &Value,
     input: &Value,
     rule: &Value,
+    jira: &JiraSettings,
 ) -> Result<OptionResult> {
     let filter = json_value::get(rule, "jira");
     let message = json_value::read(filter, "message")?;
@@ -85,7 +72,7 @@ pub async fn process(
         compiled.first_match(&json_value::to_display_string(Some(input)))
     };
     let is_mergeable = match ticket_id {
-        Some(ticket) => check_ticket_status(&ticket).await,
+        Some(ticket) => check_ticket_status(&ticket, jira).await,
         None => false,
     };
     Ok(OptionResult::decided(
@@ -107,6 +94,7 @@ mod tests {
             &json!({"name": "headRef"}),
             &json!("the test"),
             &json!({"jira": {}}),
+            &crate::app_config::JiraSettings::default(),
         )
         .await
         .unwrap_err();
@@ -119,6 +107,7 @@ mod tests {
             &json!({"name": "headRef"}),
             &json!("feature-123123"),
             &json!({"jira": {"regex": "test"}}),
+            &crate::app_config::JiraSettings::default(),
         )
         .await
         .unwrap();
@@ -128,9 +117,14 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_regex_names_the_pattern() {
-        let error = process(&json!({}), &json!("x"), &json!({"jira": {"regex": "["}}))
-            .await
-            .unwrap_err();
+        let error = process(
+            &json!({}),
+            &json!("x"),
+            &json!({"jira": {"regex": "["}}),
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             error.message(),
             "Failed to create a regex expression with the provided regex: ["

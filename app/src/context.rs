@@ -1,3 +1,4 @@
+use crate::app_state::AppState;
 use crate::error::{Error, Result};
 use crate::github::client::InstallationClient;
 use crate::json_value;
@@ -54,6 +55,7 @@ pub struct Context {
     pub event_name: String,
     pub payload: SharedPayload,
     pub github: InstallationClient,
+    pub app: Arc<AppState>,
     pub global_settings: Option<Arc<Value>>,
 }
 
@@ -63,12 +65,14 @@ impl Context {
         event_name: String,
         payload: impl Into<SharedPayload>,
         github: InstallationClient,
+        app: Arc<AppState>,
     ) -> Self {
         Context {
             event_id,
             event_name,
             payload: payload.into(),
             github,
+            app,
             global_settings: None,
         }
     }

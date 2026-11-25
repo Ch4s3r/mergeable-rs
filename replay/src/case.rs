@@ -58,6 +58,7 @@ impl CaseDefinition {
             .to_owned()
     }
 
+    #[must_use]
     pub fn delivery_id(&self) -> String {
         format!("replay-{}", self.name)
     }
@@ -70,7 +71,7 @@ pub struct Case {
 }
 
 impl Case {
-    fn load(file_path: &Path) -> Result<Case> {
+    pub fn load(file_path: &Path) -> Result<Case> {
         let text = std::fs::read_to_string(file_path)
             .with_context(|| format!("reading {}", file_path.display()))?;
         let document: Value = serde_json::from_str(&text)

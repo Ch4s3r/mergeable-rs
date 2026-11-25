@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::error::Result;
 use crate::validators::options::and_or_processor::{self, Connective};
 use crate::validators::options::output::OptionResult;
@@ -7,8 +8,9 @@ pub async fn process(
     validator_context: &Value,
     input: &Value,
     rule: &Value,
+    jira: &JiraSettings,
 ) -> Result<OptionResult> {
-    and_or_processor::process(validator_context, input, rule, Connective::Or).await
+    and_or_processor::process(validator_context, input, rule, Connective::Or, jira).await
 }
 
 #[cfg(test)]
@@ -26,10 +28,15 @@ mod tests {
         let rule =
             json!({"or": [{"must_include": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
         assert_eq!(
-            process(&option_context(), &json!(["A", "C"]), &rule)
-                .await
-                .unwrap()
-                .status,
+            process(
+                &option_context(),
+                &json!(["A", "C"]),
+                &rule,
+                &crate::app_config::JiraSettings::default()
+            )
+            .await
+            .unwrap()
+            .status,
             Status::Pass
         );
     }
@@ -41,7 +48,8 @@ mod tests {
             process(
                 &option_context(),
                 &json!(["user0", "user5", "user3"]),
-                &rule
+                &rule,
+                &crate::app_config::JiraSettings::default()
             )
             .await
             .unwrap()
@@ -53,9 +61,14 @@ mod tests {
     #[tokio::test]
     async fn missing_or_list_is_an_input_type_error() {
         let rule = json!({"and": {"must_include": {"regex": "A"}}});
-        let error = process(&option_context(), &json!("the test"), &rule)
-            .await
-            .unwrap_err();
+        let error = process(
+            &option_context(),
+            &json!("the test"),
+            &rule,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             error.message(),
             "Input type invalid, expected array type as input"
@@ -67,19 +80,29 @@ mod tests {
         let wrong_sub_setting =
             json!({"or": [{"must_include": {"regexs": "A"}}, {"must_exclude": {"regex": "B"}}]});
         assert_eq!(
-            process(&option_context(), &json!(["A"]), &wrong_sub_setting)
-                .await
-                .unwrap()
-                .status,
+            process(
+                &option_context(),
+                &json!(["A"]),
+                &wrong_sub_setting,
+                &crate::app_config::JiraSettings::default()
+            )
+            .await
+            .unwrap()
+            .status,
             Status::Error
         );
         let unknown_option =
             json!({"or": [{"must_inclde": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
         assert_eq!(
-            process(&option_context(), &json!(["A"]), &unknown_option)
-                .await
-                .unwrap()
-                .status,
+            process(
+                &option_context(),
+                &json!(["A"]),
+                &unknown_option,
+                &crate::app_config::JiraSettings::default()
+            )
+            .await
+            .unwrap()
+            .status,
             Status::Error
         );
     }
@@ -88,10 +111,15 @@ mod tests {
     async fn nested_and_inside_or_is_evaluated() {
         let rule = json!({"or": [{"and": [{"must_include": {"regex": "A"}}, {"must_include": {"regex": "C"}}]}, {"must_include": {"regex": "Z"}}]});
         assert_eq!(
-            process(&option_context(), &json!(["A", "C"]), &rule)
-                .await
-                .unwrap()
-                .status,
+            process(
+                &option_context(),
+                &json!(["A", "C"]),
+                &rule,
+                &crate::app_config::JiraSettings::default()
+            )
+            .await
+            .unwrap()
+            .status,
             Status::Pass
         );
     }
@@ -99,9 +127,14 @@ mod tests {
     #[tokio::test]
     async fn empty_sub_option_is_a_type_error_on_status() {
         let rule = json!({"or": [{}]});
-        let error = process(&option_context(), &json!("x"), &rule)
-            .await
-            .unwrap_err();
+        let error = process(
+            &option_context(),
+            &json!("x"),
+            &rule,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             error.message(),
             "Cannot read properties of undefined (reading 'status')"

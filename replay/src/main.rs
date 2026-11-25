@@ -1,17 +1,13 @@
 mod app_process;
 mod bench;
-mod case;
 mod check;
-mod compare;
-mod mock;
-mod normalize;
 mod record;
 mod runner;
-mod webhook;
 
 use anyhow::Result;
 use app_process::AppProgram;
 use clap::{Args, Parser, Subcommand};
+use replay::{case, compare, contract, mock, webhook};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::error::{Error, Result};
 use crate::json_value;
 use crate::results::Status;
@@ -41,17 +42,18 @@ async fn validate_filter(
     validator_context: &Value,
     input: &Value,
     filter: &Value,
+    jira: &JiraSettings,
 ) -> Result<Option<Value>> {
     for connective in [Connective::And, Connective::Or] {
         if json_value::truthy(json_value::read(Some(filter), connective.key())?) {
             return Ok(Some(
-                process(validator_context, input, filter, connective)
+                process(validator_context, input, filter, connective, jira)
                     .await?
                     .into_value(),
             ));
         }
     }
-    let mut raw_output = options::process(validator_context, input, filter, true).await?;
+    let mut raw_output = options::process(validator_context, input, filter, true, jira).await?;
     Ok(json_value::get_mut(&mut raw_output, "0").map(Value::take))
 }
 
@@ -60,6 +62,7 @@ pub fn process<'call>(
     input: &'call Value,
     rule: &'call Value,
     connective: Connective,
+    jira: &'call JiraSettings,
 ) -> BoxFuture<'call, Result<OptionResult>> {
     Box::pin(async move {
         let key = connective.key();
@@ -69,7 +72,7 @@ pub fn process<'call>(
         let validated: Vec<Option<Value>> = join_all(
             filters
                 .iter()
-                .map(|filter| validate_filter(validator_context, input, filter)),
+                .map(|filter| validate_filter(validator_context, input, filter, jira)),
         )
         .await
         .into_iter()
