@@ -1,3 +1,4 @@
+use crate::app_config::OutgoingHttpTimeouts;
 use crate::error::{Error, Result};
 use crate::github::client::{
     DEFAULT_ACCEPT, api_error_message, encode_uri_component, next_page_url,
@@ -12,8 +13,9 @@ const JWT_BACKDATE_SECONDS: u64 = 30;
 const JWT_LIFETIME_SECONDS: u64 = 600;
 const USER_AGENT: &str = concat!("mergeable-rust/", env!("CARGO_PKG_VERSION"));
 
-pub(crate) fn build_http_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+pub(crate) fn build_http_client(timeouts: OutgoingHttpTimeouts) -> Result<reqwest::Client> {
+    timeouts
+        .apply_to(reqwest::Client::builder())
         .user_agent(USER_AGENT)
         .build()
         .map_err(|error| Error::general(format!("cannot build the HTTP client: {error}")))
@@ -86,9 +88,14 @@ struct PageResponse {
 }
 
 impl AppJwtClient {
-    pub fn new(base_url: &str, app_id: &str, private_key_pem: &str) -> Result<Self> {
+    pub fn new(
+        base_url: &str,
+        app_id: &str,
+        private_key_pem: &str,
+        timeouts: OutgoingHttpTimeouts,
+    ) -> Result<Self> {
         Ok(AppJwtClient {
-            http: build_http_client()?,
+            http: build_http_client(timeouts)?,
             base_url: base_url.trim_end_matches('/').to_string(),
             signer: AppSigner::new(Value::String(app_id.to_string()), private_key_pem)?,
         })

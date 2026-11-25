@@ -267,12 +267,18 @@ recording new cases and the benchmark harness are no longer part of the reposito
 | `ENABLE_METRICS_ENDPOINT` | `true` serves `GET /metrics` | off |
 | `GITHUB_THROTTLE` | `false` disables the GitHub request throttling (ADR-007) | on |
 | `GITHUB_RETRY_BASE_MS` | Base delay of the retry back-off for failed GitHub requests | `1000` |
+| `MAX_CONCURRENT_WEBHOOKS` | Webhooks processed at the same time; a further webhook waits for a free slot and is answered `503` if none frees up within 9 s (zero or invalid values use the default) | `64` |
+| `OUTGOING_HTTP_CONNECT_TIMEOUT`, `OUTGOING_HTTP_TIMEOUT` | Connect timeout and whole-request timeout in seconds of the requests to GitHub and Jira (zero or invalid values use the default) | `10`, `60` |
 
 ## Routes
 
 - `POST <WEBHOOK_PATH>`: GitHub webhooks (headers `X-GitHub-Event`, `X-GitHub-Delivery`,
   `X-Hub-Signature-256`). Other methods answer `404 {"error":"Unknown route: ..."}`. A webhook still being
-  processed after 9 s is answered `202` and finishes in the background.
+  processed after 9 s is answered `202` and finishes in the background. At most `MAX_CONCURRENT_WEBHOOKS` (64)
+  webhooks are processed at once; a further one waits for a free slot and is answered
+  `503 {"error":"Too many webhooks are being processed, try again later"}` if none frees up within 9 s (redeliver
+  it from the GitHub App's advanced settings). Requests to GitHub and Jira time out after 10 s without a connection
+  and 60 s per request (`OUTGOING_HTTP_CONNECT_TIMEOUT`, `OUTGOING_HTTP_TIMEOUT`).
 - `GET /ping` (`PONG`), `GET /probot` (landing page), `GET /` (redirect to `/probot`).
 - `GET /github-ratelimit/:installationId`: `resources.core` of `GET /rate_limit` for that installation, or the
   JSON string `installation error: <message>`; an id that is not a number answers
@@ -338,7 +344,7 @@ installation's repositories fails, that installation's repositories stay schedul
   counted in the HTTP metrics; webhooks, `/ping`, `/probot` and the rate-limit route are not.
 - Redis: without `CACHE_REDIS_PASSWORD` the value of `CACHE_REDIS_HOST` is also sent as the Redis `AUTH`
   password; a server without a password that rejects that `AUTH` is used without one. A configured
-  `CACHE_REDIS_PASSWORD` is never dropped (ADR-021). Listing keys sends `KEYS ""`, so deleting the cache after a
+  `CACHE_REDIS_PASSWORD` is never dropped (ADR-022). Listing keys sends `KEYS ""`, so deleting the cache after a
   change in an organisation `.github` repository only removes the exact keys. There is no
   `CACHE_REDIS_REFRESH_THRESHOLD` setting.
 - Redis errors are logged and treated as a cache miss instead of failing the webhook.
