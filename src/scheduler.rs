@@ -17,7 +17,7 @@ use tokio::time::MissedTickBehavior;
 const MAXIMUM_TIMER_MILLISECONDS: f64 = 2_147_483_647.0;
 const SCHEDULE_EVENT_NAME: &str = "schedule";
 const INSTALLATIONS_ROUTE: &str = "/app/installations?per_page=100";
-pub const DEFAULT_INSTALLATION_RESYNC_INTERVAL: Duration = Duration::from_secs(3600);
+pub const DEFAULT_INSTALLATION_RESYNC_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FirstRun {
@@ -561,10 +561,10 @@ mod tests {
     }
 
     #[test]
-    fn installation_resync_interval_defaults_to_one_hour_and_accepts_fractional_seconds() {
+    fn installation_resync_interval_defaults_to_one_week_and_accepts_fractional_seconds() {
         assert_eq!(
             parse_installation_resync_interval(None),
-            Duration::from_secs(3600)
+            Duration::from_secs(604_800)
         );
         assert_eq!(
             parse_installation_resync_interval(Some("600")),

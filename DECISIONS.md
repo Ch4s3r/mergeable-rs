@@ -107,7 +107,7 @@ Context: With `MERGEABLE_SCHEDULER=true` the scheduler listed installations and 
 relied on the `installation` and `installation_repositories` webhooks. A missed webhook left a new repository
 unscheduled, and removed repositories or uninstalled installations stayed scheduled until a restart.
 Decision: The scheduler also handles `installation.deleted` and `installation_repositories.removed`, and every
-`MERGEABLE_INSTALLATION_RESYNC_INTERVAL` seconds (default 3600) lists all installations and their repositories again
+`MERGEABLE_INSTALLATION_RESYNC_INTERVAL` seconds (default 604800, one week) lists all installations and their repositories again
 with the same requests as at start. Unknown repositories are scheduled, scheduled repositories that were not listed
 are unscheduled (their timer task is aborted). The resync is conservative: a failed installation list changes
 nothing, a failed repository list keeps that installation's repositories, and a repository scheduled by a webhook
