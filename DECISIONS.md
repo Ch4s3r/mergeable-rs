@@ -174,3 +174,22 @@ update) is squash-merged as soon as all required checks pass.
 Consequences: One PR per vulnerability, merged without waiting for review or the weekly schedule; the required
 checks are the only gate. A wrong alert could produce a bad automerged fix, which the release changelog makes
 visible.
+
+## ADR-016: Untrusted input limits and a mandatory webhook secret
+Status: accepted
+Context: Repository configuration (`.github/mergeable.yml`, also from same-repository pull requests) and pull request
+data are untrusted. The security review (#20) found that a template nested about 20 000 levels deep overflowed the
+stack and aborted the whole process, that a glob brace range such as `{1..100000000}` or a long `{a,b}` product
+expanded without bound (a range ending at `i64::MAX` never terminated), that a production server without
+`WEBHOOK_SECRET` accepted webhooks signed with the public default `development`, that `X-Hub-Signature-256` also
+accepted SHA-1 digests, and that path segments from callers reached GitHub (`/github-ratelimit/:installationId`) and
+Jira (ticket id) URLs unencoded.
+Decision: The template parser rejects blocks, `else if` chains and subexpressions nested more than 100 levels deep
+with `RangeError: Maximum call stack size exceeded` (the error the YAML loader already uses); a brace expansion stops
+at 100 000 patterns, like the `max` of the JavaScript `brace-expansion`; `WEBHOOK_SECRET` is required unless
+`NODE_ENV=development`; only `sha256=` signatures are verified; the rate-limit route accepts numeric installation ids
+only and the Jira ticket id is percent-encoded as one path segment (`.` and `..` are never valid tickets).
+Consequences: The recorded cases are unchanged (none comes near the limits, all are signed with SHA-256 and set
+`WEBHOOK_SECRET`). A deployment without `WEBHOOK_SECRET` no longer starts and must set it. Larger follow-ups (a
+separate Redis password and TLS, bounded concurrent webhook processing and outbound timeouts) are tracked as
+separate issues labelled `security`.

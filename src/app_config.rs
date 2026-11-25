@@ -10,6 +10,7 @@ const DEFAULT_SCHEDULER_INTERVAL_SECONDS: &str = "3600";
 const DEFAULT_SETTINGS_PATH: &str = "mergeable.settings.yml";
 const DEFAULT_CONFIG_FILE_NAME: &str = "mergeable.yml";
 const DEFAULT_GITHUB_DATA_CACHE_TTL_SECONDS: u64 = 300;
+const DEVELOPMENT_WEBHOOK_SECRET: &str = "development";
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Environment {
@@ -231,6 +232,17 @@ fn read_private_key(environment: &Environment) -> Result<String, String> {
     Err("missing PRIVATE_KEY or PRIVATE_KEY_PATH".to_string())
 }
 
+fn webhook_secret(environment: &Environment, run_mode: RunMode) -> Result<String, String> {
+    match (environment.non_empty("WEBHOOK_SECRET"), run_mode) {
+        (Some(secret), _) => Ok(secret.to_string()),
+        (None, RunMode::Development) => Ok(DEVELOPMENT_WEBHOOK_SECRET.to_string()),
+        (None, RunMode::Production) => Err(
+            "missing WEBHOOK_SECRET (only NODE_ENV=development falls back to \"development\")"
+                .to_string(),
+        ),
+    }
+}
+
 fn scheduler_interval_milliseconds(environment: &Environment, run_mode: RunMode) -> Option<f64> {
     if !environment.is_true("MERGEABLE_SCHEDULER") {
         return None;
@@ -267,7 +279,7 @@ impl AppConfig {
         Ok(AppConfig {
             app_id: variable("APP_ID").ok_or("missing APP_ID")?,
             private_key_pem: read_private_key(environment)?,
-            webhook_secret: variable("WEBHOOK_SECRET").unwrap_or_else(|| "development".to_string()),
+            webhook_secret: webhook_secret(environment, run_mode)?,
             webhook_path: variable("WEBHOOK_PATH")
                 .unwrap_or_else(|| "/api/github/webhooks".to_string()),
             host: variable("HOST").unwrap_or_else(|| "0.0.0.0".to_string()),
@@ -353,6 +365,7 @@ mod tests {
         let environment = Environment::from_iter([
             ("APP_ID", "7"),
             ("PRIVATE_KEY", "-----BEGIN KEY-----\\nabc"),
+            ("WEBHOOK_SECRET", "hunter2"),
             ("GHE_HOST", "127.0.0.1:9"),
             ("GHE_PROTOCOL", "http"),
             ("PORT", "0"),
@@ -364,5 +377,30 @@ mod tests {
         assert_eq!(config.github_base_url, "http://127.0.0.1:9/api/v3");
         assert_eq!(config.port, 0);
         assert!(config.scheduler.is_none());
+    }
+
+    #[test]
+    fn production_refuses_to_start_without_a_webhook_secret() {
+        let production =
+            Environment::from_iter([("APP_ID", "7"), ("PRIVATE_KEY", "-----BEGIN KEY-----")]);
+        let error = AppConfig::from_environment(&production).err();
+        assert_eq!(
+            error.as_deref(),
+            Some(
+                "missing WEBHOOK_SECRET (only NODE_ENV=development falls back to \"development\")"
+            )
+        );
+    }
+
+    #[test]
+    fn development_falls_back_to_the_development_webhook_secret() {
+        let development = Environment::from_iter([
+            ("APP_ID", "7"),
+            ("PRIVATE_KEY", "-----BEGIN KEY-----"),
+            ("NODE_ENV", "development"),
+        ]);
+        let config =
+            AppConfig::from_environment(&development).unwrap_or_else(|error| panic!("{error}"));
+        assert_eq!(config.webhook_secret, "development");
     }
 }
