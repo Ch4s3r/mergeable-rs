@@ -154,6 +154,10 @@ impl MockGithub {
         std::mem::take(&mut self.locked_state().calls)
     }
 
+    pub fn recorded_call_count(&self) -> usize {
+        self.locked_state().calls.len()
+    }
+
     pub fn last_request_at(&self) -> Instant {
         *self
             .last_request_at

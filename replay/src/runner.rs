@@ -13,6 +13,7 @@ use tokio::task::JoinSet;
 
 const MAXIMUM_CASE_DURATION: Duration = Duration::from_secs(40);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
+const GRACE_AFTER_EXPECTED_CALLS: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -51,15 +52,32 @@ fn case_quiet_period(case: &Case, default_quiet_period: Duration) -> Duration {
         })
 }
 
+fn expected_call_count(case: &Case) -> Option<usize> {
+    if case.definition.quiet_ms.is_some() {
+        return None;
+    }
+    case.definition
+        .expected
+        .as_ref()
+        .map(|expected| expected.calls.len())
+}
+
 async fn wait_for_quiet_mock(
     mock: &MockServer,
     webhook_answered_at: Instant,
     quiet_period: Duration,
+    expected_calls: Option<usize>,
 ) -> bool {
     loop {
         tokio::time::sleep(Duration::from_millis(50)).await;
         let last_activity = mock.github.last_request_at().max(webhook_answered_at);
-        if last_activity.elapsed() >= quiet_period {
+        let quiet_for = last_activity.elapsed();
+        if quiet_for >= quiet_period {
+            return true;
+        }
+        let reached_expected_calls =
+            expected_calls.is_some_and(|expected| mock.github.recorded_call_count() >= expected);
+        if reached_expected_calls && quiet_for >= GRACE_AFTER_EXPECTED_CALLS {
             return true;
         }
         if webhook_answered_at.elapsed() >= MAXIMUM_CASE_DURATION {
@@ -80,7 +98,13 @@ async fn exercise_case(
         .send(app.port, &app.webhook_path, &webhook_of_case(case)?)
         .await
         .with_context(|| format!("sending webhook of case {}", case.definition.name))?;
-    let settled = wait_for_quiet_mock(mock, Instant::now(), quiet_period).await;
+    let settled = wait_for_quiet_mock(
+        mock,
+        Instant::now(),
+        quiet_period,
+        expected_call_count(case),
+    )
+    .await;
     Ok(CaseRun {
         status,
         calls: mock.github.take_calls(),

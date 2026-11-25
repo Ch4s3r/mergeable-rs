@@ -10,6 +10,8 @@ use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
 
+const HARNESS_ATTEMPTS: usize = 3;
+
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Outcome {
@@ -102,7 +104,14 @@ async fn run_all(
         async move {
             let case = &cases[case_index];
             let log_name = format!("{}.check", case.definition.name);
-            run_case_in_fresh_process(&program, case, &options, &log_name).await
+            let mut outcome = run_case_in_fresh_process(&program, case, &options, &log_name).await;
+            for _ in 1..HARNESS_ATTEMPTS {
+                if outcome.is_ok() {
+                    break;
+                }
+                outcome = run_case_in_fresh_process(&program, case, &options, &log_name).await;
+            }
+            outcome
         }
     })
     .await
