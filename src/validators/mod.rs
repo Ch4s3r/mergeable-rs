@@ -237,6 +237,115 @@ pub async fn process_options(
 mod tests {
     use super::*;
 
+    use crate::event_aware::is_event_supported;
+
+    #[test]
+    fn event_support_with_one_supported_event() {
+        let supported_events = ["issues.opened"];
+        assert!(!is_event_supported(
+            &supported_events,
+            "pull_request.opened"
+        ));
+        assert!(is_event_supported(&supported_events, "issues.opened"));
+    }
+
+    #[test]
+    fn event_support_with_several_supported_events() {
+        let supported_events = ["issues.opened", "pull_request.opened"];
+        assert!(!is_event_supported(
+            &supported_events,
+            "pull_request.labeled"
+        ));
+        assert!(is_event_supported(&supported_events, "issues.opened"));
+        assert!(is_event_supported(&supported_events, "pull_request.opened"));
+    }
+
+    #[test]
+    fn event_support_with_a_wildcard_in_the_event_name() {
+        let supported_events = ["issues.opened", "pull_request.*"];
+        assert!(is_event_supported(
+            &supported_events,
+            "pull_request.labeled"
+        ));
+        assert!(!is_event_supported(&supported_events, "issues.milestoned"));
+    }
+
+    #[test]
+    fn setting_of_the_wrong_type_is_rejected() {
+        let supported = json!({"first": "string", "second": "number", "third": "array"});
+        let error = validate_settings(
+            "validator/test",
+            &supported,
+            &json!({"first": "Test", "second": "32", "third": [2, 3]}),
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "validator/test: second is expected to be of type: number"
+        );
+        validate_settings(
+            "validator/test",
+            &supported,
+            &json!({"first": "Test", "second": 32}),
+            &[],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn unknown_setting_is_rejected() {
+        let setting_to_validate = json!({"first": "Test", "second": 32});
+        let error = validate_settings(
+            "validator/test",
+            &json!({"first": "string"}),
+            &setting_to_validate,
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "validator/test: second option is not supported"
+        );
+        validate_settings(
+            "validator/test",
+            &json!({"first": "string", "second": "number"}),
+            &setting_to_validate,
+            &[],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn nested_settings_are_validated() {
+        let supported = json!({"first": "string", "second": {"third": "number"}});
+        let error = validate_settings(
+            "validator/test",
+            &supported,
+            &json!({"first": "Test", "second": {"test": 32}}),
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "validator/test: second.test option is not supported"
+        );
+        validate_settings(
+            "validator/test",
+            &supported,
+            &json!({"first": "Test", "second": {"third": 32}}),
+            &[],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn setting_may_allow_several_types() {
+        let supported = json!({"first": ["string", "array"]});
+        validate_settings("validator/test", &supported, &json!({"first": "Test"}), &[]).unwrap();
+        validate_settings("validator/test", &supported, &json!({"first": [32]}), &[]).unwrap();
+    }
+
     #[test]
     fn unsupported_nested_setting_names_its_path() {
         let supported = json!({"must_include": {"regex": "string"}});
