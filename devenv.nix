@@ -9,6 +9,7 @@
     pkgs.git-cliff
     pkgs.pack
     pkgs.redis
+    pkgs.valkey
   ];
 
   scripts.build-image.exec = ''

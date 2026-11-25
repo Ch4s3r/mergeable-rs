@@ -116,3 +116,35 @@ the resync started can be removed). The scheduled payload of a repository that s
 Consequences: Missed webhooks heal within one resync interval at the cost of one installation list plus one
 repository list per installation per interval. Without `MERGEABLE_SCHEDULER` nothing changes, so the recorded
 cases are unaffected.
+
+## ADR-013: One cache layer for GitHub data, Valkey as the shared backend
+Status: accepted
+Context: Every webhook fetches the same GitHub data again (config and settings files, the organisation `.github`
+config, team memberships, collaborators, topics), which costs rate limit and latency. Replicas cannot share an
+in-memory cache. The recorded cases (ADR-005) fix the calls the app makes with the default environment.
+Decision: All caches are `cache::NamedCache` instances on the backend of `CACHE_STORAGE`: `memory` (moka, per
+instance) or a Redis-protocol server, where `valkey` is an alias of `redis` and the documented, tested shared
+backend (open source, protocol compatible with the existing `redis` client). Every lookup counts a hit or miss in
+`cache_lookups_total{cache,result}` when metrics are enabled. Inventory:
+
+| Data | Switch | Key | Invalidation |
+|---|---|---|---|
+| Merged repository config | `use_config_cache` | `owner/repo` | push changing the config file (organisation `.github` push: all `owner/` keys); `CACHE_TTL` |
+| Settings file | `USE_SETTINGS_CACHE` | `owner/repo/settings` | `CACHE_TTL` |
+| Repository topics (existing) | `use_config_cache` | `owner/repo/topics` | `CACHE_TTL` |
+| Team members (`GET /orgs/{org}/teams/{slug}/members`) | `USE_GITHUB_DATA_CACHE` | `github-data:team_members:org/slug` | `GITHUB_DATA_CACHE_TTL` (300 s) |
+| Team membership (`GET .../memberships/{user}`) | `USE_GITHUB_DATA_CACHE` | `github-data:team_memberships:org/slug/user` | `GITHUB_DATA_CACHE_TTL` |
+| Collaborators (`GET /repos/{owner}/{repo}/collaborators`) | `USE_GITHUB_DATA_CACHE` | `github-data:collaborators:owner/repo` | `GITHUB_DATA_CACHE_TTL` |
+| Repository topics (`GET /repos/{owner}/{repo}/topics`) | `USE_GITHUB_DATA_CACHE` | `github-data:repository_topics:owner/repo` | `GITHUB_DATA_CACHE_TTL` |
+| Organisation default config (`USE_ORG_AS_DEFAULT_CONFIG`) | `USE_GITHUB_DATA_CACHE` | `github-data:organization_config:owner/.github/<file>` | push to `owner/.github` adding or modifying the file; `GITHUB_DATA_CACHE_TTL` |
+| Installation tokens | always | per process (`GithubApp`) | renewed before `expires_at` |
+
+Only successful responses are cached; errors (404 team, 5xx) are fetched again. The GitHub data cache is off by
+default, so the recorded cases are unaffected; with it, a cold cache still reproduces the recordings
+(`tests/github_data_cache.rs`). Installation tokens stay per process: they are credentials and would otherwise be
+stored in the shared server. Pull-request files, reviews, comments and check runs change with every event and are
+not cached. Conditional requests (`If-None-Match`/ETag, a 304 does not count against the rate limit) are a
+follow-up: they need the ETag stored next to the cached content and the mock to answer 304.
+Consequences: Repeated events on the same repository save the cached reads (measured by the integration tests and
+`cache_lookups_total`); team, collaborator and topic changes are seen after at most `GITHUB_DATA_CACHE_TTL`.
+Several replicas share one cache through Valkey (`CACHE_STORAGE=valkey`).

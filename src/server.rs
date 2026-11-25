@@ -136,7 +136,10 @@ pub async fn start(config: AppConfig) -> std::result::Result<RunningServer, Star
         &config.app_id,
         &config.private_key_pem,
     )?);
-    let app = Arc::new(AppState::new(config.behavior.clone()));
+    let app = Arc::new(AppState::with_metrics(
+        config.behavior.clone(),
+        metrics.as_ref(),
+    ));
     tracing::info!(run_mode = ?config.run_mode, "app.mode");
     let scheduler = if let Some(options) = &config.scheduler {
         tracing::info!(
