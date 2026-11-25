@@ -156,6 +156,10 @@ redis-server --port 6392 --save '' --daemonize yes
 REDIS_TEST_PORT=6392 cargo test live_redis -- --ignored
 ```
 
+`live_redis_round_trip_over_tls_with_a_configured_password` additionally needs a server with TLS on
+`REDIS_TLS_TEST_PORT` (`--tls-port`, a certificate for `localhost` whose CA is in `SSL_CERT_FILE`) and `--requirepass`
+set to `REDIS_TEST_PASSWORD`.
+
 ## Dependency licenses
 
 `cargo deny check` (part of `devenv test`, configured in `deny.toml`) accepts only crates available under Apache-2.0,
@@ -257,6 +261,8 @@ recording new cases and the benchmark harness are no longer part of the reposito
 | `CACHE_STORAGE` | `memory`, or `valkey` / `redis` for a shared Redis-protocol server (both use the `CACHE_REDIS_*` settings) | `memory` |
 | `CACHE_MEMORY_MAX`, `CACHE_TTL` | Memory cache size, entry time to live in seconds (also Redis `SETEX` ttl) | 500, none |
 | `CACHE_REDIS_HOST`, `CACHE_REDIS_PORT`, `CACHE_REDIS_DB` | Redis connection | `localhost`, `6379`, `0` |
+| `CACHE_REDIS_USERNAME`, `CACHE_REDIS_PASSWORD` | Redis `AUTH` user (ACL) and password; without `CACHE_REDIS_PASSWORD` the value of `CACHE_REDIS_HOST` is sent as password | -, `CACHE_REDIS_HOST` |
+| `CACHE_REDIS_TLS` | `true` connects over TLS (`rediss://`), verifying the server certificate against the system roots (`SSL_CERT_FILE` adds a CA bundle) | off |
 | `JIRA_HOST`, `JIRA_USERNAME`, `JIRA_PASSWORD`, `JIRA_PROTOCOL`, `JIRA_VERSION`, `JIRA_STRICT_SSL` | Jira option | - |
 | `MERGEABLE_SCHEDULER` | `true` emits `schedule.repository` events for every installed repository | off |
 | `MERGEABLE_SCHEDULER_INTERVAL` | Scheduler interval in seconds | `3600` |
@@ -297,6 +303,13 @@ Every cache uses the backend chosen by `CACHE_STORAGE`: `memory` keeps it per ap
 or `redis` shares it between replicas through one Redis-protocol server (`CACHE_REDIS_HOST`, `CACHE_REDIS_PORT`,
 `CACHE_REDIS_DB`). Valkey is open source and protocol compatible, so the same client is used for both.
 
+Without `CACHE_REDIS_PASSWORD` the value of `CACHE_REDIS_HOST` is sent as the Redis `AUTH` password (behaviour of
+the original implementation); a server without a password that rejects that `AUTH` is used without one. With
+`CACHE_REDIS_PASSWORD` (and optionally `CACHE_REDIS_USERNAME` for an ACL user) exactly those credentials are sent and
+a rejected `AUTH` is an error. `CACHE_REDIS_TLS=true` encrypts the connection with TLS (rustls) and verifies the
+server certificate and host name against the system root certificates; point `SSL_CERT_FILE` at a PEM bundle to trust
+a private CA.
+
 | Data | Switch | Key | Invalidation |
 |---|---|---|---|
 | Repository config (`.github/mergeable.yml`, merged) | `USE_CONFIG_CACHE` / `use_config_cache` | `owner/repo` | push changing the config file; `CACHE_TTL` |
@@ -335,10 +348,11 @@ installation's repositories fails, that installation's repositories stay schedul
   `prometheus-client`. Of the process metrics only `process_start_time_seconds` is exported.
 - Only requests that no other route handles (unknown paths and `/metrics` itself, which is excluded) are
   counted in the HTTP metrics; webhooks, `/ping`, `/probot` and the rate-limit route are not.
-- Redis: the value of `CACHE_REDIS_HOST` is also sent as the Redis `AUTH` password; a server without a password
-  that rejects the `AUTH` is used without one. Listing keys sends `KEYS ""`, so deleting the cache after a
+- Redis: without `CACHE_REDIS_PASSWORD` the value of `CACHE_REDIS_HOST` is also sent as the Redis `AUTH`
+  password; a server without a password that rejects that `AUTH` is used without one. A configured
+  `CACHE_REDIS_PASSWORD` is never dropped (ADR-022). Listing keys sends `KEYS ""`, so deleting the cache after a
   change in an organisation `.github` repository only removes the exact keys. There is no
-  `CACHE_REDIS_PASSWORD` or `CACHE_REDIS_REFRESH_THRESHOLD` setting.
+  `CACHE_REDIS_REFRESH_THRESHOLD` setting.
 - Redis errors are logged and treated as a cache miss instead of failing the webhook.
 - The App-authenticated requests of the scheduler (`GET /app/installations`) are not throttled or retried.
 - `approvals` with `limit`: when the allowed set (`limit.teams` members who approved, `limit.users`, CODEOWNERS of

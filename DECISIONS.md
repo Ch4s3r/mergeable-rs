@@ -278,7 +278,20 @@ Consequences: The defaults are far above what the recorded cases and the retry t
 unchanged. Under overload GitHub sees `503` for some deliveries; GitHub does not redeliver on its own, so they have
 to be redelivered from the App's advanced settings. A Jira request that times out counts as an invalid ticket.
 
-## ADR-022: Paketo tiny run image, updated through releases
+## ADR-022: Separate Redis credentials and TLS, host-as-password only as fallback
+Status: accepted
+Context: The original sends the value of `CACHE_REDIS_HOST` as the Redis `AUTH` password over plain TCP, so a cache
+server could only be protected by a password equal to its host name and cached configuration travelled unencrypted
+(issue #29).
+Decision: `CACHE_REDIS_PASSWORD` and `CACHE_REDIS_USERNAME` set the `AUTH` credentials; only without
+`CACHE_REDIS_PASSWORD` the host name is sent, and only that fallback is retried without a password when the server
+rejects it. `CACHE_REDIS_TLS=true` connects with `ConnectionAddr::TcpTls` through the `redis` crate's
+`tokio-rustls-comp` feature (rustls, tokio-rustls and rustls-native-certs were already in the dependency tree through
+reqwest), verifying the certificate and host name against the system roots (`SSL_CERT_FILE` for a private CA).
+Consequences: Defaults and the recorded cases are unchanged. A wrong configured password or an untrusted certificate is
+logged and every lookup is a cache miss, like any other Redis error.
+
+## ADR-023: Paketo tiny run image, updated through releases
 Status: accepted
 Context: The first Grype scan of the published image (issue #33) reported 97 findings, all in Ubuntu packages of the
 Paketo run image `ubuntu-noble-run` (shell, coreutils, util-linux, systemd libraries, tar, dpkg, gnutls, expat,
