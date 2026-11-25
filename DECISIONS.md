@@ -194,7 +194,20 @@ Consequences: The recorded cases are unchanged (none comes near the limits, all 
 separate Redis password and TLS, bounded concurrent webhook processing and outbound timeouts) are tracked as
 separate issues labelled `security`.
 
-## ADR-017: License stays AGPL-3.0-only
+## ADR-017: SBOMs and attestations for every release
+Status: accepted
+Context: The Paketo image embeds a buildpacks SBOM (crates from `Cargo.lock`, launcher), but nothing was published:
+no SBOM on the GitHub release, no SPDX document for the crates, no run-image OS packages and no attestation.
+Decision: `release.yml` resolves the digest of the published image with `crane digest` and scans the image by digest
+with `syft` and `--select-catalogers +sbom-cataloger`, so one SBOM covers the Ubuntu packages and the crates of the
+embedded buildpacks SBOM (an image scan alone finds no crates: the binary is not built with `cargo auditable`).
+Both CycloneDX and SPDX JSON are attached to the GitHub release. `actions/attest-build-provenance` and
+`actions/attest-sbom` (CycloneDX) sign attestations with Sigstore for the digest and push them to the registry.
+crane and syft come from the devenv packages, so their versions are pinned by `devenv.lock`.
+Consequences: Releases can be verified with `gh attestation verify`. The crate list is the whole `Cargo.lock`,
+including crates for other platforms. The release job needs `id-token: write` and `attestations: write`.
+
+## ADR-018: License stays AGPL-3.0-only
 Status: accepted
 Context: Issue #17 asked whether mergeable-rs can move to MIT OR Apache-2.0. mergeable-rs was ported from
 mergeability/mergeable: modules translated from the original source, error and message texts reproduced verbatim,
@@ -213,12 +226,12 @@ tracking issue with a checklist (consent to "MIT OR Apache-2.0" for their contri
 or a signed-off statement); contributions of authors who decline or cannot be reached are rewritten clean-room
 before the switch. The decision whether to start this process stays with the owner (issue #17, label
 `needs-decision`). This is not legal advice.
-Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-018). Anyone running a modified mergeable-rs
+Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-019). Anyone running a modified mergeable-rs
 as a network service must offer its source to its users.
 
-## ADR-018: Dependency policy checked by cargo-deny
+## ADR-019: Dependency policy checked by cargo-deny
 Status: accepted
-Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-017), and known
+Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-018), and known
 vulnerable, unmaintained or yanked crates should not slip in through lock file updates.
 Decision: `cargo deny check` with `deny.toml` runs in `devenv test`, so in the required `test` check of every pull
 request and in the release workflow. Licenses: an allowlist of the licenses the dependency tree uses that are
@@ -232,6 +245,3 @@ the docs workflow before each build, so it is not checked in `devenv test` (Reno
 otherwise fail).
 Consequences: A new dependency under another license, or a new RustSec advisory, fails the gate until it is
 reviewed. `devenv test` needs network access to GitHub to update the advisory database.
-||||||| d753e54
-||||||| 9007066
-||||||| 38e5ed5

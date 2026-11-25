@@ -7,10 +7,12 @@
     pkgs.cargo-deny
     pkgs.cargo-edit
     pkgs.cargo-nextest
+    pkgs.crane
     pkgs.git-cliff
     pkgs.nodejs_22
     pkgs.pack
     pkgs.redis
+    pkgs.syft
     pkgs.valkey
   ];
 

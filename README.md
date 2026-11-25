@@ -2,7 +2,7 @@
 
 A Rust implementation of [mergeable](https://github.com/mergeability/mergeable), licensed under AGPL-3.0-only like the
 original (it is a port of the original, so it cannot be relicensed without the consent of the upstream copyright
-holders; see ADR-017).
+holders; see ADR-018).
 
 **Documentation: [ch4s3r.github.io/mergeable-rs](https://ch4s3r.github.io/mergeable-rs/)** (rules reference, recipes,
 deployment, operations). The site is built with Docusaurus from `website/` and deployed to GitHub Pages by
@@ -25,7 +25,7 @@ Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.m
 ## Development
 
 The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-deny, cargo-edit, cargo-nextest,
-git-cliff, pack, redis, valkey and Node.js (for the documentation site in `website/`).
+git-cliff, pack, crane, syft, redis, valkey and Node.js (for the documentation site in `website/`).
 
 ```sh
 devenv shell
@@ -63,7 +63,25 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). Ever
    (`feat` bumps the minor version, `fix`/`perf`/others the patch version, while below 1.0.0; the first release is
    0.1.0). Without releasable commits nothing is published.
 3. `build-image` builds the image with Paketo and publishes `ghcr.io/<owner>/<repo>:<version>` and `:latest`.
-4. The tag `v<version>` and a GitHub release with the generated changelog are created.
+4. `crane digest` resolves the digest of the published image and `syft` scans it into a CycloneDX and an SPDX SBOM
+   (Ubuntu packages of the run image, Rust crates from `Cargo.lock`, tini and the buildpacks launcher).
+5. `actions/attest-build-provenance` and `actions/attest-sbom` sign a build provenance and an SBOM (CycloneDX)
+   attestation for the image digest and push both to the registry.
+6. The tag `v<version>` and a GitHub release with the generated changelog, the image digest and the SBOMs
+   (`mergeable-rs-<version>.cdx.json`, `mergeable-rs-<version>.spdx.json`) as assets are created.
+
+### Verifying a release
+
+```sh
+gh release download v<version> -R Ch4s3r/mergeable-rs -p '*.json'
+gh attestation verify oci://ghcr.io/ch4s3r/mergeable-rs:<version> --owner Ch4s3r
+gh attestation verify oci://ghcr.io/ch4s3r/mergeable-rs:<version> --owner Ch4s3r \
+  --predicate-type https://cyclonedx.org/bom
+pack sbom download ghcr.io/ch4s3r/mergeable-rs:<version> --remote --output-dir sbom
+```
+
+The first `gh attestation verify` checks the build provenance (built by `release.yml` in this repository), the
+second the signed SBOM. `pack sbom download` fetches the SBOM the buildpacks embed in the image itself.
 
 Pull requests run `.github/workflows/ci.yml` (`devenv test`) and CodeQL (`codeql.yml`); OpenSSF Scorecard
 (`scorecard.yml`) and a Grype scan of the published image (`image-scan.yml`) run weekly, see

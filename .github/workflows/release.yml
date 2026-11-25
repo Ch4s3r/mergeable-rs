@@ -44,6 +44,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,13 +96,50 @@ jobs:
             --env BP_OCI_SOURCE="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             --env BP_OCI_VERSION="$VERSION" \
             --env BP_OCI_REVISION="$GITHUB_SHA"
+      - name: Resolve the digest of the published image
+        id: image
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE: ${{ steps.version.outputs.image }}
+        run: |
+          digest="$(devenv shell -- crane digest "$IMAGE:$VERSION" | tail -n 1)"
+          [[ "$digest" == sha256:* ]] || { echo "unexpected digest: $digest"; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      - name: Generate the SBOMs (CycloneDX and SPDX) of the published image
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE: ${{ steps.version.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          devenv shell -- syft scan "registry:$IMAGE@$DIGEST" --select-catalogers +sbom-cataloger \
+            --output "cyclonedx-json=mergeable-rs-$VERSION.cdx.json" \
+            --output "spdx-json=mergeable-rs-$VERSION.spdx.json"
+      - name: Attest the build provenance of the image
+        if: steps.version.outputs.release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.version.outputs.image }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Attest the SBOM of the image
+        if: steps.version.outputs.release == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ steps.version.outputs.image }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          sbom-path: mergeable-rs-${{ steps.version.outputs.version }}.cdx.json
+          push-to-registry: true
       - name: Tag and create the GitHub release
         if: steps.version.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           IMAGE: ${{ steps.version.outputs.image }}
+          DIGEST: ${{ steps.image.outputs.digest }}
         run: |
           devenv shell -- git cliff --unreleased --tag "v$VERSION" --output notes.md
-          printf '\nImage: `%s:%s`\n' "$IMAGE" "$VERSION" >> notes.md
-          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md
+          printf '\nImage: `%s:%s` (`%s`)\n' "$IMAGE" "$VERSION" "$DIGEST" >> notes.md
+          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md \
+            "mergeable-rs-$VERSION.cdx.json" "mergeable-rs-$VERSION.spdx.json"
