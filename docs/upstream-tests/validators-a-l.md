@@ -2,8 +2,8 @@
 
 Upstream: `__tests__/unit/validators/` files `a*`–`l*` and `options_processor/**` of mergeability/mergeable.
 
-- Upstream tests: 234
-- Ported: 233 (168 integration tests in `tests/upstream_validators_a_l` against the mock GitHub API, 65 unit tests in `src`, 4 of them pre-existing)
+- Upstream tests: 237
+- Ported: 236 (171 integration tests in `tests/upstream_validators_a_l` against the mock GitHub API, 65 unit tests in `src`, 4 of them pre-existing)
 - Not applicable: 1
 
 Validator tests run `validators::process_validate` on a context whose GitHub client points at the mock GitHub API
@@ -50,11 +50,14 @@ internal module (`Teams`, `Owners`), the Rust test stubs the GitHub endpoints th
 | approvals.test.js > that requestedReviewers appends to the reviewers list correctly | `tests/upstream_validators_a_l/approvals.rs::that_requested_reviewers_appends_to_the_reviewers_list_correctly` |
 | approvals.test.js > blocks if changes are requested | `tests/upstream_validators_a_l/approvals.rs::blocks_if_changes_are_requested` |
 | approvals.test.js > blocks if changes are requested while other options area also passed in | `tests/upstream_validators_a_l/approvals.rs::blocks_if_changes_are_requested_while_other_options_are_also_passed_in` |
-| approvals.test.js > returns proper error when team provided is not found | `tests/upstream_validators_a_l/approvals.rs::returns_proper_error_when_team_provided_is_not_found` |
+| approvals.test.js > returns proper error when team provided is not found | `tests/upstream_validators_a_l/approvals.rs::returns_proper_error_when_team_provided_is_not_found` (upstream mocks `Teams.extractTeamMemberships` to return the non-approving `userB`, which the membership lookup of approving reviewers cannot return; with no approver in the team the limit is empty and lifted, ADR-014) |
 | approvals.test.js > required.owners  > limit.teams option works properly | `tests/upstream_validators_a_l/approvals.rs::required_owners_limit_teams_option_works_properly` |
 | approvals.test.js > required.owners  > limit.users option works properly | `tests/upstream_validators_a_l/approvals.rs::required_owners_limit_users_option_works_properly` |
 | approvals.test.js > required.owners  > limit.owners option works properly | `tests/upstream_validators_a_l/approvals.rs::required_owners_limit_owners_option_works_properly` |
 | approvals.test.js > required.owners  > limit option will create an "info" validation | `tests/upstream_validators_a_l/approvals.rs::required_owners_limit_option_will_create_an_info_validation` |
+| approvals.test.js > required.owners  > limit.owners passes when CODEOWNERS file is missing | `tests/upstream_validators_a_l/approvals.rs::required_owners_limit_owners_passes_when_codeowners_file_is_missing` |
+| approvals.test.js > required.owners  > limit.owners passes when codeowner approved and teams are empty | `tests/upstream_validators_a_l/approvals.rs::required_owners_limit_owners_passes_when_codeowner_approved_and_teams_are_empty` |
+| approvals.test.js > required.owners  > required.owners passes when CODEOWNERS file is missing and other reviewers have approved | `tests/upstream_validators_a_l/approvals.rs::required_owners_required_owners_passes_when_codeowners_file_is_missing_and_other_reviewers_have_approved` |
 | assignee.test.js > that mergeable is false when less than minimum | `tests/upstream_validators_a_l/assignee.rs::that_mergeable_is_false_when_less_than_minimum` |
 | assignee.test.js > that mergeable is true when the same as minimum | `tests/upstream_validators_a_l/assignee.rs::that_mergeable_is_true_when_the_same_as_minimum` |
 | assignee.test.js > that mergeable is true when greater than minimum | `tests/upstream_validators_a_l/assignee.rs::that_mergeable_is_true_when_greater_than_minimum` |
