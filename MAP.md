@@ -16,7 +16,7 @@
 | Templates, globs, YAML | `template`, `glob`, `yaml` |
 | JSON value helpers, value lists | `json_value`, `value_lists` |
 | Caches | `cache`, `redis_cache` |
-| Scheduler | `scheduler` |
+| Scheduler (incl. periodic installation resync) | `scheduler` |
 | Errors | `error` |
 
 Contract tests: tests/cases (381 recorded webhook scenarios), one generated Rust test each in

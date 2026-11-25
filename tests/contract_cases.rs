@@ -1,4 +1,5 @@
 mod contract;
+mod installation_resync;
 
 use contract::case::Case;
 use contract::mock::MockServer;
