@@ -67,7 +67,9 @@ request with a passing `test` check and is squash-merged, so the pull request ti
 Paketo builder and buildpacks in `project.toml`, the Dockerfile images, and devenv: the devenv version (CLI in the
 workflows and the module input in `devenv.yaml`) and the pinned `devenv-nixpkgs` commit. devenv re-locks
 `devenv.lock` when `devenv.yaml` changes. Updates are opened on Mondays before 04:00 UTC; patch, minor, digest and
-lock file updates are squash-merged automatically once all checks pass, major updates wait for review.
+lock file updates are squash-merged automatically once all checks pass, major updates wait for review. Renovate also
+opens PRs for direct dependencies with known vulnerabilities in the [OSV database](https://osv.dev) as soon as a fix
+is available; vulnerability-fix PRs always ignore the weekly schedule.
 
 Dry run locally:
 

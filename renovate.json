@@ -12,6 +12,7 @@
     ":maintainLockFilesWeekly"
   ],
   "automergeStrategy": "squash",
+  "osvVulnerabilityAlerts": true,
   "lockFileMaintenance": {
     "automerge": true
   },
