@@ -6,6 +6,7 @@ const ESCAPED_OPEN: &str = "\u{0}OPEN\u{0}";
 const ESCAPED_CLOSE: &str = "\u{0}CLOSE\u{0}";
 const ESCAPED_COMMA: &str = "\u{0}COMMA\u{0}";
 const ESCAPED_PERIOD: &str = "\u{0}PERIOD\u{0}";
+const MAXIMUM_EXPANSIONS: usize = 100_000;
 
 static NUMERIC_SEQUENCE: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"^-?[0-9]+\.\.-?[0-9]+(?:\.\.-?[0-9]+)?$").ok());
@@ -204,11 +205,18 @@ fn expand(text: &str, is_top: bool) -> Vec<String> {
     let items: Vec<String> = if is_sequence {
         sequence_items(&parts, is_alpha_sequence)
     } else {
-        parts.iter().flat_map(|part| expand(part, false)).collect()
+        parts
+            .iter()
+            .flat_map(|part| expand(part, false))
+            .take(MAXIMUM_EXPANSIONS)
+            .collect()
     };
     let mut expansions = Vec::new();
     for item in &items {
         for suffix in &post {
+            if expansions.len() >= MAXIMUM_EXPANSIONS {
+                return expansions;
+            }
             let expansion = format!("{}{}{}", found.pre, item, suffix);
             if !is_top || is_sequence || !expansion.is_empty() {
                 expansions.push(expansion);
@@ -238,7 +246,9 @@ fn sequence_items(parts: &[String], is_alpha_sequence: bool) -> Vec<String> {
         return items;
     }
     let mut current = start;
-    while (!reverse && current <= end) || (reverse && current >= end) {
+    while ((!reverse && current <= end) || (reverse && current >= end))
+        && items.len() < MAXIMUM_EXPANSIONS
+    {
         let item = if is_alpha_sequence {
             let character = u32::try_from(current)
                 .ok()
@@ -265,7 +275,10 @@ fn sequence_items(parts: &[String], is_alpha_sequence: bool) -> Vec<String> {
             digits
         };
         items.push(item);
-        current += increment;
+        let Some(next) = current.checked_add(increment) else {
+            break;
+        };
+        current = next;
     }
     items
 }
@@ -287,6 +300,28 @@ mod tests {
         assert_eq!(expand_top("{01..03}"), vec!["01", "02", "03"]);
         assert_eq!(expand_top("{c..a}"), vec!["c", "b", "a"]);
         assert_eq!(expand_top("{1..7..3}"), vec!["1", "4", "7"]);
+    }
+
+    #[test]
+    fn huge_ranges_and_set_products_stop_at_the_expansion_limit() {
+        assert_eq!(expand_top("{1..100000000}").len(), MAXIMUM_EXPANSIONS);
+        assert_eq!(expand_top(&"{a,b}".repeat(30)).len(), MAXIMUM_EXPANSIONS);
+        assert_eq!(
+            expand_top("{{1..99999},{1..99999},{1..99999}}").len(),
+            MAXIMUM_EXPANSIONS
+        );
+    }
+
+    #[test]
+    fn ranges_ending_at_the_largest_number_terminate() {
+        assert_eq!(
+            expand_top("{9223372036854775806..9223372036854775807}"),
+            vec!["9223372036854775806", "9223372036854775807"]
+        );
+        assert_eq!(
+            expand_top("{-9223372036854775807..-9223372036854775808}"),
+            vec!["-9223372036854775807", "-9223372036854775808"]
+        );
     }
 
     #[test]

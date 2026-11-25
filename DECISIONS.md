@@ -175,7 +175,26 @@ Consequences: One PR per vulnerability, merged without waiting for review or the
 checks are the only gate. A wrong alert could produce a bad automerged fix, which the release changelog makes
 visible.
 
-## ADR-016: License stays AGPL-3.0-only
+## ADR-016: Untrusted input limits and a mandatory webhook secret
+Status: accepted
+Context: Repository configuration (`.github/mergeable.yml`, also from same-repository pull requests) and pull request
+data are untrusted. The security review (#20) found that a template nested about 20 000 levels deep overflowed the
+stack and aborted the whole process, that a glob brace range such as `{1..100000000}` or a long `{a,b}` product
+expanded without bound (a range ending at `i64::MAX` never terminated), that a production server without
+`WEBHOOK_SECRET` accepted webhooks signed with the public default `development`, that `X-Hub-Signature-256` also
+accepted SHA-1 digests, and that path segments from callers reached GitHub (`/github-ratelimit/:installationId`) and
+Jira (ticket id) URLs unencoded.
+Decision: The template parser rejects blocks, `else if` chains and subexpressions nested more than 100 levels deep
+with `RangeError: Maximum call stack size exceeded` (the error the YAML loader already uses); a brace expansion stops
+at 100 000 patterns, like the `max` of the JavaScript `brace-expansion`; `WEBHOOK_SECRET` is required unless
+`NODE_ENV=development`; only `sha256=` signatures are verified; the rate-limit route accepts numeric installation ids
+only and the Jira ticket id is percent-encoded as one path segment (`.` and `..` are never valid tickets).
+Consequences: The recorded cases are unchanged (none comes near the limits, all are signed with SHA-256 and set
+`WEBHOOK_SECRET`). A deployment without `WEBHOOK_SECRET` no longer starts and must set it. Larger follow-ups (a
+separate Redis password and TLS, bounded concurrent webhook processing and outbound timeouts) are tracked as
+separate issues labelled `security`.
+
+## ADR-017: License stays AGPL-3.0-only
 Status: accepted
 Context: Issue #17 asked whether mergeable-rs can move to MIT OR Apache-2.0. mergeable-rs was ported from
 mergeability/mergeable: modules translated from the original source, error and message texts reproduced verbatim,
@@ -194,12 +213,12 @@ tracking issue with a checklist (consent to "MIT OR Apache-2.0" for their contri
 or a signed-off statement); contributions of authors who decline or cannot be reached are rewritten clean-room
 before the switch. The decision whether to start this process stays with the owner (issue #17, label
 `needs-decision`). This is not legal advice.
-Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-017). Anyone running a modified mergeable-rs
+Consequences: Dependencies must be compatible with AGPL-3.0-only (ADR-018). Anyone running a modified mergeable-rs
 as a network service must offer its source to its users.
 
-## ADR-017: Dependency policy checked by cargo-deny
+## ADR-018: Dependency policy checked by cargo-deny
 Status: accepted
-Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-016), and known
+Context: The licenses of the crates we ship must be compatible with AGPL-3.0-only (ADR-017), and known
 vulnerable, unmaintained or yanked crates should not slip in through lock file updates.
 Decision: `cargo deny check` with `deny.toml` runs in `devenv test`, so in the required `test` check of every pull
 request and in the release workflow. Licenses: an allowlist of the licenses the dependency tree uses that are
@@ -215,3 +234,4 @@ Consequences: A new dependency under another license, or a new RustSec advisory,
 reviewed. `devenv test` needs network access to GitHub to update the advisory database.
 ||||||| d753e54
 ||||||| 9007066
+||||||| 38e5ed5

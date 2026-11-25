@@ -132,7 +132,12 @@ const sidebars = {
     {
       type: 'category',
       label: 'Operations',
-      items: ['operations/overview', 'operations/caching', 'operations/scheduler'],
+      items: [
+        'operations/overview',
+        'operations/caching',
+        'operations/scheduler',
+        'operations/security',
+      ],
     },
     {
       type: 'category',

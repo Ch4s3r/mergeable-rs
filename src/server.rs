@@ -341,6 +341,11 @@ async fn github_rate_limit(
     if installation_id.is_empty() {
         return json_response(Some(&json!("missing parameter `installationId`")));
     }
+    if !is_installation_id(&installation_id) {
+        return json_response(Some(&json!(
+            "installation error: `installationId` must be a number"
+        )));
+    }
     match rate_limit_core(&state.app_client, &installation_id).await {
         Ok(core) => json_response(core.as_ref()),
         Err(error) => json_response(Some(&json!(format!(
@@ -359,33 +364,23 @@ fn json_error(status: StatusCode, message: &str) -> Response {
         .into_response()
 }
 
-fn hmac_matches<Signature: Mac + KeyInit>(secret: &str, body: &[u8], expected: &[u8]) -> bool {
-    let Ok(mut mac) = <Signature as KeyInit>::new_from_slice(secret.as_bytes()) else {
-        return false;
-    };
-    mac.update(body);
-    mac.verify_slice(expected).is_ok()
-}
-
 #[must_use]
 pub fn signature_matches(secret: &str, body: &[u8], signature_header: &str) -> bool {
-    let (hex_signature, uses_sha256) = match signature_header.strip_prefix("sha256=") {
-        Some(rest) => (rest, true),
-        None => (
-            signature_header
-                .strip_prefix("sha1=")
-                .unwrap_or(signature_header),
-            false,
-        ),
+    let Some(hex_signature) = signature_header.strip_prefix("sha256=") else {
+        return false;
     };
     let Ok(expected) = hex::decode(hex_signature) else {
         return false;
     };
-    if uses_sha256 {
-        hmac_matches::<Hmac<Sha256>>(secret, body, &expected)
-    } else {
-        hmac_matches::<Hmac<sha1::Sha1>>(secret, body, &expected)
-    }
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(body);
+    mac.verify_slice(&expected).is_ok()
+}
+
+fn is_installation_id(text: &str) -> bool {
+    !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 fn header_text<'headers>(headers: &'headers HeaderMap, name: &str) -> &'headers str {
@@ -615,4 +610,53 @@ pub async fn handle_event(
         }
     }
     first_error.map_or(Ok(()), Err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &str = "It's a Secret to Everybody";
+    const BODY: &[u8] = b"Hello, World!";
+    const SHA256_SIGNATURE: &str =
+        "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
+
+    fn sha1_signature() -> String {
+        let mut signer = Hmac::<sha1::Sha1>::new_from_slice(SECRET.as_bytes()).unwrap();
+        signer.update(BODY);
+        hex::encode(signer.finalize().into_bytes())
+    }
+
+    #[test]
+    fn webhook_signed_with_the_secret_using_sha256_is_accepted() {
+        assert!(signature_matches(SECRET, BODY, SHA256_SIGNATURE));
+    }
+
+    #[test]
+    fn webhook_signed_with_another_secret_or_body_is_rejected() {
+        assert!(!signature_matches("another secret", BODY, SHA256_SIGNATURE));
+        assert!(!signature_matches(
+            SECRET,
+            b"Hello, World?",
+            SHA256_SIGNATURE
+        ));
+        assert!(!signature_matches(SECRET, BODY, ""));
+        assert!(!signature_matches(SECRET, BODY, "sha256=not-hex"));
+    }
+
+    #[test]
+    fn sha1_signatures_are_rejected_even_when_they_match() {
+        let sha1 = sha1_signature();
+        assert!(!signature_matches(SECRET, BODY, &format!("sha1={sha1}")));
+        assert!(!signature_matches(SECRET, BODY, &sha1));
+    }
+
+    #[test]
+    fn rate_limit_route_accepts_only_numeric_installation_ids() {
+        assert!(is_installation_id("12345"));
+        assert!(!is_installation_id(""));
+        assert!(!is_installation_id(".."));
+        assert!(!is_installation_id("1/../../app"));
+        assert!(!is_installation_id("-1"));
+    }
 }

@@ -52,6 +52,7 @@ fn test_environment(mock_port: u16, extra_variables: &[(&str, &str)]) -> Environ
     let mut variables: BTreeMap<&str, &str> = BTreeMap::from([
         ("APP_ID", "1"),
         ("PRIVATE_KEY", FAST_TEST_SIGNING_KEY_PEM.as_str()),
+        ("WEBHOOK_SECRET", "test-secret"),
         ("GHE_HOST", github_host.as_str()),
         ("GHE_PROTOCOL", "http"),
         ("GITHUB_THROTTLE", "false"),

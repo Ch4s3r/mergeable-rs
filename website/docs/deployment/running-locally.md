@@ -40,7 +40,8 @@ is always looked up below `.github/`.
 and `WEBHOOK_SECRET` differ. Set the same value on both sides. A request without the `X-GitHub-Event`,
 `X-Hub-Signature-256` or `X-GitHub-Delivery` header is rejected with `400` as well.
 
-**The server does not start (`missing APP_ID` or a private key error)**: set `APP_ID` and either `PRIVATE_KEY` or
+**The server does not start (`missing APP_ID`, `missing WEBHOOK_SECRET` or a private key error)**: set `APP_ID`,
+`WEBHOOK_SECRET` (only `NODE_ENV=development` falls back to `development`) and either `PRIVATE_KEY` or
 `PRIVATE_KEY_PATH`.
 
 **Errors from the GitHub API with GitHub Enterprise Server**: set `GHE_HOST` to the host name of your Enterprise
