@@ -46,6 +46,11 @@ bounded, templates may nest blocks and subexpressions at most 100 levels deep, a
 100 000 patterns, user regular expressions run on `fancy-regex` with its backtracking limit, and request bodies are
 limited to 2 MB.
 
+Limits on load: at most `MAX_CONCURRENT_WEBHOOKS` (default 64) webhooks are processed at once, further deliveries
+wait at most 9 s for a free slot and are then answered `503`. Requests to GitHub and Jira time out after
+`OUTGOING_HTTP_CONNECT_TIMEOUT` (10 s) without a connection and `OUTGOING_HTTP_TIMEOUT` (60 s) per request, so a
+hanging upstream cannot keep a handler alive indefinitely.
+
 ## Automated checks
 
 - [CodeQL](https://codeql.github.com) for Rust and the GitHub Actions workflows on every pull request, on `main` and

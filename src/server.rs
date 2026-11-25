@@ -26,8 +26,8 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
+use tokio::sync::{Semaphore, oneshot};
+use tokio::task::{JoinError, JoinHandle};
 use tracing::Instrument;
 
 const STILL_PROCESSING_AFTER: Duration = Duration::from_secs(9);
@@ -128,6 +128,7 @@ pub async fn start(config: AppConfig) -> std::result::Result<RunningServer, Star
             private_key_pem: config.private_key_pem.clone(),
             retry_base_delay: config.github_retry_base_delay,
             throttle: config.github_throttle_enabled.then(RequestThrottle::new),
+            http_timeouts: config.outgoing_http_timeouts,
         },
         metrics.clone(),
     )?);
@@ -135,6 +136,7 @@ pub async fn start(config: AppConfig) -> std::result::Result<RunningServer, Star
         &config.github_base_url,
         &config.app_id,
         &config.private_key_pem,
+        config.outgoing_http_timeouts,
     )?);
     let app = Arc::new(AppState::with_metrics(
         config.behavior.clone(),
@@ -164,6 +166,7 @@ pub async fn start(config: AppConfig) -> std::result::Result<RunningServer, Star
         scheduler,
         webhook_secret: Arc::from(config.webhook_secret.as_str()),
         metrics,
+        webhook_slots: Arc::new(Semaphore::new(config.max_concurrent_webhooks)),
     };
     let router = router(&config, state);
     let listener = tokio::net::TcpListener::bind(&requested_address)
@@ -202,6 +205,7 @@ pub struct ServerState {
     pub scheduler: Option<Arc<Scheduler>>,
     pub webhook_secret: Arc<str>,
     pub metrics: Option<Arc<Metrics>>,
+    pub webhook_slots: Arc<Semaphore>,
 }
 
 pub fn router(config: &AppConfig, state: ServerState) -> Router {
@@ -427,26 +431,64 @@ async fn receive_webhook(
     };
     let event_name = header_text(&headers, "x-github-event").to_string();
     let delivery_id = header_text(&headers, "x-github-delivery").to_string();
-    let handling = tokio::spawn(handle_event(
-        state,
-        delivery_id,
-        event_name,
-        SharedPayload::from(payload),
-    ));
-    match tokio::time::timeout(STILL_PROCESSING_AFTER, handling).await {
-        Err(_) => (StatusCode::ACCEPTED, "still processing\n").into_response(),
-        Ok(Ok(Ok(()))) => (StatusCode::OK, "ok\n").into_response(),
-        Ok(Ok(Err(error))) => {
+    let webhook_slots = Arc::clone(&state.webhook_slots);
+    let overload_log_fields = (delivery_id.clone(), event_name.clone());
+    let handler = handle_event(state, delivery_id, event_name, SharedPayload::from(payload));
+    match handle_within_answer_window(webhook_slots, STILL_PROCESSING_AFTER, handler).await {
+        WebhookHandling::Overloaded => {
+            let (delivery_id, event_name) = overload_log_fields;
+            tracing::warn!(%delivery_id, %event_name, "webhook.rejected.overloaded");
+            json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Too many webhooks are being processed, try again later",
+            )
+        }
+        WebhookHandling::StillProcessing => {
+            (StatusCode::ACCEPTED, "still processing\n").into_response()
+        }
+        WebhookHandling::Finished(Ok(())) => (StatusCode::OK, "ok\n").into_response(),
+        WebhookHandling::Finished(Err(error)) => {
             let status = error
                 .status()
                 .and_then(|code| StatusCode::from_u16(code).ok())
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             json_error(status, &error.to_string())
         }
-        Ok(Err(join_error)) => json_error(
+        WebhookHandling::Crashed(join_error) => json_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             &format!("Error: {join_error}"),
         ),
+    }
+}
+
+#[derive(Debug)]
+enum WebhookHandling {
+    Overloaded,
+    StillProcessing,
+    Finished(Result<()>),
+    Crashed(JoinError),
+}
+
+async fn handle_within_answer_window(
+    webhook_slots: Arc<Semaphore>,
+    answer_window: Duration,
+    handler: impl Future<Output = Result<()>> + Send + 'static,
+) -> WebhookHandling {
+    let answer_deadline = tokio::time::Instant::now() + answer_window;
+    let Ok(Ok(webhook_slot)) =
+        tokio::time::timeout_at(answer_deadline, webhook_slots.acquire_owned()).await
+    else {
+        return WebhookHandling::Overloaded;
+    };
+    let handling = tokio::spawn(async move {
+        let outcome = handler.await;
+        drop(webhook_slot);
+        outcome
+    });
+    match tokio::time::timeout_at(answer_deadline, handling).await {
+        Err(_) => WebhookHandling::StillProcessing,
+        Ok(Ok(outcome)) => WebhookHandling::Finished(outcome),
+        Ok(Err(join_error)) => WebhookHandling::Crashed(join_error),
     }
 }
 
@@ -667,5 +709,50 @@ mod tests {
         assert!(!is_installation_id(".."));
         assert!(!is_installation_id("1/../../app"));
         assert!(!is_installation_id("-1"));
+    }
+    fn webhook_slots(available: usize) -> Arc<Semaphore> {
+        Arc::new(Semaphore::new(available))
+    }
+
+    #[tokio::test]
+    async fn webhook_beyond_the_limit_is_rejected_when_no_slot_frees_up_within_the_answer_window() {
+        let slots = webhook_slots(1);
+        let _busy_slot = Arc::clone(&slots).acquire_owned().await;
+        let handling =
+            handle_within_answer_window(slots, Duration::from_millis(50), async { Ok(()) }).await;
+        assert!(matches!(handling, WebhookHandling::Overloaded));
+    }
+
+    #[tokio::test]
+    async fn webhook_beyond_the_limit_waits_for_a_slot_that_frees_up_in_time() {
+        let slots = webhook_slots(1);
+        let busy_slot = Arc::clone(&slots).acquire_owned().await;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            drop(busy_slot);
+        });
+        let handling =
+            handle_within_answer_window(slots, Duration::from_secs(5), async { Ok(()) }).await;
+        assert!(matches!(handling, WebhookHandling::Finished(Ok(()))));
+    }
+
+    #[tokio::test]
+    async fn webhook_still_processing_after_the_answer_keeps_its_slot_until_it_finishes() {
+        let slots = webhook_slots(1);
+        let (finish, finished) = oneshot::channel::<()>();
+        let handling = handle_within_answer_window(
+            Arc::clone(&slots),
+            Duration::from_millis(30),
+            async move {
+                let _ = finished.await;
+                Ok(())
+            },
+        )
+        .await;
+        assert!(matches!(handling, WebhookHandling::StillProcessing));
+        assert_eq!(slots.available_permits(), 0);
+        let _ = finish.send(());
+        let slot_returned = tokio::time::timeout(Duration::from_secs(5), slots.acquire()).await;
+        assert!(slot_returned.is_ok_and(|slot| slot.is_ok()));
     }
 }
