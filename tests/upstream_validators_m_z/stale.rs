@@ -1,6 +1,8 @@
 use super::{MockedGithub, PullRequestFields, get_stub, pull_request_payload};
-use chrono::{Datelike, Timelike, Utc};
+use jiff::Timestamp;
+use jiff::tz::TimeZone;
 use mergeable::validators::stale::Stale;
+use mergeable::validators::stale::weekday_abbreviation;
 use serde_json::{Value, json};
 
 const QUERY_PREFIX: &str = "repo:owner/repo is:open updated:<<timestamp>";
@@ -67,12 +69,12 @@ async fn assert_metadata_queries(draft: bool, milestones: bool, projects: bool) 
 }
 
 fn weekday_in(time_zone: &str) -> String {
-    let zone: chrono_tz::Tz = time_zone.parse().expect("known time zone");
-    Utc::now().with_timezone(&zone).weekday().to_string()
+    let local = Timestamp::now().in_tz(time_zone).expect("known time zone");
+    weekday_abbreviation(local.weekday()).to_string()
 }
 
 fn current_utc_hour() -> i64 {
-    i64::from(Utc::now().hour())
+    i64::from(Timestamp::now().to_zoned_datetime(TimeZone::UTC).hour())
 }
 
 #[tokio::test]
@@ -260,7 +262,13 @@ async fn time_zone_option_decides_the_local_day() {
 async fn days_of_week_option_only_runs_on_listed_days() {
     let github = github_searching(json!([{"number": 1, "pull_request": {}}])).await;
     let today = weekday_in("UTC");
-    let other_day = Utc::now().weekday().succ().to_string();
+    let other_day = weekday_abbreviation(
+        Timestamp::now()
+            .to_zoned_datetime(TimeZone::UTC)
+            .weekday()
+            .next(),
+    )
+    .to_string();
 
     let other_day_only =
         json!({"do": "stale", "days": 10, "time_constraint": {"days_of_week": [other_day]}});

@@ -27,20 +27,20 @@ the check: decide whether the license is compatible with AGPL-3.0-only before ad
 
 ## Rust crates in the binary
 
-The `mergeable` binary is built from 246 third-party crates (normal dependencies, including proc-macro crates
+The `mergeable` binary is built from 238 third-party crates (normal dependencies, including proc-macro crates
 and crates for other target platforms, without development dependencies). An expression with `OR` means we may use the crate under either license.
 
 | License expression | Packages |
 |---|---|
-| MIT OR Apache-2.0 | 117 |
-| Apache-2.0 OR MIT | 43 |
-| MIT | 37 |
+| MIT OR Apache-2.0 | 106 |
+| Apache-2.0 OR MIT | 44 |
+| MIT | 35 |
 | Unicode-3.0 | 18 |
+| Unlicense OR MIT | 6 |
 | MIT/Apache-2.0 | 5 |
 | BSD-3-Clause | 4 |
 | Apache-2.0 OR ISC OR MIT | 3 |
 | ISC | 3 |
-| Unlicense OR MIT | 2 |
 | (MIT OR Apache-2.0) AND Apache-2.0 | 1 |
 | (MIT OR Apache-2.0) AND Unicode-3.0 | 1 |
 | Apache-2.0 | 1 |
@@ -62,7 +62,6 @@ and crates for other target platforms, without development dependencies). An exp
 | Crate | Version | License |
 |---|---|---|
 | aho-corasick | 1.1.5 | Unlicense OR MIT |
-| android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
 | arcstr | 1.2.0 | Apache-2.0 OR MIT OR Zlib |
 | async-lock | 3.5.0 | Apache-2.0 OR MIT |
 | async-trait | 0.1.92 | MIT OR Apache-2.0 |
@@ -82,8 +81,6 @@ and crates for other target platforms, without development dependencies). An exp
 | bytes | 1.12.2 | MIT |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
 | chacha20 | 0.10.2 | MIT OR Apache-2.0 |
-| chrono | 0.4.45 | MIT OR Apache-2.0 |
-| chrono-tz | 0.10.4 | MIT OR Apache-2.0 |
 | cmov | 0.5.4 | Apache-2.0 OR MIT |
 | combine | 4.6.9 | MIT |
 | const-oid | 0.10.3 | Apache-2.0 OR MIT |
@@ -141,8 +138,6 @@ and crates for other target platforms, without development dependencies). An exp
 | hyper | 1.12.0 | MIT |
 | hyper-rustls | 0.27.10 | Apache-2.0 OR ISC OR MIT |
 | hyper-util | 0.1.21 | MIT |
-| iana-time-zone | 0.1.65 | MIT OR Apache-2.0 |
-| iana-time-zone-haiku | 0.1.2 | MIT OR Apache-2.0 |
 | icu_collections | 2.4.0 | Unicode-3.0 |
 | icu_locale_core | 2.4.0 | Unicode-3.0 |
 | icu_normalizer | 2.4.0 | Unicode-3.0 |
@@ -155,6 +150,10 @@ and crates for other target platforms, without development dependencies). An exp
 | indexmap | 2.14.2 | Apache-2.0 OR MIT |
 | ipnet | 2.12.2 | MIT OR Apache-2.0 |
 | itoa | 1.0.19 | MIT OR Apache-2.0 |
+| jiff | 1.0.1 | Unlicense OR MIT |
+| jiff-core | 1.0.1 | Unlicense OR MIT |
+| jiff-static | 1.0.1 | Unlicense OR MIT |
+| jiff-tzdb | 1.0.0 | Unlicense OR MIT |
 | jni | 0.22.4 | MIT OR Apache-2.0 |
 | jni-macros | 0.22.4 | MIT OR Apache-2.0 |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 |
@@ -187,12 +186,11 @@ and crates for other target platforms, without development dependencies). An exp
 | pem | 4.0.0 | MIT |
 | pem-rfc7468 | 1.0.0 | Apache-2.0 OR MIT |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 |
-| phf | 0.12.1 | MIT |
-| phf_shared | 0.12.1 | MIT |
 | pin-project-lite | 0.2.18 | Apache-2.0 OR MIT |
 | pkcs1 | 0.8.0 | Apache-2.0 OR MIT |
 | pkcs8 | 0.11.0 | Apache-2.0 OR MIT |
 | portable-atomic | 1.15.0 | Apache-2.0 OR MIT |
+| portable-atomic-util | 0.2.8 | Apache-2.0 OR MIT |
 | potential_utf | 0.1.6 | Unicode-3.0 |
 | powerfmt | 0.2.1 | MIT OR Apache-2.0 |
 | primefield | 0.14.0 | Apache-2.0 OR MIT |
@@ -237,7 +235,6 @@ and crates for other target platforms, without development dependencies). An exp
 | simd_cesu8 | 1.2.0 | Apache-2.0 OR MIT |
 | simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
 | simple_asn1 | 0.6.4 | ISC |
-| siphasher | 1.0.4 | MIT OR Apache-2.0 |
 | slab | 0.4.12 | MIT |
 | smallvec | 1.16.6 | MIT OR Apache-2.0 |
 | socket2 | 0.6.5 | MIT OR Apache-2.0 |
@@ -287,12 +284,7 @@ and crates for other target platforms, without development dependencies). An exp
 | wasm-bindgen-shared | 0.2.130 | MIT OR Apache-2.0 |
 | web-sys | 0.3.107 | MIT OR Apache-2.0 |
 | webpki-root-certs | 1.0.12 | CDLA-Permissive-2.0 |
-| windows-core | 0.62.2 | MIT OR Apache-2.0 |
-| windows-implement | 0.60.2 | MIT OR Apache-2.0 |
-| windows-interface | 0.59.3 | MIT OR Apache-2.0 |
 | windows-link | 0.2.1 | MIT OR Apache-2.0 |
-| windows-result | 0.4.1 | MIT OR Apache-2.0 |
-| windows-strings | 0.5.1 | MIT OR Apache-2.0 |
 | windows-sys | 0.61.2 | MIT OR Apache-2.0 |
 | wnaf | 0.14.1 | Apache-2.0 OR MIT |
 | writeable | 0.6.4 | Unicode-3.0 |

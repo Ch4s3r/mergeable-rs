@@ -122,7 +122,7 @@ fn insert_when_given(target: &mut Value, options: &Value, option_key: &str, fiel
 }
 
 fn now_iso() -> Value {
-    json!(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+    json!(format!("{:.3}", jiff::Timestamp::now()))
 }
 
 pub fn payload(options: &Value) -> Value {
