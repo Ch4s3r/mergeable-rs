@@ -13,6 +13,12 @@
   ],
   "automergeStrategy": "squash",
   "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "labels": [
+      "security"
+    ],
+    "automerge": true
+  },
   "lockFileMaintenance": {
     "automerge": true
   },
