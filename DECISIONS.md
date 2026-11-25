@@ -149,7 +149,21 @@ Consequences: Repeated events on the same repository save the cached reads (meas
 `cache_lookups_total`); team, collaborator and topic changes are seen after at most `GITHUB_DATA_CACHE_TTL`.
 Several replicas share one cache through Valkey (`CACHE_STORAGE=valkey`).
 
-## ADR-014: Untrusted input limits and a mandatory webhook secret
+## ADR-014: An empty approvals limit does not filter approvals
+Status: accepted
+Context: With `limit` set, the `approvals` validator only counts approvals from the allowed set (`limit.teams`
+members, `limit.users`, CODEOWNERS of `limit.owners`). When that set is empty, for example `limit.owners: true`
+in a repository without a CODEOWNERS file, every approval was dropped and `min.count` failed, while
+`required.owners` already passes without a CODEOWNERS file. Upstream changed this in
+Ch4s3r/mergeable@528691515800307ac14685d05d68c1b4c63507ca.
+Decision: Follow upstream: `approvals::only_allowed_reviewers` narrows the approvals down to the allowed set only
+when the set is not empty; the info output "Only approvals from following sources are counted" stays.
+Consequences: A `limit` that resolves to nobody behaves like no `limit`. A team that does not exist or has no
+approving member no longer blocks approvals on its own. No recorded case (ADR-005) covers an empty allowed set;
+the upstream test "returns proper error when team provided is not found" mocks a non-approving team member that
+the membership lookup cannot return, so its Rust port asserts the lifted limit instead.
+
+## ADR-015: Untrusted input limits and a mandatory webhook secret
 Status: accepted
 Context: Repository configuration (`.github/mergeable.yml`, also from same-repository pull requests) and pull request
 data are untrusted. The security review (#20) found that a template nested about 20 000 levels deep overflowed the
