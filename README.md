@@ -62,6 +62,10 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). Ever
 2. `git cliff --bumped-version` computes the next semantic version from the commits since the last `v*` tag
    (`feat` bumps the minor version, `fix`/`perf`/others the patch version, while below 1.0.0; the first release is
    0.1.0). Without releasable commits nothing is published.
+   Only the run of the newest commit on `main` releases: a run whose commit is no longer the head of `main` (another
+   pull request was merged while it waited or built) skips publishing and tagging, and the newer run releases its
+   commits too, because `GITHUB_TOKEN` cannot tag a commit other than the head when its workflow files differ from it
+   (ADR-020).
 3. `build-image` builds the image with Paketo and publishes `ghcr.io/<owner>/<repo>:<version>` and `:latest`.
 4. `crane digest` resolves the digest of the published image and `syft` scans it into a CycloneDX and an SPDX SBOM
    (Ubuntu packages of the run image, Rust crates from `Cargo.lock`, tini and the buildpacks launcher).

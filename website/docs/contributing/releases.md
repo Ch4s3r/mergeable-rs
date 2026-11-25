@@ -16,6 +16,10 @@ Every push to `main` runs `.github/workflows/release.yml`:
    the last `v*` tag. While below 1.0.0, `feat` and breaking changes bump the minor version and `fix`, `perf` and the
    other types bump the patch version. The first release was 0.1.0. Without
    releasable commits nothing is published.
+   Only the run of the newest commit on `main` releases: a run whose commit is no longer the head of `main` (another
+   pull request was merged while it waited or built) skips publishing and tagging, and the newer run releases its
+   commits too, because `GITHUB_TOKEN` cannot tag a commit other than the head when its workflow files differ from it
+   (ADR-020).
 3. The image is built with Paketo buildpacks and published as `ghcr.io/ch4s3r/mergeable-rs:<version>` and
    `ghcr.io/ch4s3r/mergeable-rs:latest`, with the OCI labels for source, version and revision.
 4. [crane](https://github.com/google/go-containerregistry/tree/main/cmd/crane) resolves the digest of the published

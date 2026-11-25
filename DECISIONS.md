@@ -245,3 +245,19 @@ the docs workflow before each build, so it is not checked in `devenv test` (Reno
 otherwise fail).
 Consequences: A new dependency under another license, or a new RustSec advisory, fails the gate until it is
 reviewed. `devenv test` needs network access to GitHub to update the advisory database.
+
+## ADR-020: Only the head of main is released
+Status: accepted
+Context: Release runs share the concurrency group `release`, so a run can start after newer commits landed on `main`.
+Between 13:26 and 13:55 UTC on 2026-11-25 every such run failed at `gh release create` with `HTTP 403: Resource not
+accessible by integration` although the job token had `contents: write`: each tagged commit (38e5ed5, 1e73540,
+0e2cdc2) was no longer the head of `main`, and the head already carried changed workflow files (#31, #26, #28).
+Creating a tag on a non-head commit whose `.github/workflows` differ needs the `workflows` permission, which
+`GITHUB_TOKEN` cannot be granted (GitHub community discussion 121022: `contents: write` tags only the head commit,
+`workflows: write` any commit). Runs whose commit was the head (9007066 and earlier) succeeded.
+Decision: The release job compares `GITHUB_SHA` with `git ls-remote origin refs/heads/main` when it computes the
+version and again before tagging. A superseded commit is not published or tagged; the run of the newer head releases
+all commits since the last tag.
+Consequences: No failing release runs from merges in quick succession and no PAT or App token with `workflows`
+permission. If `main` moves during the image build, that version's image is published by the old run and published
+again by the newer run, which tags it.
