@@ -4,7 +4,7 @@ id = "mergeable-rust"
 
 [io.buildpacks]
 builder = "paketobuildpacks/ubuntu-noble-builder-buildpackless:0.0.231"
-exclude = ["target", "app-cases", "*.md", ".devenv*", ".direnv", ".github"]
+exclude = ["target", "tests", "*.md", ".devenv*", ".direnv", ".github"]
 
 [[io.buildpacks.group]]
 uri = "docker.io/paketocommunity/rust:0.92.4"

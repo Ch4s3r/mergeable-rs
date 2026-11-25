@@ -19,7 +19,7 @@
 | Scheduler | `scheduler` |
 | Errors | `error` |
 
-Contract tests: app-cases (381 recorded webhook scenarios), one generated Rust test each in
-`app/tests/contract_cases.rs` (app/build.rs), run in-process with the `replay` library (ADR-005).
+Contract tests: tests/cases (381 recorded webhook scenarios), one generated Rust test each in
+`app/tests/contract_cases.rs` (app/build.rs), run in-process with the mock GitHub API in `app/tests/contract/` (ADR-005).
 Gate: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run --workspace`,
 `cargo test --doc --workspace`.

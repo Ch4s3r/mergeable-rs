@@ -1,5 +1,5 @@
-use crate::case::{CaseDefinition, Stub};
-use crate::normalize::RecordedValueNormalizer;
+use super::case::{CaseDefinition, Stub};
+use super::normalize::RecordedValueNormalizer;
 use anyhow::Result;
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -11,7 +11,6 @@ use base64::Engine;
 use percent_encoding::percent_decode_str;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 use tokio::task::JoinHandle;
@@ -67,15 +66,13 @@ fn value_as_query_text(value: &Value) -> String {
 }
 
 struct MockState {
-    scenarios: Vec<Scenario>,
-    recording: bool,
+    scenario: Option<Scenario>,
     calls: Vec<Value>,
 }
 
 pub struct MockGithub {
     state: Mutex<MockState>,
     last_request_at: Mutex<Instant>,
-    requests_served: AtomicU64,
     normalizer: RecordedValueNormalizer,
 }
 
@@ -128,12 +125,10 @@ impl MockGithub {
     pub fn new(mock_origin: &str) -> Result<MockGithub> {
         Ok(MockGithub {
             state: Mutex::new(MockState {
-                scenarios: Vec::new(),
-                recording: false,
+                scenario: None,
                 calls: Vec::new(),
             }),
             last_request_at: Mutex::new(Instant::now()),
-            requests_served: AtomicU64::new(0),
             normalizer: RecordedValueNormalizer::new(mock_origin)?,
         })
     }
@@ -144,10 +139,9 @@ impl MockGithub {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    pub fn load_scenarios(&self, scenarios: Vec<Scenario>, recording: bool) {
+    pub fn load_scenario(&self, scenario: Scenario) {
         let mut state = self.locked_state();
-        state.scenarios = scenarios;
-        state.recording = recording;
+        state.scenario = Some(scenario);
         state.calls.clear();
     }
 
@@ -166,12 +160,7 @@ impl MockGithub {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    pub fn requests_served(&self) -> u64 {
-        self.requests_served.load(Ordering::Relaxed)
-    }
-
     fn note_request(&self) {
-        self.requests_served.fetch_add(1, Ordering::Relaxed);
         *self
             .last_request_at
             .lock()
@@ -196,36 +185,24 @@ impl MockGithub {
         body: &[u8],
     ) -> MockReply {
         let mut state = self.locked_state();
-        if state.recording {
-            let call = json!({
-                "method": method,
-                "path": path,
-                "query": self.normalizer.normalize(Value::Object(query.clone())),
-                "body": self.recorded_body(body),
-            });
-            state.calls.push(call);
-        }
-        let repository = repository_of_path(path);
-        let mut candidates: Vec<&Scenario> = state.scenarios.iter().collect();
-        if let Some(repository) = &repository {
-            candidates.sort_by_key(|scenario| &scenario.home_repository != repository);
-        }
-        if let Some(stub) = candidates
-            .iter()
-            .find_map(|scenario| scenario.matching_stub(method, path, query))
-        {
+        let call = json!({
+            "method": method,
+            "path": path,
+            "query": self.normalizer.normalize(Value::Object(query.clone())),
+            "body": self.recorded_body(body),
+        });
+        state.calls.push(call);
+        let Some(scenario) = &state.scenario else {
+            return MockReply::not_found();
+        };
+        if let Some(stub) = scenario.matching_stub(method, path, query) {
             return stub_reply(stub);
         }
         if method == "GET"
             && let Some((repository, file_path)) = contents_request(path)
+            && let Some(content) = scenario.file_content(&repository, &file_path)
         {
-            // ponytail: in bench mode a file of a shared repository (e.g. owner/.github) comes from the first case that lists it
-            if let Some(content) = candidates
-                .iter()
-                .find_map(|scenario| scenario.file_content(&repository, &file_path))
-            {
-                return file_reply(&file_path, content, accept);
-            }
+            return file_reply(&file_path, content, accept);
         }
         MockReply::not_found()
     }
@@ -278,13 +255,6 @@ fn file_reply(file_path: &str, content: &str, accept: &str) -> MockReply {
             "sha": "0000",
         }),
     )
-}
-
-fn repository_of_path(path: &str) -> Option<String> {
-    let mut segments = path.strip_prefix("/repos/")?.splitn(3, '/');
-    let owner = segments.next()?;
-    let repository = segments.next()?;
-    Some(format!("{owner}/{repository}"))
 }
 
 fn contents_request(path: &str) -> Option<(String, String)> {
