@@ -118,14 +118,14 @@ jobs:
             --output "spdx-json=mergeable-rs-$VERSION.spdx.json"
       - name: Attest the build provenance of the image
         if: steps.version.outputs.release == 'true'
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ steps.version.outputs.image }}
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: true
       - name: Attest the SBOM of the image
         if: steps.version.outputs.release == 'true'
-        uses: actions/attest-sbom@v4
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-name: ${{ steps.version.outputs.image }}
           subject-digest: ${{ steps.image.outputs.digest }}
