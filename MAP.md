@@ -3,6 +3,7 @@
 | Area | Rust module (src) |
 |---|---|
 | Entry point, environment snapshot, server startup | `main`, `app_config` (`Environment`), `server::start`, `logging` |
+| OpenTelemetry export (OTEL_* settings, providers, spans of GitHub requests, trace propagation) | `telemetry` |
 | Per-instance state (behaviour settings, caches) | `app_state` |
 | HTTP routes, webhook verification, metrics | `server`, `metrics` |
 | Event context | `context`, `event_aware` |

@@ -4,10 +4,12 @@ use crate::github::client::{
     DEFAULT_ACCEPT, api_error_message, encode_uri_component, next_page_url,
 };
 use crate::json_value;
+use crate::telemetry;
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use reqwest::header::{ACCEPT, AUTHORIZATION, LINK};
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::Instrument;
 
 const JWT_BACKDATE_SECONDS: u64 = 30;
 const JWT_LIFETIME_SECONDS: u64 = 600;
@@ -102,18 +104,33 @@ impl AppJwtClient {
     }
 
     async fn send(&self, request: reqwest::RequestBuilder) -> Result<PageResponse> {
-        let response = request
+        let mut request = request
             .header(ACCEPT, DEFAULT_ACCEPT)
-            .send()
-            .await
+            .build()
             .map_err(|error| Error::http(500, error.to_string()))?;
-        let status = response.status().as_u16();
-        let next_url = response
-            .headers()
-            .get(LINK)
-            .and_then(|link| link.to_str().ok())
-            .and_then(next_page_url);
-        let data: Value = response.json().await.unwrap_or(Value::Null);
+        let request_span = telemetry::github_request_span(request.method(), request.url().path());
+        telemetry::propagate_trace(&request_span, request.headers_mut());
+        let (status, next_url, data) = async {
+            let response = self
+                .http
+                .execute(request)
+                .await
+                .map_err(|error| Error::http(500, error.to_string()))?;
+            let status = response.status().as_u16();
+            let next_url = response
+                .headers()
+                .get(LINK)
+                .and_then(|link| link.to_str().ok())
+                .and_then(next_page_url);
+            let data: Value = response.json().await.unwrap_or(Value::Null);
+            Ok::<_, Error>((status, next_url, data))
+        }
+        .instrument(request_span.clone())
+        .await
+        .inspect_err(|error| {
+            telemetry::record_response_status(&request_span, error.status(), true);
+        })?;
+        telemetry::record_response_status(&request_span, Some(status), status >= 400);
         if status >= 400 {
             return Err(Error::http(status, api_error_message(&data)));
         }

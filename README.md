@@ -275,6 +275,7 @@ recording new cases and the benchmark harness are no longer part of the reposito
 | `GITHUB_RETRY_BASE_MS` | Base delay of the retry back-off for failed GitHub requests | `1000` |
 | `MAX_CONCURRENT_WEBHOOKS` | Webhooks processed at the same time; a further webhook waits for a free slot and is answered `503` if none frees up within 9 s (zero or invalid values use the default) | `64` |
 | `OUTGOING_HTTP_CONNECT_TIMEOUT`, `OUTGOING_HTTP_TIMEOUT` | Connect timeout and whole-request timeout in seconds of the requests to GitHub and Jira (zero or invalid values use the default) | `10`, `60` |
+| `OTEL_*` | OpenTelemetry export of traces, metrics and logs, see [OpenTelemetry](#opentelemetry) | off |
 
 ## Routes
 
@@ -296,6 +297,45 @@ recording new cases and the benchmark harness are no longer part of the reposito
   `http_response_length_bytes` with labels `route` (ids masked as `#val`), `method`, `status` (`2XX`..`5XX`), and
   `cache_lookups_total` with labels `cache` (`configuration`, `settings`, `topics`, `team_members`,
   `team_memberships`, `collaborators`, `repository_topics`, `organization_config`) and `result` (`hit`, `miss`).
+
+## OpenTelemetry
+
+mergeable-rs exports traces, metrics and logs over OTLP to an OpenTelemetry Collector or any OTLP backend. It is
+configured only through the standard `OTEL_*` environment variables of the OpenTelemetry SDK; without any of them
+nothing is exported and stdout logs and `/metrics` behave as before.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint for all signals; setting it turns on the export of traces, metrics and logs | off |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `..._METRICS_ENDPOINT`, `..._LOGS_ENDPOINT` | Endpoint of one signal; setting it turns on the export of that signal | - |
+| `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` | `otlp` turns the signal on (default endpoint `http://localhost:4318`, `http://localhost:4317` for gRPC), `none` turns it off; other exporters are not supported and logged as ignored | `otlp` when an endpoint is set |
+| `OTEL_SDK_DISABLED` | `true` turns every export off | `false` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` and `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_PROTOCOL` | `http/protobuf` or `grpc` | `http/protobuf` |
+| `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_INSECURE` and their per-signal variants | Headers (for example an API key; never recorded in telemetry), timeout in milliseconds, plaintext gRPC (`true`) | -, `10000`, `false` |
+| `OTEL_SERVICE_NAME` | `service.name` resource attribute | `mergeable` |
+| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes (`key=value,...`) | - |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Sampler, for example `parentbased_traceidratio` with `0.1` | `parentbased_always_on` |
+| `OTEL_PROPAGATORS` | `tracecontext`, `baggage` or `none` (comma-separated) | `tracecontext,baggage` |
+| `OTEL_BSP_*`, `OTEL_BLRP_*` | Batch span / log record processor (schedule delay, queue and batch size, export timeout) | SDK defaults |
+| `OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_METRIC_EXPORT_TIMEOUT` | Metric export interval and timeout in milliseconds | `60000`, SDK default |
+
+- **Traces**: a `webhook` server span per delivery (continuing an incoming W3C `traceparent`), the `event` span of
+  the workflow, `rule.filter` and `rule` spans per rule with `filter`, `validator` and `action` children, and a
+  `github.request` client span per GitHub API call (method, templated path, status). The trace context is sent to
+  GitHub as `traceparent`.
+- **Logs**: every log event that goes to stdout is also exported, with the trace and span id of the span it was logged in.
+- **Metrics**: the metrics of `GET /metrics` are also exported (`/metrics` keeps working): `github.ratelimit.remaining`,
+  `github.ratelimit.limit` (attribute `github.installation.id`), `http.server.request.duration` (`http.route`,
+  `http.request.method`, `http.response.status_code`) and `cache.lookups` (`cache.name`, `cache.result`).
+
+Secrets (the private key, the webhook secret, installation tokens, the OTLP headers) are never recorded as span or log
+attributes. Buffered telemetry is flushed when the process stops on `SIGTERM` or `SIGINT`. Example for a Collector
+in the same pod:
+
+```shell
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production
+```
 
 ## Caching
 

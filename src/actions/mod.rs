@@ -71,6 +71,11 @@ pub fn spawn_detached(
     );
 }
 
+#[tracing::instrument(
+    name = "action",
+    skip_all,
+    fields(action.name = action.name(), action.phase = "before_validate")
+)]
 pub async fn process_before_validate(
     action: &dyn Action,
     context: &Context,
@@ -85,6 +90,11 @@ pub async fn process_before_validate(
     action.before_validate(context, rule, rule_name).await
 }
 
+#[tracing::instrument(
+    name = "action",
+    skip_all,
+    fields(action.name = action.name(), action.phase = "after_validate")
+)]
 pub async fn process_after_validate(
     action: &dyn Action,
     context: &Context,

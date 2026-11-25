@@ -59,6 +59,7 @@ pub fn is_event_supported(filter: &dyn Filter, event_name: &str) -> bool {
     crate::event_aware::is_event_supported(filter.supported_events(), event_name)
 }
 
+#[tracing::instrument(name = "filter", skip_all, fields(filter.name = filter.name()))]
 pub async fn process_filter(
     filter: &dyn Filter,
     context: &Context,

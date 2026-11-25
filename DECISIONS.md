@@ -327,3 +327,25 @@ the binary does not load (OpenSSL) are dismissed in code scanning as "won't fix"
 Consequences: About a third of the findings remain (glibc and OpenSSL of noble) until Ubuntu ships fixes, which the
 weekly run image update picks up. No `docker exec ... sh` into the container; debug with an ephemeral debug
 container. A Paketo update releases a new patch version even without code changes.
+
+## ADR-025: OpenTelemetry export configured only by the standard OTEL_* variables
+Status: accepted
+Context: Logs went only to stdout, metrics only to `/metrics`, and there were no traces (issue #39). Operators want
+to send all three to an OpenTelemetry Collector or OTLP backend without learning app-specific settings.
+Decision: The official crates (`opentelemetry`, `opentelemetry_sdk`, `opentelemetry-otlp` 0.33,
+`opentelemetry-appender-tracing` 0.33, `tracing-opentelemetry` 0.34) add an OTLP span layer and a log bridge to
+the existing `tracing` subscriber, each behind its own filter; the log bridge drops the events of the exporter's own
+crates so exporting cannot feed itself. Only standard variables configure it: `telemetry::TelemetrySettings` decides
+per signal whether to export (an OTLP endpoint, or `OTEL_{SIGNAL}_EXPORTER=otlp`; `none` and
+`OTEL_SDK_DISABLED=true` turn it off) and which propagators to install; endpoint, protocol, headers, timeouts,
+sampler, batching, export interval and resource attributes are left to the SDK and exporter builders, which read
+them themselves. `service.name` defaults to `mergeable`. The exporters use the SDK's default background-thread
+processors, so OTLP/HTTP uses the blocking reqwest client and gRPC uses tonic, both on rustls. Metrics are written
+twice, to the `prometheus-client` registry and to OTel instruments of the global meter, instead of bridging the
+Prometheus registry (no maintained bridge for `prometheus-client` exists). `main` stops the server on `SIGTERM` /
+`SIGINT` and then shuts the providers down, which flushes them.
+Consequences: Without `OTEL_*` variables no provider is created and the subscriber has only the stdout layer, so
+behaviour and recorded cases are unchanged; the process now also exits cleanly on `SIGTERM`. Span and metric
+attributes carry only names, templated paths, statuses and ids, never request headers or tokens. The HTTP server
+duration metric still covers only fall-through routes, like `/metrics`. Exporting adds tonic and prost to the
+dependency tree.

@@ -22,6 +22,7 @@ pub mod results;
 pub mod scheduler;
 pub mod server;
 pub mod settings;
+pub mod telemetry;
 pub mod template;
 pub mod validators;
 pub mod value_lists;

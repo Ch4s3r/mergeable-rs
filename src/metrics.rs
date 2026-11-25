@@ -1,3 +1,5 @@
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::Meter;
 use prometheus_client::encoding::EncodeLabelSet;
 use prometheus_client::encoding::text::encode;
 use prometheus_client::metrics::counter::Counter;
@@ -78,8 +80,54 @@ fn header_number(headers: &HeaderMap, name: &str) -> f64 {
         .map_or(f64::NAN, crate::json_value::parse_decimal_number)
 }
 
+struct ExportedInstruments {
+    rate_limit_remaining: opentelemetry::metrics::Gauge<f64>,
+    rate_limit_limit: opentelemetry::metrics::Gauge<f64>,
+    http_request_duration: opentelemetry::metrics::Histogram<f64>,
+    cache_lookups: opentelemetry::metrics::Counter<u64>,
+}
+
+impl ExportedInstruments {
+    fn new(meter: &Meter) -> Self {
+        ExportedInstruments {
+            rate_limit_remaining: meter
+                .f64_gauge("github.ratelimit.remaining")
+                .with_description("GitHub API requests remaining in the rate limit window")
+                .with_unit("{request}")
+                .build(),
+            rate_limit_limit: meter
+                .f64_gauge("github.ratelimit.limit")
+                .with_description("GitHub API requests allowed in the rate limit window")
+                .with_unit("{request}")
+                .build(),
+            http_request_duration: meter
+                .f64_histogram("http.server.request.duration")
+                .with_description("Duration of HTTP requests")
+                .with_unit("s")
+                .with_boundaries(exponential_buckets(0.05, 1.75, 8).collect())
+                .build(),
+            cache_lookups: meter
+                .u64_counter("cache.lookups")
+                .with_description("Cache lookups by cache and result (hit or miss)")
+                .with_unit("{lookup}")
+                .build(),
+        }
+    }
+}
+
+fn record_when_known(
+    gauge: &opentelemetry::metrics::Gauge<f64>,
+    value: f64,
+    attributes: &[KeyValue],
+) {
+    if value.is_finite() {
+        gauge.record(value, attributes);
+    }
+}
+
 pub struct Metrics {
     registry: Registry,
+    exported: ExportedInstruments,
     rate_limit_remaining: Family<InstallationLabels, Gauge<f64, AtomicU64>>,
     rate_limit_limit: Family<InstallationLabels, Gauge<f64, AtomicU64>>,
     http_requests: Family<HttpRequestLabels, Counter>,
@@ -104,6 +152,13 @@ impl Default for Metrics {
 impl Metrics {
     #[must_use]
     pub fn new() -> Self {
+        Self::with_meter(&opentelemetry::global::meter(
+            crate::telemetry::INSTRUMENTATION_SCOPE,
+        ))
+    }
+
+    #[must_use]
+    pub fn with_meter(meter: &Meter) -> Self {
         let mut registry = Registry::default();
         let rate_limit_remaining = Family::<InstallationLabels, Gauge<f64, AtomicU64>>::default();
         let rate_limit_limit = Family::<InstallationLabels, Gauge<f64, AtomicU64>>::default();
@@ -168,6 +223,7 @@ impl Metrics {
         );
         Metrics {
             registry,
+            exported: ExportedInstruments::new(meter),
             rate_limit_remaining,
             rate_limit_limit,
             http_requests,
@@ -182,17 +238,34 @@ impl Metrics {
             result: if hit { "hit" } else { "miss" }.to_string(),
         };
         self.cache_lookups.get_or_create(&labels).inc();
+        self.exported.cache_lookups.add(
+            1,
+            &[
+                KeyValue::new("cache.name", labels.cache),
+                KeyValue::new("cache.result", labels.result),
+            ],
+        );
     }
 
     pub fn record_rate_limit(&self, installation_id: u64, headers: &HeaderMap) {
         let labels: InstallationLabels =
             vec![("installationId".to_string(), installation_id.to_string())];
+        let remaining = header_number(headers, "x-ratelimit-remaining");
+        let limit = header_number(headers, "x-ratelimit-limit");
         self.rate_limit_remaining
             .get_or_create(&labels)
-            .set(header_number(headers, "x-ratelimit-remaining"));
-        self.rate_limit_limit
-            .get_or_create(&labels)
-            .set(header_number(headers, "x-ratelimit-limit"));
+            .set(remaining);
+        self.rate_limit_limit.get_or_create(&labels).set(limit);
+        let installation = [KeyValue::new(
+            "github.installation.id",
+            i64::try_from(installation_id).unwrap_or(i64::MAX),
+        )];
+        record_when_known(
+            &self.exported.rate_limit_remaining,
+            remaining,
+            &installation,
+        );
+        record_when_known(&self.exported.rate_limit_limit, limit, &installation);
     }
 
     pub fn record_http_request(&self, method: &str, path: &str, status: u16, seconds: f64) {
@@ -209,6 +282,14 @@ impl Metrics {
         self.http_request_duration
             .get_or_create(&labels)
             .observe(seconds);
+        self.exported.http_request_duration.record(
+            seconds,
+            &[
+                KeyValue::new("http.route", labels.route),
+                KeyValue::new("http.request.method", labels.method),
+                KeyValue::new("http.response.status_code", i64::from(status)),
+            ],
+        );
     }
 
     #[must_use]
@@ -264,6 +345,35 @@ mod tests {
         );
         assert!(!rendered.contains(r#"route="/metrics""#));
         assert!(rendered.contains(r#"http_request_duration_seconds_bucket{le="0.05",route="/nope/#val",method="GET",status="4XX"} 1"#));
+    }
+
+    #[test]
+    fn recorded_metrics_are_also_exported_through_opentelemetry() {
+        let exporter = opentelemetry_sdk::metrics::InMemoryMetricExporter::default();
+        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+            .with_periodic_exporter(exporter.clone())
+            .build();
+        let metrics = Metrics::with_meter(&opentelemetry::metrics::MeterProvider::meter(
+            &meter_provider,
+            "test",
+        ));
+        metrics.record_http_request("GET", "/nope/42", 404, 0.01);
+        metrics.record_cache_lookup("settings", true);
+        metrics.record_rate_limit(4242, &HeaderMap::new());
+        assert!(meter_provider.force_flush().is_ok());
+        let exported_names: Vec<String> = exporter
+            .get_finished_metrics()
+            .unwrap_or_default()
+            .iter()
+            .flat_map(opentelemetry_sdk::metrics::data::ResourceMetrics::scope_metrics)
+            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .map(|metric| metric.name().to_string())
+            .collect();
+        assert!(exported_names.contains(&"http.server.request.duration".to_string()));
+        assert!(exported_names.contains(&"cache.lookups".to_string()));
+        assert!(!exported_names.contains(&"github.ratelimit.remaining".to_string()));
+        let rendered = metrics.render();
+        assert!(rendered.contains(r#"cache_lookups_total{cache="settings",result="hit"} 1"#));
     }
 
     #[test]

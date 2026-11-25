@@ -4,7 +4,8 @@ title: Operations
 
 # Operations
 
-This page covers running mergeable-rs in production: routes, health checks, metrics, logs and the GitHub rate limit.
+This page covers running mergeable-rs in production: routes, health checks, metrics, logs, OpenTelemetry export and
+the GitHub rate limit.
 See also [Caching](./caching.md) (including scaling to several replicas) and [Scheduler](./scheduler.md).
 
 ## Routes
@@ -56,6 +57,45 @@ Logs go to standard output as structured JSON, one event per line, with named fi
 `LOG_LEVEL` sets the level of the app's own logs: `trace`, `debug`, `info` (default), `warn`, `error` or `fatal`
 (same as `error`). Logs of libraries are shown from `warn`. `LOG_CONFIG` (any non-empty value) logs the loaded
 configuration.
+
+## OpenTelemetry
+
+mergeable-rs exports traces, metrics and logs over OTLP to an OpenTelemetry Collector or any OTLP backend. It is
+configured only through the standard `OTEL_*` environment variables of the OpenTelemetry SDK; without any of them
+nothing is exported and stdout logs and `/metrics` behave as before.
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint for all signals; setting it turns on the export of traces, metrics and logs | off |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `..._METRICS_ENDPOINT`, `..._LOGS_ENDPOINT` | Endpoint of one signal; setting it turns on the export of that signal | - |
+| `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` | `otlp` turns the signal on (default endpoint `http://localhost:4318`, `http://localhost:4317` for gRPC), `none` turns it off; other exporters are not supported and logged as ignored | `otlp` when an endpoint is set |
+| `OTEL_SDK_DISABLED` | `true` turns every export off | `false` |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` and `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_PROTOCOL` | `http/protobuf` or `grpc` | `http/protobuf` |
+| `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TIMEOUT`, `OTEL_EXPORTER_OTLP_INSECURE` and their per-signal variants | Headers (for example an API key; never recorded in telemetry), timeout in milliseconds, plaintext gRPC (`true`) | -, `10000`, `false` |
+| `OTEL_SERVICE_NAME` | `service.name` resource attribute | `mergeable` |
+| `OTEL_RESOURCE_ATTRIBUTES` | Extra resource attributes (`key=value,...`) | - |
+| `OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG` | Sampler, for example `parentbased_traceidratio` with `0.1` | `parentbased_always_on` |
+| `OTEL_PROPAGATORS` | `tracecontext`, `baggage` or `none` (comma-separated) | `tracecontext,baggage` |
+| `OTEL_BSP_*`, `OTEL_BLRP_*` | Batch span / log record processor (schedule delay, queue and batch size, export timeout) | SDK defaults |
+| `OTEL_METRIC_EXPORT_INTERVAL`, `OTEL_METRIC_EXPORT_TIMEOUT` | Metric export interval and timeout in milliseconds | `60000`, SDK default |
+
+- **Traces**: a `webhook` server span per delivery (continuing an incoming W3C `traceparent`), the `event` span of
+  the workflow, `rule.filter` and `rule` spans per rule with `filter`, `validator` and `action` children, and a
+  `github.request` client span per GitHub API call (method, templated path, status). The trace context is sent to
+  GitHub as `traceparent`.
+- **Logs**: every log event that goes to stdout is also exported, with the trace and span id of the span it was logged in.
+- **Metrics**: the metrics of [Metrics](#metrics) are also exported (`/metrics` keeps working): `github.ratelimit.remaining`,
+  `github.ratelimit.limit` (attribute `github.installation.id`), `http.server.request.duration` (`http.route`,
+  `http.request.method`, `http.response.status_code`) and `cache.lookups` (`cache.name`, `cache.result`).
+
+Secrets (the private key, the webhook secret, installation tokens, the OTLP headers) are never recorded as span or log
+attributes. Buffered telemetry is flushed when the process stops on `SIGTERM` or `SIGINT`. Example for a Collector
+in the same pod:
+
+```shell
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=production
+```
 
 ## GitHub rate limit and throttling
 

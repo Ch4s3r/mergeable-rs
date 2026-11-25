@@ -8,6 +8,7 @@ use crate::github::throttle::RequestThrottle;
 use crate::json_value;
 use crate::metrics::{self, Metrics};
 use crate::scheduler::Scheduler;
+use crate::telemetry::{self, Signal};
 use crate::workflow;
 use axum::Router;
 use axum::body::Bytes;
@@ -102,24 +103,49 @@ impl RunningServer {
         outcome
     }
 
-    pub async fn shutdown(self) -> std::result::Result<(), StartupError> {
+    pub async fn serve_until(
+        self,
+        stop_requested: impl Future<Output = ()>,
+    ) -> std::result::Result<(), StartupError> {
         let RunningServer {
             shutdown_signal,
             mut serving,
             ..
         } = self;
-        let _ = shutdown_signal.send(());
-        if let Ok(joined) = tokio::time::timeout(GRACEFUL_SHUTDOWN_LIMIT, &mut serving).await {
-            return serving_outcome(joined);
+        tokio::select! {
+            joined = &mut serving => {
+                drop(shutdown_signal);
+                return serving_outcome(joined);
+            }
+            () = stop_requested => {}
         }
-        serving.abort();
-        Ok(())
+        stop_gracefully(shutdown_signal, serving).await
+    }
+
+    pub async fn shutdown(self) -> std::result::Result<(), StartupError> {
+        let RunningServer {
+            shutdown_signal,
+            serving,
+            ..
+        } = self;
+        stop_gracefully(shutdown_signal, serving).await
     }
 }
 
+async fn stop_gracefully(
+    shutdown_signal: oneshot::Sender<()>,
+    mut serving: JoinHandle<std::io::Result<()>>,
+) -> std::result::Result<(), StartupError> {
+    let _ = shutdown_signal.send(());
+    if let Ok(joined) = tokio::time::timeout(GRACEFUL_SHUTDOWN_LIMIT, &mut serving).await {
+        return serving_outcome(joined);
+    }
+    serving.abort();
+    Ok(())
+}
+
 pub async fn start(config: AppConfig) -> std::result::Result<RunningServer, StartupError> {
-    let metrics = config
-        .metrics_endpoint_enabled
+    let metrics = (config.metrics_endpoint_enabled || config.telemetry.exports(Signal::Metrics))
         .then(|| Arc::new(Metrics::new()));
     let github = Arc::new(GithubApp::new(
         GithubAppSettings {
@@ -210,18 +236,15 @@ pub struct ServerState {
 
 pub fn router(config: &AppConfig, state: ServerState) -> Router {
     let mut fall_through_routes: Router<ServerState> = Router::new().fallback(not_found_page);
-    if let Some(registry) = state
-        .metrics
-        .clone()
-        .filter(|_| config.metrics_endpoint_enabled)
-    {
-        fall_through_routes = fall_through_routes
-            .route(metrics::METRICS_PATH, get(render_metrics))
-            .layer(axum::middleware::from_fn(
-                move |request: Request, next: Next| {
-                    record_request_metrics(Arc::clone(&registry), request, next)
-                },
-            ));
+    if config.metrics_endpoint_enabled {
+        fall_through_routes = fall_through_routes.route(metrics::METRICS_PATH, get(render_metrics));
+    }
+    if let Some(registry) = state.metrics.clone() {
+        fall_through_routes = fall_through_routes.layer(axum::middleware::from_fn(
+            move |request: Request, next: Next| {
+                record_request_metrics(Arc::clone(&registry), request, next)
+            },
+        ));
     }
     let mut router = Router::new()
         .route(
@@ -433,8 +456,32 @@ async fn receive_webhook(
     let delivery_id = header_text(&headers, "x-github-delivery").to_string();
     let webhook_slots = Arc::clone(&state.webhook_slots);
     let overload_log_fields = (delivery_id.clone(), event_name.clone());
-    let handler = handle_event(state, delivery_id, event_name, SharedPayload::from(payload));
-    match handle_within_answer_window(webhook_slots, STILL_PROCESSING_AFTER, handler).await {
+    let webhook_span = tracing::info_span!(
+        "webhook",
+        otel.kind = "server",
+        github.event = %event_name,
+        github.delivery_id = %delivery_id,
+        http.response.status_code = tracing::field::Empty,
+        otel.status_code = tracing::field::Empty,
+    );
+    telemetry::continue_incoming_trace(&webhook_span, &headers);
+    let handler = handle_event(state, delivery_id, event_name, SharedPayload::from(payload))
+        .instrument(webhook_span.clone());
+    let response = webhook_response(
+        handle_within_answer_window(webhook_slots, STILL_PROCESSING_AFTER, handler).await,
+        overload_log_fields,
+    );
+    let status = response.status();
+    telemetry::record_response_status(
+        &webhook_span,
+        Some(status.as_u16()),
+        status.is_server_error(),
+    );
+    response
+}
+
+fn webhook_response(handling: WebhookHandling, overload_log_fields: (String, String)) -> Response {
+    match handling {
         WebhookHandling::Overloaded => {
             let (delivery_id, event_name) = overload_log_fields;
             tracing::warn!(%delivery_id, %event_name, "webhook.rejected.overloaded");
