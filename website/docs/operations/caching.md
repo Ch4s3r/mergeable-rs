@@ -21,11 +21,31 @@ configured with `CACHE_REDIS_HOST`, `CACHE_REDIS_PORT` and `CACHE_REDIS_DB` (def
 `CACHE_TTL` sets the time to live in seconds of the configuration, settings and topic cache entries (also used as the
 Redis `SETEX` ttl); without it they do not expire.
 
+## Authentication and TLS
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `CACHE_REDIS_PASSWORD` | password sent with `AUTH` | the value of `CACHE_REDIS_HOST` |
+| `CACHE_REDIS_USERNAME` | ACL user sent with `AUTH` (only together with a password) | none (`default` user) |
+| `CACHE_REDIS_TLS` | `true` connects over TLS (like a `rediss://` URL) | off |
+
+Without `CACHE_REDIS_PASSWORD` the value of `CACHE_REDIS_HOST` is sent as the Redis `AUTH` password (behaviour of
+the original implementation); a server without a password that rejects that `AUTH` is used without one. With
+`CACHE_REDIS_PASSWORD` (and optionally `CACHE_REDIS_USERNAME` for an ACL user) exactly those credentials are sent and
+a rejected `AUTH` is an error. `CACHE_REDIS_TLS=true` encrypts the connection with TLS (rustls) and verifies the
+server certificate and host name against the system root certificates; point `SSL_CERT_FILE` at a PEM bundle to trust
+a private CA.
+
+```bash
+CACHE_STORAGE=valkey CACHE_REDIS_HOST=valkey.internal CACHE_REDIS_PORT=6380 CACHE_REDIS_TLS=true \
+CACHE_REDIS_USERNAME=mergeable CACHE_REDIS_PASSWORD=change-me \
+  mergeable
+```
+
 :::note
 
-The value of `CACHE_REDIS_HOST` is also sent as the Redis `AUTH` password; a server without a password that rejects the
-`AUTH` is used without one. There is no `CACHE_REDIS_PASSWORD` setting. Redis errors are logged and treated as a cache
-miss instead of failing the webhook.
+Redis errors (including a rejected password or certificate) are logged and treated as a cache miss instead of failing
+the webhook.
 
 :::
 
