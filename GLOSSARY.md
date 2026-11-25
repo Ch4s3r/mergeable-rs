@@ -15,4 +15,4 @@
 | configuration | .github/mergeable.yml | `configuration` |
 | validation result | {status, name, validations:[...]} | `Value` |
 | special annotation | @author, @bot, @sender, @action, @repository | `annotations` |
-| case | one recorded webhook scenario with its expected GitHub calls | app-cases, `replay` |
+| case | one recorded webhook scenario with its expected GitHub calls | tests/cases, `contract::case::Case` (app/tests) |

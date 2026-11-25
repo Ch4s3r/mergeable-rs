@@ -1,8 +1,9 @@
 # Benchmark
 
-Harness: `replay bench` (replay) starts the app and a mock GitHub API that answers instantly, then fires N
-signed webhooks drawn round-robin from the listed recorded cases with C in flight. Apple Silicon, macOS, release
-build. Result files are produced with `--json`.
+The numbers below are historical: they were measured with the former `replay bench` harness, which has since been
+removed together with the `replay` crate (there is no benchmark harness in the repository anymore). It started the
+app and a mock GitHub API that answered instantly, then fired N signed webhooks drawn round-robin from the listed
+recorded cases with C in flight. Apple Silicon, macOS, release build.
 
 ## Read path (2026-11-21)
 

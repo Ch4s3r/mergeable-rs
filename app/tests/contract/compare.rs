@@ -1,4 +1,4 @@
-use crate::normalize::canonical_text;
+use super::normalize::canonical_text;
 use serde_json::Value;
 
 #[derive(Debug, PartialEq)]

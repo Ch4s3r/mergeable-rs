@@ -41,9 +41,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 [dev-dependencies]
-replay = { path = "../replay" }
-rsa = { version = "0.10", features = ["encoding"] }
+anyhow = "1"
+form_urlencoded = "1"
 pretty_assertions = "1"
+rsa = { version = "0.10", features = ["encoding"] }
 
 [lints]
 workspace = true

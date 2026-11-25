@@ -1,13 +1,15 @@
+mod contract;
+
+use contract::case::Case;
+use contract::mock::MockServer;
+use contract::runner::{self, Outcome};
 use mergeable::app_config::{AppConfig, Environment};
 use mergeable::server;
-use replay::case::Case;
-use replay::contract::{self, Outcome};
-use replay::mock::MockServer;
 use std::path::PathBuf;
 
 fn case_path(case_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../app-cases/cases")
+        .join("../tests/cases")
         .join(format!("{case_name}.json"))
 }
 
@@ -17,7 +19,7 @@ async fn run_contract_case(case_name: &str) {
     let mock = MockServer::start()
         .await
         .unwrap_or_else(|error| panic!("starting the mock GitHub API: {error:#}"));
-    let environment: Environment = contract::in_process_app_environment(mock.port, &case)
+    let environment: Environment = runner::in_process_app_environment(mock.port, &case)
         .unwrap_or_else(|error| panic!("building the app environment: {error:#}"))
         .into_iter()
         .collect();
@@ -27,22 +29,22 @@ async fn run_contract_case(case_name: &str) {
     let running_app = server::start(config)
         .await
         .unwrap_or_else(|error| panic!("starting the app: {error}"));
-    let case_run = contract::exercise_case(
+    let case_run = runner::exercise_case(
         &mock,
         running_app.address().port(),
         &webhook_path,
         &case,
-        contract::case_quiet_period(&case, contract::DEFAULT_QUIET_PERIOD),
+        runner::case_quiet_period(&case, runner::DEFAULT_QUIET_PERIOD),
     )
     .await;
     let shutdown = running_app.shutdown().await;
     mock.stop();
     let case_run = case_run.unwrap_or_else(|error| panic!("running case {case_name}: {error:#}"));
     shutdown.unwrap_or_else(|error| panic!("stopping the app: {error}"));
-    let (outcome, detail) = contract::judge(&case, &case_run);
+    let (outcome, detail) = runner::judge(&case, &case_run);
     if outcome == Outcome::Fail && case.definition.known_diff.is_none() {
         let detail = detail.unwrap_or_default();
-        let texts = contract::comparable_texts(&case, &case_run);
+        let texts = runner::comparable_texts(&case, &case_run);
         pretty_assertions::assert_eq!(
             texts.expected,
             texts.actual,

@@ -8,13 +8,9 @@ result as check runs, comments, labels and assignees. One Rust binary, `mergeabl
 endpoint and the optional rate-limit and Prometheus routes. It reads `.github/mergeable.yml` and
 `.github/mergeable.settings.yml` from the repository and is configured through environment variables.
 
-The workspace has two crates:
-
-- `app` (package `mergeable`): the server, the rule engine and the GitHub client.
-- `replay`: library and CLI for the black-box contract tests: a mock GitHub API, case loading, webhook signing and
-  call comparison. Each recorded webhook scenario is an ordinary Rust test of `app` (`app/tests/contract_cases.rs`)
-  that runs the server in-process; the CLI records cases and benchmarks a binary (see
-  [app-cases/README.md](app-cases/README.md)).
+The workspace has one crate, `app` (package `mergeable`): the server, the rule engine and the GitHub client.
+The black-box contract tests (recorded webhook scenarios in `tests/cases`) are ordinary Rust integration tests of
+`app` (`app/tests/contract_cases.rs`, support code in `app/tests/contract/`); see [Contract tests](#contract-tests).
 
 Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.md). Terms:
 [GLOSSARY.md](GLOSSARY.md). Performance: [BENCHMARK.md](BENCHMARK.md).
@@ -95,9 +91,22 @@ cargo nextest run --workspace     # unit tests and the 381 recorded webhook case
 cargo test --doc --workspace
 ```
 
-The contract cases are generated tests (one per `app-cases/cases/<name>.json`, named after the case with `-`
-replaced by `_`). Each starts the mock GitHub API and the app in-process, sends the signed webhook and compares
-the GitHub calls with the recording. Run them alone or pick one:
+The Redis round trip test needs a local server and is ignored by default:
+
+```sh
+redis-server --port 6392 --save '' --daemonize yes
+REDIS_TEST_PORT=6392 cargo test -p mergeable live_redis -- --ignored
+```
+
+## Contract tests
+
+Each file `tests/cases/<name>.json` is one recorded webhook scenario (ADR-005). `app/build.rs` generates one test
+per case file in `app/tests/contract_cases.rs` (`action-assign-author` becomes `action_assign_author`); without a
+`tests/cases` directory it generates none. Each test starts the mock GitHub API (`app/tests/contract/`) and the app
+in-process (`mergeable::server::start` on port 0) with a fixed test environment (seeded test App key, `GHE_HOST` of the mock) plus the case `env`, sends the signed
+webhook and compares the GitHub API calls the app makes and its HTTP response with the recorded expectation. A case
+passes when the calls match, also when only the order differs; a case with `known_diff` does not fail on a
+difference. A failing case prints the first differing call and a diff of all calls. Run them alone or pick one:
 
 ```sh
 cargo nextest run --test contract_cases
@@ -105,12 +114,51 @@ cargo nextest run --test contract_cases validator_title_must_include_fail
 cargo test --test contract_cases            # plain cargo test works too, in one process
 ```
 
-The Redis round trip test needs a local server and is ignored by default:
+The 381 cases were recorded from the reference implementation. The former `replay` crate, whose CLI recorded new
+cases (`replay record`), ran them against a built binary and benchmarked it (`replay bench`), has been removed;
+recording new cases and the benchmark harness are no longer part of the repository.
 
-```sh
-redis-server --port 6392 --save '' --daemonize yes
-REDIS_TEST_PORT=6392 cargo test -p mergeable live_redis -- --ignored
+### Case format
+
+```jsonc
+{
+  "name": "title-must-include-fail",          // = file name without .json
+  "description": "what this case proves",
+  "env": { "APP_NAME": "Mergeable" },          // optional extra env vars for the app (this case only)
+  "event": "pull_request",                     // X-GitHub-Event header
+  "payload": { ... },                          // webhook body; must contain installation.id and repository (owner.login, name, full_name)
+  "files": {                                   // sugar: repository files served by GET /repos/{owner}/{repo}/contents/{path}
+    ".github/mergeable.yml": "version: 2\nmergeable: ...",      // key "path" = payload repository
+    "acme/.github:.github/mergeable.settings.yml": "..."          // key "owner/repo:path" = other repository
+  },                                           // a path not listed answers 404
+  "github": [                                  // stubbed responses, first match wins
+    { "method": "GET", "path": "/repos/acme/app/pulls/1/files", "query": {"page": "2"},   // query optional: subset match
+      "status": 200, "headers": {"link": "..."}, "body": [ ... ] }
+  ],
+  "expected": {                                // recorded from the reference implementation, never written by hand
+    "status": 200,                             // webhook HTTP response status
+    "calls": [ { "method": "POST", "path": "/repos/acme/app/check-runs", "query": {}, "body": { ... } } ]
+  },
+  "unordered": false,                          // the recording runs disagreed on call order
+  "quiet_ms": 12000,                           // optional: longer quiet window for cases that wait for retries
+  "known_diff": null                           // or the reason for an approved divergence from the recording
+}
 ```
+
+### Mock GitHub rules
+
+- Served under `/api/v3` (the app gets `GHE_HOST=127.0.0.1:<port>`, `GHE_PROTOCOL=http`); paths are stored without the
+  prefix, percent-decoded (`%2F` -> `/`), query as an object with sorted keys.
+- `POST /app/installations/{id}/access_tokens` and `GET /app/installations/...` are answered by the mock (token
+  `ghs_test`) and are not recorded.
+- Every response carries `x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset` headers.
+- Anything unmatched answers `404 {"message":"Not Found","documentation_url":"https://docs.github.com/rest"}`.
+- Recorded bodies: JSON parsed; ISO-8601 timestamps replaced by `"<timestamp>"`.
+- Recorded strings: the mock origin `http://127.0.0.1:<port>` is replaced by `http://github.mock`; stack-trace
+  lines inside error texts are ignored when comparing.
+- A case ends when no request arrived for the quiet window (4 s, or the case's `quiet_ms` if longer) after the
+  webhook was answered, or 500 ms after the expected number of calls arrived (cases without `quiet_ms`), at most
+  40 s. The window covers the client's retries after 1 s, 4 s and 9 s and the 1 s spacing of writes (ADR-007).
 
 ## Configuration
 

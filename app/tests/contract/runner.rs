@@ -1,21 +1,19 @@
-use crate::case::Case;
-use crate::compare::{CallComparison, compare_calls};
-use crate::mock::{MockServer, Scenario};
-use crate::normalize::with_sorted_keys;
-use crate::webhook::{WEBHOOK_SECRET, Webhook, WebhookSender};
+use super::case::Case;
+use super::compare::{CallComparison, compare_calls};
+use super::mock::{MockServer, Scenario};
+use super::normalize::with_sorted_keys;
+use super::webhook::{WEBHOOK_SECRET, Webhook, WebhookSender};
 use anyhow::{Context as _, Result, anyhow};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rsa::PrivateKey;
 use rsa::pkcs1::{EncodeRsaPrivateKey, LineEnding};
-use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_QUIET_PERIOD: Duration = Duration::from_secs(4);
-pub const DEFAULT_WEBHOOK_PATH: &str = "/api/github/webhooks";
 const MAXIMUM_CASE_DURATION: Duration = Duration::from_secs(40);
 const GRACE_AFTER_EXPECTED_CALLS: Duration = Duration::from_millis(500);
 const MOCK_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -32,14 +30,14 @@ static TEST_SIGNING_KEY_PEM: LazyLock<Result<String, String>> = LazyLock::new(||
         })
 });
 
-pub fn test_signing_key_pem() -> Result<&'static str> {
+fn test_signing_key_pem() -> Result<&'static str> {
     TEST_SIGNING_KEY_PEM
         .as_deref()
         .map_err(|error| anyhow!("generating the test signing key: {error}"))
 }
 
-pub fn app_environment(mock_port: u16) -> Result<BTreeMap<String, String>> {
-    Ok(BTreeMap::from(
+pub fn in_process_app_environment(mock_port: u16, case: &Case) -> Result<BTreeMap<String, String>> {
+    let mut environment = BTreeMap::from(
         [
             ("APP_ID", "1"),
             ("PRIVATE_KEY", test_signing_key_pem()?),
@@ -48,15 +46,11 @@ pub fn app_environment(mock_port: u16) -> Result<BTreeMap<String, String>> {
             ("GHE_PROTOCOL", "http"),
             ("LOG_LEVEL", "fatal"),
             ("NODE_ENV", "production"),
+            ("HOST", "127.0.0.1"),
+            ("PORT", "0"),
         ]
         .map(|(name, value)| (name.to_owned(), value.to_owned())),
-    ))
-}
-
-pub fn in_process_app_environment(mock_port: u16, case: &Case) -> Result<BTreeMap<String, String>> {
-    let mut environment = app_environment(mock_port)?;
-    environment.insert("HOST".to_owned(), "127.0.0.1".to_owned());
-    environment.insert("PORT".to_owned(), "0".to_owned());
+    );
     environment.extend(case.definition.env.clone());
     Ok(environment)
 }
@@ -64,7 +58,6 @@ pub fn in_process_app_environment(mock_port: u16, case: &Case) -> Result<BTreeMa
 pub struct CaseRun {
     pub status: u16,
     pub calls: Vec<Value>,
-    pub settled: bool,
 }
 
 pub fn webhook_of_case(case: &Case) -> Result<Webhook> {
@@ -100,21 +93,21 @@ async fn wait_for_quiet_mock(
     webhook_answered_at: Instant,
     quiet_period: Duration,
     expected_calls: Option<usize>,
-) -> bool {
+) {
     loop {
         tokio::time::sleep(MOCK_POLL_INTERVAL).await;
         let last_activity = mock.github.last_request_at().max(webhook_answered_at);
         let quiet_for = last_activity.elapsed();
         if quiet_for >= quiet_period {
-            return true;
+            return;
         }
         let reached_expected_calls =
             expected_calls.is_some_and(|expected| mock.github.recorded_call_count() >= expected);
-        if reached_expected_calls && quiet_for >= GRACE_AFTER_EXPECTED_CALLS {
-            return true;
-        }
-        if webhook_answered_at.elapsed() >= MAXIMUM_CASE_DURATION {
-            return false;
+        let reached_maximum_duration = webhook_answered_at.elapsed() >= MAXIMUM_CASE_DURATION;
+        if (reached_expected_calls && quiet_for >= GRACE_AFTER_EXPECTED_CALLS)
+            || reached_maximum_duration
+        {
+            return;
         }
     }
 }
@@ -127,12 +120,12 @@ pub async fn exercise_case(
     quiet_period: Duration,
 ) -> Result<CaseRun> {
     mock.github
-        .load_scenarios(vec![Scenario::from_case(&case.definition)], true);
+        .load_scenario(Scenario::from_case(&case.definition));
     let status = WebhookSender::new()?
         .send(app_port, webhook_path, &webhook_of_case(case)?)
         .await
         .with_context(|| format!("sending webhook of case {}", case.definition.name))?;
-    let settled = wait_for_quiet_mock(
+    wait_for_quiet_mock(
         mock,
         Instant::now(),
         quiet_period,
@@ -142,12 +135,10 @@ pub async fn exercise_case(
     Ok(CaseRun {
         status,
         calls: mock.github.take_calls(),
-        settled,
     })
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Outcome {
     Pass,
     PassOrderDiffers,
@@ -162,10 +153,7 @@ fn pretty_or_missing(call: Option<&Value>) -> String {
 #[must_use]
 pub fn judge(case: &Case, run: &CaseRun) -> (Outcome, Option<String>) {
     let Some(expected) = &case.definition.expected else {
-        return (
-            Outcome::Fail,
-            Some("no expected section: run replay record first".to_owned()),
-        );
+        return (Outcome::Fail, Some("no expected section".to_owned()));
     };
     if expected.status != run.status {
         return (

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["app", "replay"]
+members = ["app"]
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
