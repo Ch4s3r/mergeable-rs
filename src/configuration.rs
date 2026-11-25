@@ -7,7 +7,6 @@ use crate::results::Status;
 use crate::yaml;
 use serde_json::{Map, Value, json};
 use std::sync::LazyLock;
-use tracing::Instrument;
 
 mod v1_config;
 
@@ -425,15 +424,9 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     let use_cache = context.global_setting("use_config_cache")? == Some(&Value::Bool(true));
     let cache_key = repository.to_string();
     if use_cache {
-        let reset_context = context.clone();
-        tokio::spawn(
-            async move {
-                if let Err(error) = reset_cache(&reset_context).await {
-                    tracing::warn!(%error, "configuration.cache_reset.failed");
-                }
-            }
-            .in_current_span(),
-        );
+        if let Err(error) = reset_cache(context).await {
+            tracing::warn!(%error, "configuration.cache_reset.failed");
+        }
         if let Some(cached) = context.app.configuration_cache.get(&cache_key).await
             && json_value::is_truthy(&cached)
         {
@@ -650,5 +643,414 @@ mod tests {
                 ErrorCode::MissingValidateKeyword
             ]
         );
+    }
+
+    fn loaded_yaml(text: &str) -> Value {
+        crate::yaml::parse(text).unwrap().unwrap()
+    }
+
+    fn configuration_from_yaml(text: &str) -> Configuration {
+        Configuration::from_settings(loaded_yaml(text)).unwrap()
+    }
+
+    fn assert_single_error(configuration: &Configuration, code: ErrorCode) {
+        assert_eq!(configuration.errors.len(), 1, "{:?}", configuration.errors);
+        assert!(configuration.has_error(code), "{:?}", configuration.errors);
+    }
+
+    #[test]
+    fn wrong_version_is_reported_as_unknown_version() {
+        let configuration = configuration_from_yaml(
+            "
+version: not a number
+mergeable:
+  pull_request:
+",
+        );
+        assert_single_error(&configuration, ErrorCode::UnknownVersion);
+    }
+
+    #[test]
+    fn missing_mergeable_node_is_reported() {
+        let configuration = configuration_from_yaml("version: 2\n");
+        assert_single_error(&configuration, ErrorCode::MissingMergeableNode);
+    }
+
+    #[test]
+    fn missing_rule_sets_are_reported() {
+        let configuration = configuration_from_yaml("version: 2\nmergeable:\n");
+        assert_single_error(&configuration, ErrorCode::MissingRuleSets);
+    }
+
+    #[test]
+    fn v2_non_array_rule_set_is_reported() {
+        let configuration = configuration_from_yaml(
+            "
+version: 2
+mergeable:
+  when: test
+",
+        );
+        assert_single_error(&configuration, ErrorCode::NonArrayMergeable);
+    }
+
+    #[test]
+    fn v2_missing_or_misspelled_validate_keyword_is_reported_for_multiple_rule_sets() {
+        let misspelled_validate = configuration_from_yaml(
+            "
+version: 2
+mergeable:
+  - when: pull_requests.*
+    validate:
+      - do :
+  - when: issues.*
+    valdate:
+",
+        );
+        assert_single_error(&misspelled_validate, ErrorCode::MissingValidateKeyword);
+        let missing_validate = configuration_from_yaml(
+            "
+version: 2
+mergeable:
+  - when: pull_requests.*
+",
+        );
+        assert_single_error(&missing_validate, ErrorCode::MissingValidateKeyword);
+    }
+
+    #[test]
+    fn v2_non_array_validate_node_is_reported() {
+        let empty_validate = configuration_from_yaml(
+            "
+version: 2
+mergeable:
+  - when: pull_requests.*
+    validate:
+",
+        );
+        assert_single_error(&empty_validate, ErrorCode::NonArrayValidate);
+        let object_validate = configuration_from_yaml(
+            "
+version: 2
+mergeable:
+  - when: pull_requests.*
+    validate:
+      do : title
+",
+        );
+        assert_single_error(&object_validate, ErrorCode::NonArrayValidate);
+    }
+
+    #[test]
+    fn v2_missing_or_misspelled_when_keyword_is_reported() {
+        let configuration = configuration_from_yaml(
+            "
+version: 2
+mergeable:
+  - validate:
+      - do :
+",
+        );
+        assert_single_error(&configuration, ErrorCode::MissingWhenKeyword);
+    }
+
+    #[test]
+    fn multiple_errors_are_all_reported() {
+        let configuration = configuration_from_yaml(
+            "
+version: foo
+mergeably:
+  when: bar
+",
+        );
+        assert_eq!(configuration.errors.len(), 2);
+    }
+
+    const VERSION_ONE_APPROVALS_LABEL_AND_TITLE: &str = "
+mergeable:
+  approvals: 5
+  label: 'label regex'
+  title: 'title regex'
+";
+
+    fn validator<'rule>(rule_set: &'rule Value, validator_name: &str) -> Option<&'rule Value> {
+        rule_set["validate"]
+            .as_array()
+            .and_then(|validators| validators.iter().find(|item| item["do"] == validator_name))
+    }
+
+    #[test]
+    fn version_two_shape_loads_correctly_without_version() {
+        let configuration = configuration_from_yaml(VERSION_ONE_APPROVALS_LABEL_AND_TITLE);
+        assert!(configuration.settings[0].get("when").is_some());
+        assert!(configuration.settings[0].get("validate").is_some());
+        assert!(!configuration.has_errors());
+    }
+
+    #[test]
+    fn version_one_constructor_loads_settings_correctly() {
+        let configuration = configuration_from_yaml(VERSION_ONE_APPROVALS_LABEL_AND_TITLE);
+        let rule_set = &configuration.settings[0];
+        assert_eq!(validator(rule_set, "approvals").unwrap()["min"]["count"], 5);
+        assert_eq!(
+            validator(rule_set, "title").unwrap()["must_exclude"]["regex"],
+            "title regex"
+        );
+        assert_eq!(
+            validator(rule_set, "label").unwrap()["must_exclude"]["regex"],
+            "label regex"
+        );
+    }
+
+    #[test]
+    fn version_one_defaults_are_not_injected_when_user_defined_configuration_exists() {
+        let configuration = configuration_from_yaml("mergeable:\n  approvals: 1\n");
+        let rule_set = &configuration.settings[0];
+        assert_eq!(validator(rule_set, "approvals").unwrap()["min"]["count"], 1);
+        assert!(validator(rule_set, "title").is_none());
+        assert!(validator(rule_set, "label").is_none());
+    }
+
+    #[test]
+    fn undefined_pass_fail_or_error_does_not_break_the_config() {
+        let configuration = configuration_from_yaml(
+            "
+mergeable:
+  issues:
+    stale:
+      days: 30
+      message: 'There has not been any activity in the past month. Is there anything to follow-up?'
+",
+        );
+        assert_eq!(configuration.settings.as_array().map(Vec::len), Some(2));
+        assert!(configuration.settings[0].get("fail").is_some());
+        assert!(configuration.settings[0].get("error").is_some());
+    }
+
+    fn transformed_v2(text: &str) -> Value {
+        let mut config = loaded_yaml(text);
+        set_pull_request_defaults(&mut config).unwrap();
+        config["mergeable"].take()
+    }
+
+    fn assert_default_pull_request_outcomes(rule_set: &Value) {
+        assert_eq!(rule_set["pass"], *default_actions_for(Status::Pass));
+        assert_eq!(rule_set["fail"], *default_actions_for(Status::Fail));
+        assert_eq!(rule_set["error"], *default_actions_for(Status::Error));
+    }
+
+    const TITLE_RULE_FOR_PULL_REQUESTS: &str = "
+version: 2
+mergeable:
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: 'wip|work in progress'
+          message: 'This PR is work in progress.'
+";
+
+    #[test]
+    fn outcome_defaults_load_when_pull_request_event_is_specified() {
+        let rule_sets = transformed_v2(TITLE_RULE_FOR_PULL_REQUESTS);
+        assert_default_pull_request_outcomes(&rule_sets[0]);
+    }
+
+    #[test]
+    fn outcome_defaults_load_for_pull_requests_without_overriding_user_specified_outcomes() {
+        let pass_outcome = "    pass:
+      - do: checks
+        state: completed
+        status: success
+        payload:
+          title: a title
+          summary: a summary
+          text: some text
+";
+        let fail_outcome = "    fail:
+      - do: checks
+        state: completed
+        status: failure
+        payload:
+          title: a failed title
+";
+        let error_outcome = "    error:
+      - do: checks
+        state: completed
+        status: error
+        payload:
+          title: an errored title
+";
+        let with_pass = format!("{TITLE_RULE_FOR_PULL_REQUESTS}{pass_outcome}");
+        let rule_sets = transformed_v2(&with_pass);
+        assert_eq!(rule_sets[0]["pass"][0]["payload"]["title"], "a title");
+        assert_eq!(rule_sets[0]["fail"], *default_actions_for(Status::Fail));
+        assert_eq!(rule_sets[0]["error"], *default_actions_for(Status::Error));
+
+        let with_pass_and_fail = format!("{with_pass}{fail_outcome}");
+        let rule_sets = transformed_v2(&with_pass_and_fail);
+        assert_eq!(rule_sets[0]["pass"][0]["payload"]["title"], "a title");
+        assert_eq!(
+            rule_sets[0]["fail"][0]["payload"]["title"],
+            "a failed title"
+        );
+        assert_eq!(rule_sets[0]["error"], *default_actions_for(Status::Error));
+
+        let with_all_outcomes = format!("{with_pass_and_fail}{error_outcome}");
+        let rule_sets = transformed_v2(&with_all_outcomes);
+        assert_eq!(rule_sets[0]["pass"][0]["payload"]["title"], "a title");
+        assert_eq!(
+            rule_sets[0]["fail"][0]["payload"]["title"],
+            "a failed title"
+        );
+        assert_eq!(
+            rule_sets[0]["error"][0]["payload"]["title"],
+            "an errored title"
+        );
+    }
+
+    #[test]
+    fn outcome_defaults_load_when_pull_request_is_mixed_with_other_events() {
+        let rule_sets = transformed_v2(
+            "
+version: 2
+mergeable:
+  - when: issues.*, pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: 'wip|work in progress'
+          message: 'This PR is work in progress.'
+",
+        );
+        assert_default_pull_request_outcomes(&rule_sets[0]);
+    }
+
+    #[test]
+    fn outcome_defaults_load_when_issue_comment_event_is_specified() {
+        let rule_sets = transformed_v2(
+            "
+version: 2
+mergeable:
+  - when: issue_comment.*
+    validate:
+      - do: lastComment
+        must_exclude:
+          regex: 'wip|work in progress'
+",
+        );
+        assert_default_pull_request_outcomes(&rule_sets[0]);
+    }
+
+    #[test]
+    fn outcome_defaults_load_when_pull_request_review_event_is_specified() {
+        let rule_sets = transformed_v2(
+            "
+version: 2
+mergeable:
+  - when: pull_request_review.*
+    validate:
+      - do: payload
+        review:
+          state:
+            must_exclude:
+              regex: 'changes_requested'
+",
+        );
+        assert_default_pull_request_outcomes(&rule_sets[0]);
+    }
+
+    #[test]
+    fn outcome_defaults_ignore_recipes_that_are_not_for_pull_requests() {
+        let rule_sets = transformed_v2(
+            "
+version: 2
+mergeable:
+  - when: issues.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: 'wip|work in progress'
+          message: 'This PR is work in progress.'
+",
+        );
+        assert_eq!(rule_sets[0]["pass"], json!([]));
+        assert_eq!(rule_sets[0]["fail"], json!([]));
+        assert_eq!(rule_sets[0]["error"], json!([]));
+    }
+
+    const TITLE_RULE_FOR_PULL_REQUESTS_PLURAL: &str = "
+version: 2
+mergeable:
+  - when: pull_requests.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: 'wip|work in progress'
+          message: 'This PR is work in progress.'
+";
+
+    #[test]
+    fn default_checks_fill_in_missing_required_fields() {
+        let rule_sets = transformed_v2(&format!(
+            "{TITLE_RULE_FOR_PULL_REQUESTS_PLURAL}    pass:
+      - do: checks
+        payload:
+          summary: 'test Summary'
+          text: 'test text'
+"
+        ));
+        assert_eq!(
+            rule_sets[0]["pass"],
+            json!([{
+                "do": "checks",
+                "status": "success",
+                "payload": {
+                    "title": "Mergeable Run has been Completed!",
+                    "summary": "test Summary",
+                    "text": "test text"
+                }
+            }])
+        );
+    }
+
+    const COMMENT_ON_FAIL: &str = "    fail:
+      - do: comment
+        payload:
+          body: 'test Body'
+";
+
+    #[test]
+    fn adding_defaults_only_works_for_checks() {
+        let rule_sets = transformed_v2(&format!(
+            "{TITLE_RULE_FOR_PULL_REQUESTS_PLURAL}{COMMENT_ON_FAIL}"
+        ));
+        assert_eq!(
+            rule_sets[0]["fail"],
+            json!([{"do": "comment", "payload": {"body": "test Body"}}])
+        );
+    }
+
+    #[test]
+    fn defaults_are_not_added_to_all_outcomes_if_no_checks_exist() {
+        let rule_sets = transformed_v2(&format!(
+            "{TITLE_RULE_FOR_PULL_REQUESTS_PLURAL}{COMMENT_ON_FAIL}"
+        ));
+        assert_eq!(rule_sets[0]["pass"], json!([]));
+        assert_eq!(rule_sets[0]["error"], json!([]));
+    }
+
+    #[test]
+    fn defaults_are_added_to_all_outcomes_if_at_least_one_checks_exists() {
+        let rule_sets = transformed_v2(&format!(
+            "{TITLE_RULE_FOR_PULL_REQUESTS_PLURAL}    fail:
+      - do: checks
+        payload:
+          body: 'test Body'
+"
+        ));
+        assert_eq!(rule_sets[0]["pass"], *default_actions_for(Status::Pass));
+        assert_eq!(rule_sets[0]["fail"][0]["payload"]["body"], "test Body");
+        assert_eq!(rule_sets[0]["error"], *default_actions_for(Status::Error));
     }
 }

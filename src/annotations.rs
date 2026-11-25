@@ -139,4 +139,61 @@ mod tests {
             "TypeError: Cannot read properties of undefined (reading 'login')"
         );
     }
+
+    const UPSTREAM_SPECIAL_ANNOTATIONS: [(&str, &str); 5] = [
+        ("@author", "creator"),
+        ("@action", "created"),
+        ("@sender", "initiator"),
+        ("@bot", "Mergeable[bot]"),
+        ("@repository", "botrepo"),
+    ];
+
+    fn assert_each_annotation_is_replaced(message: &str, expected: &str) {
+        let payload = json!({"user": {"login": "creator"}});
+        let event = json!({"action": "created", "repository": {"full_name": "botrepo"}, "sender": {"login": "initiator"}});
+        for (annotation, replacement) in UPSTREAM_SPECIAL_ANNOTATIONS {
+            let message_with_annotation = message.replacen("$annotation$", annotation, 1);
+            let message_with_replacement = expected.replacen("$annotation$", replacement, 1);
+            let rendered = search_and_replace_special_annotations(
+                &message_with_annotation,
+                Some(&payload),
+                &EventAttributes::from_payload(&event),
+            )
+            .unwrap();
+            assert_eq!(rendered, message_with_replacement, "{annotation}");
+        }
+    }
+
+    #[test]
+    fn does_not_affect_input_if_no_special_annotations_are_found() {
+        assert_each_annotation_is_replaced("no special annotations", "no special annotations");
+    }
+
+    #[test]
+    fn special_annotation_at_the_beginning_of_string_works_properly() {
+        assert_each_annotation_is_replaced("$annotation$ says hello!", "$annotation$ says hello!");
+    }
+
+    #[test]
+    fn escape_character_works_properly() {
+        assert_each_annotation_is_replaced("this is \\@author", "this is @author");
+    }
+
+    #[test]
+    fn special_annotation_at_the_end_of_string_works_properly() {
+        assert_each_annotation_is_replaced("this is $annotation$", "this is $annotation$");
+    }
+
+    #[test]
+    fn double_at_annotation_is_replaced_and_prepending_at_remains() {
+        assert_each_annotation_is_replaced("this is @$annotation$", "this is @$annotation$");
+    }
+
+    #[test]
+    fn replaces_special_annotation_anywhere_in_the_text() {
+        assert_each_annotation_is_replaced(
+            "this is something$annotation$ speaking",
+            "this is something$annotation$ speaking",
+        );
+    }
 }

@@ -392,4 +392,342 @@ mod tests {
         assert_eq!(order, [json!("2"), json!("10"), json!("title")]);
         Ok(())
     }
+
+    fn transformed_from_yaml(text: &str) -> Value {
+        let mut config = crate::yaml::parse(text).unwrap().unwrap();
+        transform(&mut config).unwrap()["mergeable"].take()
+    }
+
+    fn assert_description_no_empty_is_enabled(text: &str) {
+        let rule_sets = transformed_from_yaml(text);
+        let description_validator = &rule_sets[0]["validate"][0];
+        assert!(rule_sets[0].get("when").is_some());
+        assert_eq!(description_validator["do"], "description");
+        assert_eq!(description_validator["no_empty"]["enabled"], true);
+    }
+
+    #[test]
+    fn description_no_empty_using_simple_config() {
+        assert_description_no_empty_is_enabled(
+            "
+mergeable:
+  pull_requests:
+    description:
+      no_empty: true
+",
+        );
+    }
+
+    #[test]
+    fn description_no_empty_using_advanced_config() {
+        assert_description_no_empty_is_enabled(
+            "
+mergeable:
+  pull_requests:
+    description:
+      no_empty:
+        enabled: true
+",
+        );
+    }
+
+    #[test]
+    fn description_no_dash_empty_using_simple_config() {
+        assert_description_no_empty_is_enabled(
+            "
+mergeable:
+  pull_requests:
+    description:
+      no-empty: true
+",
+        );
+    }
+
+    #[test]
+    fn description_no_dash_empty_using_advanced_config() {
+        assert_description_no_empty_is_enabled(
+            "
+mergeable:
+  pull_requests:
+    description:
+      no-empty:
+        enabled: true
+",
+        );
+    }
+
+    fn scheduled_rule_sets_with(more_config: &str, expected_length: usize) -> Vec<Value> {
+        let rule_sets = transformed_from_yaml(&format!(
+            "
+mergeable:
+  pull_requests:
+    title: 'wip'
+{more_config}"
+        ));
+        let scheduled: Vec<Value> = rule_sets
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|rule_set| rule_set["when"] == "schedule.repository")
+            .cloned()
+            .collect();
+        assert_eq!(scheduled.len(), expected_length);
+        scheduled
+    }
+
+    #[test]
+    fn stale_absent_creates_no_scheduled_rule_set() {
+        scheduled_rule_sets_with("", 0);
+    }
+
+    #[test]
+    fn stale_configuration_in_pulls_only() {
+        let scheduled = scheduled_rule_sets_with(
+            "    stale:
+      days: 20
+      message: 'This is issue is stale. Please follow up!'
+",
+            1,
+        );
+        assert_eq!(scheduled[0]["validate"][0]["type"], "pull_request");
+    }
+
+    #[test]
+    fn stale_configuration_in_issues_only() {
+        let scheduled = scheduled_rule_sets_with(
+            "  issues:
+    stale:
+      days: 20
+      message: 'This is issue is stale. Please follow up!'
+",
+            1,
+        );
+        assert_eq!(scheduled[0]["validate"][0]["type"], "issues");
+    }
+
+    #[test]
+    fn stale_configuration_in_both_pulls_and_issues() {
+        let scheduled = scheduled_rule_sets_with(
+            "    stale:
+      days: 20
+  issues:
+    stale:
+      days: 20
+      message: 'This is issue is stale. Please follow up!'
+",
+            2,
+        );
+        assert_eq!(scheduled[0]["validate"][0]["type"], "issues");
+        assert_eq!(scheduled[1]["validate"][0]["type"], "pull_request");
+    }
+
+    const PULL_REQUEST_TITLE_WIP: &str = "
+mergeable:
+  pull_requests:
+    title: 'wip'
+";
+
+    #[test]
+    fn proper_format_is_returned_including_default_pass_fail_and_error() {
+        let rule_sets = transformed_from_yaml(PULL_REQUEST_TITLE_WIP);
+        for key in ["when", "pass", "fail", "error"] {
+            assert!(rule_sets[0].get(key).is_some(), "{key}");
+        }
+    }
+
+    #[test]
+    fn content_is_transformed_correctly() {
+        let rule_sets = transformed_from_yaml(PULL_REQUEST_TITLE_WIP);
+        let validators = &rule_sets[0]["validate"];
+        assert_eq!(validators[0]["do"], "title");
+        assert_eq!(validators[0]["must_exclude"]["regex"], "wip");
+    }
+
+    fn first_rule_set_validators(rule_sets: &Value, when_part: &str) -> Value {
+        rule_sets
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|rule_set| rule_set["when"].as_str().unwrap().contains(when_part))
+            .unwrap()["validate"]
+            .clone()
+    }
+
+    #[test]
+    fn all_the_simple_config_is_transformed_accurately() {
+        let rule_sets = transformed_from_yaml(
+            "
+mergeable:
+  pull_requests:
+    approvals: 5
+    title: 'wip'
+    milestone: 'version 1'
+    project: 'Alpha'
+    exclude: 'title, label'
+  issues:
+    label: 'wip|do not merge|experimental'
+    title: 'wip'
+",
+        );
+        assert_eq!(rule_sets.as_array().map(Vec::len), Some(3));
+        let issues = first_rule_set_validators(&rule_sets, "issues");
+        let pull_requests = first_rule_set_validators(&rule_sets, "pull_request");
+        assert_eq!(
+            issues,
+            json!([
+                {"do": "label", "must_exclude": {"regex": "wip|do not merge|experimental"}},
+                {"do": "title", "must_exclude": {"regex": "wip"}}
+            ])
+        );
+        assert_eq!(
+            pull_requests,
+            json!([
+                {"do": "approvals", "min": {"count": 5}},
+                {"do": "milestone", "must_include": {"regex": "version 1"}},
+                {"do": "project", "must_include": {"regex": "Alpha"}}
+            ])
+        );
+    }
+
+    #[test]
+    fn all_advanced_config_is_transformed_accurately() {
+        let rule_sets = transformed_from_yaml(
+            "
+mergeable:
+  pull_requests:
+    approvals:
+      min:
+        count: 5
+        message: 'Custom message...'
+      required:
+        reviewers: [ user1, user2 ]
+        owners: true | false
+        message: 'Custom message...'
+    assignee:
+      min:
+        count: 1
+      max:
+        count: 3
+      message: 'Custom message...'
+    dependent:
+      files: ['package.json', 'yarn.lock']
+      message: 'Custom message...'
+    stale:
+      days: 20
+      message: 'This is issue is stale. Please follow up!'
+  issues:
+    stale:
+      days: 20
+      message: 'This is issue is stale. Please follow up!'
+    title:
+      ends_with:
+        match: '(feat)|(doc)|(fix)'
+        message: 'Custom message...'
+    label:
+      begins_with:
+        match: '(feat)|(doc)|(fix)'
+        message: 'Come message...'
+    milestone:
+      must_include:
+        regex: 'Release 1'
+        message: 'Custom message...'
+    project:
+      must_exclude:
+        regex: 'jibberish'
+        message: 'Custom message...'
+",
+        );
+        assert_eq!(rule_sets.as_array().map(Vec::len), Some(5));
+        let issues = first_rule_set_validators(&rule_sets, "issues");
+        let pull_requests = first_rule_set_validators(&rule_sets, "pull_request");
+        let scheduled: Vec<&Value> = rule_sets
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|rule_set| rule_set["when"].as_str().unwrap().contains("schedule"))
+            .collect();
+
+        assert_eq!(issues.as_array().map(Vec::len), Some(4));
+        assert_eq!(issues[0]["do"], "title");
+        assert_eq!(issues[0]["ends_with"]["match"], "(feat)|(doc)|(fix)");
+        assert_eq!(issues[1]["do"], "label");
+        assert_eq!(issues[1]["begins_with"]["match"], "(feat)|(doc)|(fix)");
+        assert_eq!(issues[2]["do"], "milestone");
+        assert_eq!(issues[2]["must_include"]["regex"], "Release 1");
+        assert_eq!(issues[3]["do"], "project");
+        assert_eq!(issues[3]["must_exclude"]["regex"], "jibberish");
+
+        assert_eq!(pull_requests.as_array().map(Vec::len), Some(3));
+        assert_eq!(pull_requests[0]["do"], "approvals");
+        assert_eq!(pull_requests[0]["min"]["count"], 5);
+        assert_eq!(
+            pull_requests[0]["required"]["reviewers"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+        assert_eq!(pull_requests[1]["do"], "assignee");
+        assert_eq!(pull_requests[1]["min"]["count"], 1);
+        assert_eq!(pull_requests[1]["max"]["count"], 3);
+        assert_eq!(pull_requests[2]["do"], "dependent");
+        assert_eq!(pull_requests[2]["files"].as_array().map(Vec::len), Some(2));
+
+        assert_eq!(scheduled.len(), 2);
+        assert_eq!(scheduled[0]["validate"].as_array().map(Vec::len), Some(1));
+        assert_eq!(scheduled[0]["validate"][0]["do"], "stale");
+        assert_eq!(scheduled[0]["validate"][0]["days"], 20);
+        assert_eq!(scheduled[0]["validate"][0]["type"], "issues");
+        assert_eq!(
+            scheduled[0]["pass"][0]["payload"]["body"],
+            "This is issue is stale. Please follow up!"
+        );
+        assert_eq!(scheduled[1]["validate"][0]["do"], "stale");
+        assert_eq!(scheduled[1]["validate"][0]["days"], 20);
+        assert_eq!(scheduled[1]["validate"][0]["type"], "pull_request");
+        assert_eq!(
+            scheduled[1]["pass"][0]["payload"]["body"],
+            "This is issue is stale. Please follow up!"
+        );
+    }
+
+    #[test]
+    fn and_or_logic_is_transformed_correctly() {
+        let rule_sets = transformed_from_yaml(
+            r"
+mergeable:
+  label:
+    or:
+      - and:
+        - must_include:
+            regex: 'release note: yes'
+            message: 'Please include release note: yes'
+        - must_include:
+            regex: 'lang\\/core|lang\\/c\\+\\+|lang\\/c#'
+            message: 'Please include a language label'
+      - must_include:
+          regex: 'release note: no'
+          message: 'Please include release note: no'
+",
+        );
+        assert_eq!(rule_sets.as_array().map(Vec::len), Some(2));
+        let pull_requests = first_rule_set_validators(&rule_sets, "pull_request");
+        assert_eq!(pull_requests.as_array().map(Vec::len), Some(1));
+        let label = &pull_requests[0];
+        assert_eq!(label["do"], "label");
+        assert_eq!(label["or"].as_array().map(Vec::len), Some(2));
+        assert_eq!(label["or"][0]["and"].as_array().map(Vec::len), Some(2));
+        assert_eq!(
+            label["or"][0]["and"][0]["must_include"]["regex"],
+            "release note: yes"
+        );
+        assert_eq!(
+            label["or"][0]["and"][0]["must_include"]["message"],
+            "Please include release note: yes"
+        );
+        assert_eq!(
+            label["or"][0]["and"][1]["must_include"]["regex"],
+            r"lang\\/core|lang\\/c\\+\\+|lang\\/c#"
+        );
+        assert_eq!(label["or"][1]["must_include"]["regex"], "release note: no");
+    }
 }
