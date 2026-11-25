@@ -16,10 +16,6 @@ uri = "docker.io/paketobuildpacks/procfile:5.15.10"
 uri = "docker.io/paketobuildpacks/image-labels:4.14.9"
 
 [[io.buildpacks.build.env]]
-name = "BP_CARGO_WORKSPACE_MEMBERS"
-value = "mergeable"
-
-[[io.buildpacks.build.env]]
 name = "BP_OCI_TITLE"
 value = "mergeable-rs"
 

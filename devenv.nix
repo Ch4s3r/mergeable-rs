@@ -19,7 +19,7 @@
     set -euo pipefail
     cargo fmt --all --check
     cargo clippy --all-targets -- -D warnings
-    cargo nextest run --workspace 1>&2
-    cargo test --doc --workspace 1>&2
+    cargo nextest run 1>&2
+    cargo test --doc 1>&2
   '';
 }

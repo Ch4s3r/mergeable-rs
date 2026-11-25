@@ -61,7 +61,7 @@ fn generated_tests(case_names: &[String]) -> Result<String, Box<dyn Error>> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest_directory = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR")?);
-    let cases_directory = manifest_directory.join("../tests/cases");
+    let cases_directory = manifest_directory.join("tests/cases");
     println!("cargo:rerun-if-changed={}", cases_directory.display());
     let source = generated_tests(&case_names(&cases_directory)?)?;
     let output_path = PathBuf::from(std::env::var("OUT_DIR")?).join("contract_cases.rs");

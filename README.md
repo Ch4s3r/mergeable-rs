@@ -8,9 +8,9 @@ result as check runs, comments, labels and assignees. One Rust binary, `mergeabl
 endpoint and the optional rate-limit and Prometheus routes. It reads `.github/mergeable.yml` and
 `.github/mergeable.settings.yml` from the repository and is configured through environment variables.
 
-The workspace has one crate, `app` (package `mergeable`): the server, the rule engine and the GitHub client.
-The black-box contract tests (recorded webhook scenarios in `tests/cases`) are ordinary Rust integration tests of
-`app` (`app/tests/contract_cases.rs`, support code in `app/tests/contract/`); see [Contract tests](#contract-tests).
+The repository is a single Cargo package, `mergeable` (`src/`): the server, the rule engine and the GitHub client.
+The black-box contract tests (recorded webhook scenarios in `tests/cases`) are ordinary Rust integration tests
+(`tests/contract_cases.rs`, support code in `tests/contract/`); see [Contract tests](#contract-tests).
 
 Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.md). Terms:
 [GLOSSARY.md](GLOSSARY.md). Performance: [BENCHMARK.md](BENCHMARK.md).
@@ -22,7 +22,7 @@ pack and redis.
 
 ```sh
 devenv shell
-cargo build --release -p mergeable
+cargo build --release
 ./target/release/mergeable
 ```
 
@@ -87,22 +87,22 @@ or step by step inside `devenv shell`:
 ```sh
 cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
-cargo nextest run --workspace     # unit tests and the 381 recorded webhook cases, 32 in parallel
-cargo test --doc --workspace
+cargo nextest run                 # unit tests and the 381 recorded webhook cases, 32 in parallel
+cargo test --doc
 ```
 
 The Redis round trip test needs a local server and is ignored by default:
 
 ```sh
 redis-server --port 6392 --save '' --daemonize yes
-REDIS_TEST_PORT=6392 cargo test -p mergeable live_redis -- --ignored
+REDIS_TEST_PORT=6392 cargo test live_redis -- --ignored
 ```
 
 ## Contract tests
 
-Each file `tests/cases/<name>.json` is one recorded webhook scenario (ADR-005). `app/build.rs` generates one test
-per case file in `app/tests/contract_cases.rs` (`action-assign-author` becomes `action_assign_author`); without a
-`tests/cases` directory it generates none. Each test starts the mock GitHub API (`app/tests/contract/`) and the app
+Each file `tests/cases/<name>.json` is one recorded webhook scenario (ADR-005). `build.rs` generates one test
+per case file in `tests/contract_cases.rs` (`action-assign-author` becomes `action_assign_author`); without a
+`tests/cases` directory it generates none. Each test starts the mock GitHub API (`tests/contract/`) and the app
 in-process (`mergeable::server::start` on port 0) with a fixed test environment (seeded test App key, `GHE_HOST` of the mock) plus the case `env`, sends the signed
 webhook and compares the GitHub API calls the app makes and its HTTP response with the recorded expectation. A case
 passes when the calls match, also when only the order differs; a case with `known_diff` does not fail on a

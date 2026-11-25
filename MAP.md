@@ -1,6 +1,6 @@
 # Module map
 
-| Area | Rust module (app/src) |
+| Area | Rust module (src) |
 |---|---|
 | Entry point, environment snapshot, server startup | `main`, `app_config` (`Environment`), `server::start`, `logging` |
 | Per-instance state (behaviour settings, caches) | `app_state` |
@@ -20,6 +20,6 @@
 | Errors | `error` |
 
 Contract tests: tests/cases (381 recorded webhook scenarios), one generated Rust test each in
-`app/tests/contract_cases.rs` (app/build.rs), run in-process with the mock GitHub API in `app/tests/contract/` (ADR-005).
-Gate: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run --workspace`,
-`cargo test --doc --workspace`.
+`tests/contract_cases.rs` (build.rs), run in-process with the mock GitHub API in `tests/contract/` (ADR-005).
+Gate: `cargo fmt --all --check`, `cargo clippy --all-targets -- -D warnings`, `cargo nextest run`,
+`cargo test --doc`.

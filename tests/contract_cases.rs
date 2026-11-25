@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 fn case_path(case_name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../tests/cases")
+        .join("tests/cases")
         .join(format!("{case_name}.json"))
 }
 
