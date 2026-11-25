@@ -283,3 +283,7 @@ installation's repositories fails, that installation's repositories stay schedul
   `CACHE_REDIS_PASSWORD` or `CACHE_REDIS_REFRESH_THRESHOLD` setting.
 - Redis errors are logged and treated as a cache miss instead of failing the webhook.
 - The App-authenticated requests of the scheduler (`GET /app/installations`) are not throttled or retried.
+- `approvals` with `limit`: when the allowed set (`limit.teams` members who approved, `limit.users`, CODEOWNERS of
+  `limit.owners`) is empty, for example because the repository has no CODEOWNERS file, all approvals count, the
+  same way `required.owners` passes without a CODEOWNERS file (ADR-014, upstream
+  Ch4s3r/mergeable@5286915).
