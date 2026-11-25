@@ -1,5 +1,6 @@
 use crate::app_config::JiraSettings;
 use crate::error::{Error, Result};
+use crate::github::client::encode_uri_component;
 use crate::json_value;
 use crate::validators::options::output::{self, OptionResult};
 use crate::validators::options::text_matching;
@@ -12,12 +13,15 @@ const FAILURE_DESCRIPTION: &str = "The JIRA TICKET is not valid";
 #[must_use]
 pub fn ticket_url(ticket_id: &str, jira: &JiraSettings) -> Option<String> {
     let host = jira.host.as_deref()?;
+    if matches!(ticket_id, "." | "..") {
+        return None;
+    }
     let host_part = if host.contains(':') {
         format!("[{host}]")
     } else {
         host.to_string()
     };
-    let escaped_ticket = ticket_id.replace('#', "%23").replace('?', "%3F");
+    let escaped_ticket = encode_uri_component(ticket_id);
     Some(format!(
         "{}://{host_part}/rest/api/{}/issue/{escaped_ticket}?expand=&fields=*all&properties=*all&fieldsByKeys=false",
         jira.protocol.trim_end_matches(':'),
@@ -129,6 +133,33 @@ mod tests {
             error.message(),
             "Failed to create a regex expression with the provided regex: ["
         );
+    }
+
+    fn jira_on(host: &str) -> crate::app_config::JiraSettings {
+        crate::app_config::JiraSettings::from_environment(
+            &crate::app_config::Environment::from_iter([("JIRA_HOST", host)]),
+        )
+    }
+
+    #[test]
+    fn ticket_url_points_at_the_issue_of_the_ticket() {
+        assert_eq!(
+            ticket_url("ABC-123", &jira_on("jira.example.com")).as_deref(),
+            Some(
+                "https://jira.example.com/rest/api/2/issue/ABC-123?expand=&fields=*all&properties=*all&fieldsByKeys=false"
+            )
+        );
+    }
+
+    #[test]
+    fn ticket_from_the_pull_request_cannot_leave_the_issue_path() {
+        let jira = jira_on("jira.example.com");
+        let traversal = ticket_url("../../../../admin?x=#y", &jira).unwrap_or_default();
+        assert!(traversal.starts_with(
+            "https://jira.example.com/rest/api/2/issue/..%2F..%2F..%2F..%2Fadmin%3Fx%3D%23y?"
+        ));
+        assert_eq!(ticket_url("..", &jira), None);
+        assert_eq!(ticket_url(".", &jira), None);
     }
 
     #[test]

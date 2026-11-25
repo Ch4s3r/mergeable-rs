@@ -1,5 +1,5 @@
 use crate::annotations;
-use crate::error::{Error, Result};
+use crate::error::{Error, ErrorKind, Result};
 use crate::json_value;
 use chrono::{
     DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Timelike, Utc,
@@ -30,6 +30,7 @@ const MONTH_ABBREVIATIONS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 const MAXIMUM_DATE_MILLISECONDS: i64 = 8_640_000_000_000_000;
+const MAXIMUM_NESTING_DEPTH: usize = 100;
 
 pub fn render(template: &str, data: &Value) -> Result<String> {
     let mut program = parse(template)?;
@@ -788,7 +789,11 @@ fn literal_source_text(expression: &Expression) -> String {
 
 fn parse(template: &str) -> Result<Program> {
     let tokens = Lexer::new(template).tokenize()?;
-    let mut parser = Parser { tokens, index: 0 };
+    let mut parser = Parser {
+        tokens,
+        index: 0,
+        nesting_depth: 0,
+    };
     let program = parser.parse_program()?;
     if parser.peek() != TokenKind::EndOfInput {
         return Err(parser.error());
@@ -799,6 +804,7 @@ fn parse(template: &str) -> Result<Program> {
 struct Parser<'source> {
     tokens: Vec<Token<'source>>,
     index: usize,
+    nesting_depth: usize,
 }
 
 impl<'source> Parser<'source> {
@@ -844,6 +850,22 @@ impl<'source> Parser<'source> {
         Error::general(format!("Parse error on line {line}: unexpected {found:?}"))
     }
 
+    fn nested<Parsed>(
+        &mut self,
+        parse: impl FnOnce(&mut Self) -> Result<Parsed>,
+    ) -> Result<Parsed> {
+        if self.nesting_depth >= MAXIMUM_NESTING_DEPTH {
+            return Err(Error::new(
+                ErrorKind::OutOfRange,
+                "Maximum call stack size exceeded",
+            ));
+        }
+        self.nesting_depth += 1;
+        let parsed = parse(self);
+        self.nesting_depth -= 1;
+        parsed
+    }
+
     fn expect(&mut self, kind: TokenKind) -> Result<Token<'source>> {
         if self.peek() == kind {
             Ok(self.advance())
@@ -873,7 +895,7 @@ impl<'source> Parser<'source> {
                     body.push(Statement::Mustache(self.parse_mustache()?));
                 }
                 TokenKind::OpenBlock | TokenKind::OpenInverse => {
-                    body.push(Statement::Block(Box::new(self.parse_block()?)));
+                    body.push(Statement::Block(Box::new(self.nested(Self::parse_block)?)));
                 }
                 TokenKind::Unsupported | TokenKind::Invalid => return Err(self.error()),
                 _ => break,
@@ -937,7 +959,7 @@ impl<'source> Parser<'source> {
     fn parse_param(&mut self) -> Result<Expression> {
         if self.peek() == TokenKind::OpenSubExpression {
             self.advance();
-            let call = self.parse_call()?;
+            let call = self.nested(Self::parse_call)?;
             self.expect(TokenKind::CloseSubExpression)?;
             return Ok(Expression::Invocation(Box::new(call)));
         }
@@ -1055,7 +1077,7 @@ impl<'source> Parser<'source> {
         let program = self.parse_program()?;
         let inverse_and_program = match self.peek() {
             TokenKind::OpenInverseChain if opening == BlockOpening::Regular => {
-                Some(self.parse_inverse_chain()?)
+                Some(self.nested(Self::parse_inverse_chain)?)
             }
             TokenKind::Inverse => Some(self.parse_inverse_and_program()?),
             _ => None,
@@ -1089,7 +1111,7 @@ impl<'source> Parser<'source> {
         let open = self.parse_open_block(&open_token)?;
         let program = self.parse_program()?;
         let nested = match self.peek() {
-            TokenKind::OpenInverseChain => Some(self.parse_inverse_chain()?),
+            TokenKind::OpenInverseChain => Some(self.nested(Self::parse_inverse_chain)?),
             TokenKind::Inverse => Some(self.parse_inverse_and_program()?),
             _ => None,
         };
@@ -2675,6 +2697,70 @@ mod tests {
     use serde_json::json;
 
     const TEMPLATE_CORPUS: &str = include_str!("../tests/fixtures/templates.json");
+
+    fn render_on_a_one_megabyte_stack(template: String) -> Result<String> {
+        std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(move || render(&template, &json!({"flag": true})))
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    fn nested_if_blocks(depth: usize) -> String {
+        format!(
+            "{}x{}",
+            "{{#if flag}}".repeat(depth),
+            "{{/if}}".repeat(depth)
+        )
+    }
+
+    fn nested_subexpressions(depth: usize) -> String {
+        format!(
+            "{{{{lookup {}flag{}}}}}",
+            "(lookup ".repeat(depth),
+            ")".repeat(depth)
+        )
+    }
+
+    fn chained_else_if_blocks(length: usize) -> String {
+        format!(
+            "{{{{#if missing}}}}a{}{{{{else}}}}x{{{{/if}}}}",
+            "{{else if missing}}b".repeat(length)
+        )
+    }
+
+    #[test]
+    fn templates_nested_up_to_the_limit_render() {
+        assert_eq!(
+            render_on_a_one_megabyte_stack(nested_if_blocks(MAXIMUM_NESTING_DEPTH)).unwrap(),
+            "x"
+        );
+        assert!(
+            render_on_a_one_megabyte_stack(nested_subexpressions(MAXIMUM_NESTING_DEPTH - 1))
+                .is_ok()
+        );
+        assert_eq!(
+            render_on_a_one_megabyte_stack(chained_else_if_blocks(MAXIMUM_NESTING_DEPTH - 1))
+                .unwrap(),
+            "x"
+        );
+    }
+
+    #[test]
+    fn deeply_nested_templates_fail_with_a_range_error_instead_of_overflowing_the_stack() {
+        for template in [
+            nested_if_blocks(50_000),
+            nested_subexpressions(50_000),
+            chained_else_if_blocks(50_000),
+        ] {
+            let error = render_on_a_one_megabyte_stack(template).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "RangeError: Maximum call stack size exceeded"
+            );
+        }
+    }
 
     #[test]
     fn every_corpus_template_renders_as_recorded() {
