@@ -38,7 +38,7 @@ impl Annotation {
                 "login",
             )?),
             Annotation::Action => json_value::to_display_string(event.action),
-            Annotation::Bot => bot_name(),
+            Annotation::Bot => bot_name(event.app_name),
             Annotation::Repository => display_or_empty(
                 event
                     .repository
@@ -50,11 +50,8 @@ impl Annotation {
 }
 
 #[must_use]
-pub fn bot_name() -> String {
-    match std::env::var("APP_NAME") {
-        Ok(name) if !name.is_empty() => format!("{name}[bot]"),
-        _ => "Mergeable[bot]".to_string(),
-    }
+pub fn bot_name(app_name: Option<&str>) -> String {
+    format!("{}[bot]", app_name.unwrap_or("Mergeable"))
 }
 
 fn display_or_empty(value: Option<&Value>) -> String {

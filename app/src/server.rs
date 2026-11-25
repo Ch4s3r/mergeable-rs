@@ -1,8 +1,10 @@
 use crate::app_config::AppConfig;
+use crate::app_state::AppState;
 use crate::context::{Context, SharedPayload};
 use crate::error::{Error, Result};
 use crate::github::app_auth::AppJwtClient;
-use crate::github::client::{GithubApp, InstallationClient};
+use crate::github::client::{GithubApp, GithubAppSettings, InstallationClient};
+use crate::github::throttle::RequestThrottle;
 use crate::json_value;
 use crate::metrics::{self, Metrics};
 use crate::scheduler::Scheduler;
@@ -20,15 +22,179 @@ use futures::stream::FuturesUnordered;
 use hmac::{Hmac, KeyInit, Mac};
 use serde_json::{Map, Value, json};
 use sha2::Sha256;
+use std::fmt;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tracing::Instrument;
 
 const STILL_PROCESSING_AFTER: Duration = Duration::from_secs(9);
+const GRACEFUL_SHUTDOWN_LIMIT: Duration = Duration::from_secs(5);
+
+#[derive(Debug)]
+pub enum StartupError {
+    GithubClient(Error),
+    Listen {
+        address: String,
+        source: std::io::Error,
+    },
+    Serve(std::io::Error),
+}
+
+impl fmt::Display for StartupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StartupError::GithubClient(error) => write!(formatter, "{error}"),
+            StartupError::Listen { address, source } => {
+                write!(formatter, "cannot listen on {address}: {source}")
+            }
+            StartupError::Serve(source) => write!(formatter, "server error: {source}"),
+        }
+    }
+}
+
+impl std::error::Error for StartupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            StartupError::GithubClient(error) => Some(error),
+            StartupError::Listen { source, .. } | StartupError::Serve(source) => Some(source),
+        }
+    }
+}
+
+impl From<Error> for StartupError {
+    fn from(error: Error) -> Self {
+        StartupError::GithubClient(error)
+    }
+}
+
+pub struct RunningServer {
+    address: SocketAddr,
+    shutdown_signal: oneshot::Sender<()>,
+    serving: JoinHandle<std::io::Result<()>>,
+}
+
+fn serving_outcome(
+    joined: std::result::Result<std::io::Result<()>, tokio::task::JoinError>,
+) -> std::result::Result<(), StartupError> {
+    match joined {
+        Ok(served) => served.map_err(StartupError::Serve),
+        Err(join_error) => Err(StartupError::Serve(std::io::Error::other(join_error))),
+    }
+}
+
+impl RunningServer {
+    #[must_use]
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    pub async fn wait(self) -> std::result::Result<(), StartupError> {
+        let RunningServer {
+            shutdown_signal,
+            serving,
+            ..
+        } = self;
+        let outcome = serving_outcome(serving.await);
+        drop(shutdown_signal);
+        outcome
+    }
+
+    pub async fn shutdown(self) -> std::result::Result<(), StartupError> {
+        let RunningServer {
+            shutdown_signal,
+            mut serving,
+            ..
+        } = self;
+        let _ = shutdown_signal.send(());
+        if let Ok(joined) = tokio::time::timeout(GRACEFUL_SHUTDOWN_LIMIT, &mut serving).await {
+            return serving_outcome(joined);
+        }
+        serving.abort();
+        Ok(())
+    }
+}
+
+pub async fn start(config: AppConfig) -> std::result::Result<RunningServer, StartupError> {
+    let metrics = config
+        .metrics_endpoint_enabled
+        .then(|| Arc::new(Metrics::new()));
+    let github = Arc::new(GithubApp::new(
+        GithubAppSettings {
+            base_url: config.github_base_url.clone(),
+            app_id: config.app_id.clone(),
+            private_key_pem: config.private_key_pem.clone(),
+            retry_base_delay: config.github_retry_base_delay,
+            throttle: config.github_throttle_enabled.then(RequestThrottle::new),
+        },
+        metrics.clone(),
+    )?);
+    let app_client = Arc::new(AppJwtClient::new(
+        &config.github_base_url,
+        &config.app_id,
+        &config.private_key_pem,
+    )?);
+    let app = Arc::new(AppState::new(config.behavior.clone()));
+    tracing::info!(run_mode = ?config.run_mode, "app.mode");
+    let scheduler = if let Some(options) = &config.scheduler {
+        tracing::info!(
+            interval_milliseconds = options.interval_milliseconds,
+            "scheduler.started"
+        );
+        Some(Scheduler::start(
+            Arc::clone(&github),
+            Arc::clone(&app),
+            Arc::clone(&app_client),
+            options.clone(),
+        ))
+    } else {
+        tracing::info!("scheduler.disabled");
+        None
+    };
+    let requested_address = format!("{}:{}", config.host, config.port);
+    let state = ServerState {
+        github,
+        app,
+        app_client,
+        scheduler,
+        webhook_secret: Arc::from(config.webhook_secret.as_str()),
+        metrics,
+    };
+    let router = router(&config, state);
+    let listener = tokio::net::TcpListener::bind(&requested_address)
+        .await
+        .map_err(|source| StartupError::Listen {
+            address: requested_address.clone(),
+            source,
+        })?;
+    let address = listener
+        .local_addr()
+        .map_err(|source| StartupError::Listen {
+            address: requested_address,
+            source,
+        })?;
+    tracing::info!(%address, "server.listening");
+    let (shutdown_signal, shutdown_requested) = oneshot::channel::<()>();
+    let serving = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_requested.await;
+            })
+            .await
+    });
+    Ok(RunningServer {
+        address,
+        shutdown_signal,
+        serving,
+    })
+}
 
 #[derive(Clone)]
 pub struct ServerState {
     pub github: Arc<GithubApp>,
+    pub app: Arc<AppState>,
     pub app_client: Arc<AppJwtClient>,
     pub scheduler: Option<Arc<Scheduler>>,
     pub webhook_secret: Arc<str>,
@@ -395,12 +561,13 @@ fn event_client(github: &Arc<GithubApp>, event_name: &str, payload: &Value) -> I
 
 pub async fn run_mergeable(
     github: Arc<GithubApp>,
+    app: Arc<AppState>,
     delivery_id: String,
     event_name: String,
     payload: SharedPayload,
 ) -> Result<()> {
     let client = event_client(&github, &event_name, &payload);
-    let context = Context::new(delivery_id, event_name, payload, client);
+    let context = Context::new(delivery_id, event_name, payload, client, app);
     let span = tracing::info_span!(
         "event",
         event_id = %context.event_id,
@@ -431,6 +598,7 @@ pub async fn handle_event(
     }
     handlers.push(Box::pin(run_mergeable(
         state.github,
+        state.app,
         delivery_id,
         event_name,
         payload,

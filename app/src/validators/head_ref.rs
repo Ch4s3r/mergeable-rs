@@ -38,6 +38,6 @@ impl Validator for HeadRef {
             "ref",
         )?
         .unwrap_or(&Value::Null);
-        validators::process_options(settings, head_ref, None).await
+        validators::process_options(settings, head_ref, None, &context.app.behavior.jira).await
     }
 }

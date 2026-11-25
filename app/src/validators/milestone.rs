@@ -46,7 +46,13 @@ impl Validator for Milestone {
             }
             _ => &empty_title,
         };
-        let mut output = validators::process_options(settings, milestone_title, None).await?;
+        let mut output = validators::process_options(
+            settings,
+            milestone_title,
+            None,
+            &context.app.behavior.jira,
+        )
+        .await?;
 
         if Status::of(&output) == Some(Status::Fail) {
             let closed_issues =
@@ -61,7 +67,13 @@ impl Validator for Milestone {
                 for issue_milestone in &milestones {
                     let issue_title =
                         json_value::get(issue_milestone, "title").unwrap_or(&Value::Null);
-                    output = validators::process_options(settings, issue_title, None).await?;
+                    output = validators::process_options(
+                        settings,
+                        issue_title,
+                        None,
+                        &context.app.behavior.jira,
+                    )
+                    .await?;
                 }
             }
         }

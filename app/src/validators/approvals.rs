@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::context::Context;
 use crate::error::{Error, ErrorKind, Result};
 use crate::event_aware;
@@ -268,6 +269,7 @@ async fn limit_to_allowed_sources(
 async fn process_options_raw(
     settings: &Value,
     approved_reviewers: Vec<Value>,
+    jira: &JiraSettings,
 ) -> Result<Vec<Value>> {
     let options_context = validators::options_context(settings, &DEFAULT_SUPPORTED_OPTIONS);
     let raw_output = validators::options::process(
@@ -275,6 +277,7 @@ async fn process_options_raw(
         &Value::Array(approved_reviewers),
         settings,
         true,
+        jira,
     )
     .await?;
     Ok(json_value::into_array_or_wrap(raw_output))
@@ -336,7 +339,14 @@ impl Validator for Approvals {
         }
         approved_reviewers = exclude_users(approved_reviewers, exclude_option.as_ref());
 
-        output.extend(process_options_raw(&options_settings, approved_reviewers).await?);
+        output.extend(
+            process_options_raw(
+                &options_settings,
+                approved_reviewers,
+                &context.app.behavior.jira,
+            )
+            .await?,
+        );
 
         if let Some(block) = block_option
             .as_ref()

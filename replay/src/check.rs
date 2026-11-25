@@ -1,24 +1,15 @@
 use crate::app_process::AppProgram;
 use crate::case::Case;
-use crate::compare::{CallComparison, compare_calls};
+use crate::contract::{Outcome, judge};
 use crate::runner::{
     CaseRun, RunOptions, for_each_in_parallel, run_case_in_fresh_process, run_cases_in_one_process,
 };
 use anyhow::Result;
 use serde::Serialize;
-use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
 
 const HARNESS_ATTEMPTS: usize = 3;
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum Outcome {
-    Pass,
-    PassOrderDiffers,
-    Fail,
-}
 
 #[derive(Debug, Serialize)]
 pub struct CaseReport {
@@ -36,55 +27,6 @@ pub struct CheckReport {
     pub failed: usize,
     pub known_diffs: usize,
     pub cases: Vec<CaseReport>,
-}
-
-fn pretty_or_missing(call: Option<&Value>) -> String {
-    call.and_then(|call| serde_json::to_string_pretty(call).ok())
-        .unwrap_or_else(|| "<no call>".to_owned())
-}
-
-fn judge(case: &Case, run: &CaseRun) -> (Outcome, Option<String>) {
-    let Some(expected) = &case.definition.expected else {
-        return (
-            Outcome::Fail,
-            Some("no expected section: run replay record first".to_owned()),
-        );
-    };
-    if expected.status != run.status {
-        return (
-            Outcome::Fail,
-            Some(format!(
-                "webhook status: expected {}, actual {}",
-                expected.status, run.status
-            )),
-        );
-    }
-    match compare_calls(&expected.calls, &run.calls) {
-        CallComparison::Equal => (Outcome::Pass, None),
-        CallComparison::OrderDiffers { .. } if case.definition.unordered => (Outcome::Pass, None),
-        CallComparison::OrderDiffers {
-            first_differing_position,
-        } => (
-            Outcome::PassOrderDiffers,
-            Some(format!(
-                "same calls, order differs from position {first_differing_position}"
-            )),
-        ),
-        CallComparison::Different {
-            first_differing_position,
-            expected: expected_call,
-            actual: actual_call,
-        } => (
-            Outcome::Fail,
-            Some(format!(
-                "{} expected calls, {} actual; first difference at call {first_differing_position}\nexpected:\n{}\nactual:\n{}",
-                expected.calls.len(),
-                run.calls.len(),
-                pretty_or_missing(expected_call.as_ref()),
-                pretty_or_missing(actual_call.as_ref()),
-            )),
-        ),
-    }
 }
 
 async fn run_all(

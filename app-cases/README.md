@@ -1,16 +1,22 @@
 # App cases
 
 Black-box contract tests. Each file `app-cases/cases/<name>.json` is one recorded webhook scenario. The
-`replay` crate (replay) starts an app process behind a mock GitHub API, sends the signed webhook and compares
-the GitHub API calls the app makes and its HTTP response with the recorded expectation (ADR-005).
+`replay` crate starts the app behind a mock GitHub API, sends the signed webhook and compares the GitHub API
+calls the app makes and its HTTP response with the recorded expectation (ADR-005).
 
-- `replay check --bin <mergeable binary>` runs the cases against a build and fails on any difference.
+- `cargo nextest run --test contract_cases` (or `cargo test --test contract_cases`) runs every case as an
+  ordinary Rust test. `app/build.rs` generates one test per case file (`action-assign-author` becomes
+  `action_assign_author`); each test starts the mock and the app in-process (`mergeable::server::start` on port 0)
+  with the same environment as below plus the case `env`. A case passes when the calls match, also when only
+  the order differs; a case with `known_diff` does not fail on a difference. A failing case prints the first
+  differing call and a diff of all calls.
+- `replay check --bin <mergeable binary>` runs the cases against a built binary, one process per case.
 - `replay record --reference-command <command…>` records `expected` from any reference implementation that
   speaks the same HTTP and environment interface. Each case is run twice; if the two runs disagree only on call
   order, the case is marked `unordered`.
 - `replay bench` fires many webhooks drawn from the cases for throughput and latency (BENCHMARK.md).
 
-Commands run from the repository root; `--case <name>` selects cases, `--jobs` sets parallelism.
+The `replay` commands run from the repository root; `--case <name>` selects cases, `--jobs` sets parallelism.
 
 ## Format
 
@@ -18,7 +24,7 @@ Commands run from the repository root; `--case <name>` selects cases, `--jobs` s
 {
   "name": "title-must-include-fail",          // = file name without .json
   "description": "what this case proves",
-  "env": { "APP_NAME": "Mergeable" },          // optional extra env vars for the app process
+  "env": { "APP_NAME": "Mergeable" },          // optional extra env vars for the app (this case only)
   "event": "pull_request",                     // X-GitHub-Event header
   "payload": { ... },                          // webhook body; must contain installation.id and repository (owner.login, name, full_name)
   "files": {                                   // sugar: repository files served by GET /repos/{owner}/{repo}/contents/{path}

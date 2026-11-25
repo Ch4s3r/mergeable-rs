@@ -1,32 +1,62 @@
+use crate::app_config::Environment;
+use crate::redis_cache::{RedisCache, RedisSettings};
 use serde_json::Value;
 use std::time::Duration;
 
-pub enum ConfigCache {
-    Memory(moka::future::Cache<String, Value>),
-    Redis(crate::redis_cache::RedisCache),
+#[derive(Debug, Clone, PartialEq)]
+pub enum CacheSettings {
+    Memory {
+        max_entries: Option<u64>,
+        time_to_live: Option<Duration>,
+    },
+    Redis(RedisSettings),
 }
 
-#[must_use]
-pub fn env_number(name: &str) -> Option<u64> {
-    std::env::var(name)
-        .ok()
+fn number_variable(environment: &Environment, name: &str) -> Option<u64> {
+    environment
+        .value(name)
         .and_then(|value| value.trim().parse::<u64>().ok())
+}
+
+impl CacheSettings {
+    #[must_use]
+    pub fn from_environment(environment: &Environment) -> Self {
+        if environment.value("CACHE_STORAGE") == Some("redis") {
+            return CacheSettings::Redis(RedisSettings::from_environment(environment));
+        }
+        CacheSettings::Memory {
+            max_entries: number_variable(environment, "CACHE_MEMORY_MAX"),
+            time_to_live: number_variable(environment, "CACHE_TTL").map(Duration::from_secs),
+        }
+    }
+}
+
+pub enum ConfigCache {
+    Memory(moka::future::Cache<String, Value>),
+    Redis(RedisCache),
 }
 
 impl ConfigCache {
     #[must_use]
-    pub fn from_env() -> Self {
-        if std::env::var("CACHE_STORAGE").as_deref() == Ok("redis") {
-            return ConfigCache::Redis(crate::redis_cache::RedisCache::from_env());
+    pub fn new(settings: &CacheSettings) -> Self {
+        match settings {
+            CacheSettings::Redis(redis_settings) => {
+                ConfigCache::Redis(RedisCache::new(redis_settings.clone()))
+            }
+            CacheSettings::Memory {
+                max_entries,
+                time_to_live,
+            } => {
+                let mut builder = moka::future::Cache::builder();
+                if let Some(max_entries) = max_entries {
+                    builder = builder.max_capacity(*max_entries);
+                }
+                if let Some(time_to_live) = time_to_live {
+                    builder = builder.time_to_live(*time_to_live);
+                }
+                ConfigCache::Memory(builder.build())
+            }
         }
-        let mut builder = moka::future::Cache::builder();
-        if let Some(max_entries) = env_number("CACHE_MEMORY_MAX") {
-            builder = builder.max_capacity(max_entries);
-        }
-        if let Some(ttl_seconds) = env_number("CACHE_TTL") {
-            builder = builder.time_to_live(Duration::from_secs(ttl_seconds));
-        }
-        ConfigCache::Memory(builder.build())
     }
 
     pub async fn get(&self, key: &str) -> Option<Value> {

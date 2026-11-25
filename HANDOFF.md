@@ -1,8 +1,9 @@
 # Handoff
 
 - Decisions: DECISIONS.md. Modules: MAP.md. Numbers: BENCHMARK.md. Usage: README.md.
-- Environment: `devenv shell` (Rust, cargo-edit, git-cliff, pack, redis).
-- Verify everything: `devenv test` (fmt, clippy, unit tests and the contract tests).
+- Environment: `devenv shell` (Rust, cargo-edit, cargo-nextest, git-cliff, pack, redis).
+- Verify everything: `devenv test` (fmt, clippy, `cargo nextest run --workspace` with unit and contract tests,
+  doctests). Contract tests alone: `cargo nextest run --test contract_cases` or `cargo test --test contract_cases`.
 - Record a new case: add `app-cases/cases/<name>.json` without `expected`, then
   `target/release/replay record --missing-only --jobs 8 --reference-command <command that starts the reference app>`.
 - The template, glob and YAML corpora in app/tests/fixtures are fixed golden data (ADR-009).

@@ -1,4 +1,3 @@
-use crate::cache::ConfigCache;
 use crate::context::Context;
 use crate::error::Result;
 use crate::filters::options;
@@ -6,9 +5,6 @@ use crate::filters::options_processor::name::ProcessedOption;
 use crate::github::api;
 use crate::json_value;
 use serde_json::{Value, json};
-use std::sync::LazyLock;
-
-static TOPICS_CACHE: LazyLock<ConfigCache> = LazyLock::new(ConfigCache::from_env);
 
 pub async fn process(
     context: &Context,
@@ -25,7 +21,7 @@ async fn repository_topics(context: &Context) -> Result<Value> {
     let cache_key = format!("{}/topics", context.repository_name()?);
     let use_config_cache = context.global_setting("use_config_cache")? == Some(&Value::Bool(true));
     if use_config_cache
-        && let Some(names) = TOPICS_CACHE.get(&cache_key).await
+        && let Some(names) = context.app.topics_cache.get(&cache_key).await
         && json_value::is_truthy(&names)
     {
         return Ok(names);
@@ -36,7 +32,11 @@ async fn repository_topics(context: &Context) -> Result<Value> {
     });
     let topics = api::fetch_all_topics(context, params).await?;
     if use_config_cache {
-        TOPICS_CACHE.set(&cache_key, topics.clone()).await;
+        context
+            .app
+            .topics_cache
+            .set(&cache_key, topics.clone())
+            .await;
     }
     Ok(topics)
 }

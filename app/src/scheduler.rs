@@ -1,3 +1,5 @@
+use crate::app_config::Environment;
+use crate::app_state::AppState;
 use crate::context::SharedPayload;
 use crate::error::{Error, Result};
 use crate::github::app_auth::AppJwtClient;
@@ -20,6 +22,7 @@ pub enum FirstRun {
     Immediate,
 }
 
+#[derive(Debug, Clone)]
 pub struct SchedulerOptions {
     pub first_run: FirstRun,
     pub interval_milliseconds: f64,
@@ -28,16 +31,17 @@ pub struct SchedulerOptions {
 
 impl SchedulerOptions {
     #[must_use]
-    pub fn from_env(interval_milliseconds: f64) -> Self {
-        let environment_text = |name: &str| std::env::var(name).unwrap_or_default();
+    pub fn from_environment(environment: &Environment, interval_milliseconds: f64) -> Self {
         SchedulerOptions {
-            first_run: if environment_text("DISABLE_DELAY").is_empty() {
+            first_run: if environment.non_empty("DISABLE_DELAY").is_none() {
                 FirstRun::RandomlyDelayed
             } else {
                 FirstRun::Immediate
             },
             interval_milliseconds,
-            ignored_accounts: parse_ignored_accounts(&environment_text("IGNORED_ACCOUNTS")),
+            ignored_accounts: parse_ignored_accounts(
+                environment.value("IGNORED_ACCOUNTS").unwrap_or_default(),
+            ),
         }
     }
 }
@@ -99,6 +103,7 @@ fn repository_key(repository: &Value) -> String {
 
 pub struct Scheduler {
     github: Arc<GithubApp>,
+    app: Arc<AppState>,
     app_client: Arc<AppJwtClient>,
     options: SchedulerOptions,
     intervals: Mutex<HashMap<String, JoinHandle<()>>>,
@@ -108,12 +113,14 @@ pub struct Scheduler {
 impl Scheduler {
     pub fn start(
         github: Arc<GithubApp>,
+        app: Arc<AppState>,
         app_client: Arc<AppJwtClient>,
         options: SchedulerOptions,
     ) -> Arc<Scheduler> {
         let (installation_queue, mut queued_installations) = mpsc::unbounded_channel::<Value>();
         let scheduler = Arc::new(Scheduler {
             github,
+            app,
             app_client,
             options,
             intervals: Mutex::new(HashMap::new()),
@@ -218,14 +225,17 @@ impl Scheduler {
         );
         let payload = SharedPayload::from(scheduled_event_payload(installation, repository));
         let github = Arc::clone(&self.github);
+        let app = Arc::clone(&self.app);
         let timer = tokio::spawn(async move {
             tokio::time::sleep(timer_duration(delay_milliseconds)).await;
             loop {
                 let receive_github = Arc::clone(&github);
+                let receive_app = Arc::clone(&app);
                 let receive_payload = payload.clone();
                 tokio::spawn(async move {
                     let outcome = server::run_mergeable(
                         receive_github,
+                        receive_app,
                         String::new(),
                         SCHEDULE_EVENT_NAME.to_string(),
                         receive_payload,

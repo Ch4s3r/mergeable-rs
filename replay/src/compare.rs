@@ -30,6 +30,7 @@ fn sorted_canonical_texts(calls: &[Value]) -> Vec<String> {
     texts
 }
 
+#[must_use]
 pub fn compare_calls(expected: &[Value], actual: &[Value]) -> CallComparison {
     let position = first_differing_position(expected, actual);
     if expected.len() == actual.len() && position == expected.len() {

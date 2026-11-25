@@ -1,19 +1,18 @@
 use crate::app_process::{AppProcess, AppProgram};
 use crate::case::Case;
-use crate::mock::{MockServer, Scenario};
-use crate::webhook::{Webhook, WebhookSender};
-use anyhow::{Context as _, Result, anyhow};
-use serde_json::Value;
+use crate::contract::{case_quiet_period, exercise_case};
+use crate::mock::MockServer;
+use anyhow::{Result, anyhow};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-const MAXIMUM_CASE_DURATION: Duration = Duration::from_secs(40);
+pub use crate::contract::CaseRun;
+
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
-const GRACE_AFTER_EXPECTED_CALLS: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone)]
 pub struct RunOptions {
@@ -27,89 +26,6 @@ impl RunOptions {
     fn log_path(&self, log_name: &str) -> PathBuf {
         self.log_directory.join(format!("{log_name}.log"))
     }
-}
-
-pub struct CaseRun {
-    pub status: u16,
-    pub calls: Vec<Value>,
-    pub settled: bool,
-}
-
-pub fn webhook_of_case(case: &Case) -> Result<Webhook> {
-    Ok(Webhook {
-        event: case.definition.event.clone(),
-        delivery_id: case.definition.delivery_id(),
-        body: serde_json::to_vec(&case.definition.payload)?,
-    })
-}
-
-fn case_quiet_period(case: &Case, default_quiet_period: Duration) -> Duration {
-    case.definition
-        .quiet_ms
-        .map(Duration::from_millis)
-        .map_or(default_quiet_period, |case_period| {
-            case_period.max(default_quiet_period)
-        })
-}
-
-fn expected_call_count(case: &Case) -> Option<usize> {
-    if case.definition.quiet_ms.is_some() {
-        return None;
-    }
-    case.definition
-        .expected
-        .as_ref()
-        .map(|expected| expected.calls.len())
-}
-
-async fn wait_for_quiet_mock(
-    mock: &MockServer,
-    webhook_answered_at: Instant,
-    quiet_period: Duration,
-    expected_calls: Option<usize>,
-) -> bool {
-    loop {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        let last_activity = mock.github.last_request_at().max(webhook_answered_at);
-        let quiet_for = last_activity.elapsed();
-        if quiet_for >= quiet_period {
-            return true;
-        }
-        let reached_expected_calls =
-            expected_calls.is_some_and(|expected| mock.github.recorded_call_count() >= expected);
-        if reached_expected_calls && quiet_for >= GRACE_AFTER_EXPECTED_CALLS {
-            return true;
-        }
-        if webhook_answered_at.elapsed() >= MAXIMUM_CASE_DURATION {
-            return false;
-        }
-    }
-}
-
-async fn exercise_case(
-    mock: &MockServer,
-    app: &AppProcess,
-    case: &Case,
-    quiet_period: Duration,
-) -> Result<CaseRun> {
-    mock.github
-        .load_scenarios(vec![Scenario::from_case(&case.definition)], true);
-    let status = WebhookSender::new()?
-        .send(app.port, &app.webhook_path, &webhook_of_case(case)?)
-        .await
-        .with_context(|| format!("sending webhook of case {}", case.definition.name))?;
-    let settled = wait_for_quiet_mock(
-        mock,
-        Instant::now(),
-        quiet_period,
-        expected_call_count(case),
-    )
-    .await;
-    Ok(CaseRun {
-        status,
-        calls: mock.github.take_calls(),
-        settled,
-    })
 }
 
 pub async fn run_case_in_fresh_process(
@@ -129,7 +45,8 @@ pub async fn run_case_in_fresh_process(
         Ok(()) => {
             exercise_case(
                 &mock,
-                &app,
+                app.port,
+                &app.webhook_path,
                 case,
                 case_quiet_period(case, options.quiet_period),
             )
@@ -172,7 +89,8 @@ pub async fn run_cases_in_one_process(
         case_runs.push(
             exercise_case(
                 &mock,
-                app,
+                app.port,
+                &app.webhook_path,
                 case,
                 case_quiet_period(case, options.quiet_period),
             )

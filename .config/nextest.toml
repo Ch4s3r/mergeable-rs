@@ -1,0 +1,10 @@
+[profile.default]
+test-threads = 32
+slow-timeout = { period = "30s", terminate-after = 2 }
+
+[test-groups]
+contract-cases = { max-threads = 32 }
+
+[[profile.default.overrides]]
+filter = "binary(contract_cases)"
+test-group = "contract-cases"

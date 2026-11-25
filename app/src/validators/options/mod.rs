@@ -16,6 +16,7 @@ pub mod required;
 pub mod text_matching;
 pub mod user_pattern;
 
+use crate::app_config::JiraSettings;
 use crate::error::{Error, Result};
 use crate::json_value;
 use crate::results;
@@ -86,11 +87,12 @@ impl DeferredOption {
         validator_context: &Value,
         input: &Value,
         rule: &Value,
+        jira: &JiraSettings,
     ) -> Result<OptionResult> {
         match self {
-            DeferredOption::And => and::process(validator_context, input, rule).await,
-            DeferredOption::Or => or::process(validator_context, input, rule).await,
-            DeferredOption::Jira => jira::process(validator_context, input, rule).await,
+            DeferredOption::And => and::process(validator_context, input, rule, jira).await,
+            DeferredOption::Or => or::process(validator_context, input, rule, jira).await,
+            DeferredOption::Jira => jira::process(validator_context, input, rule, jira).await,
         }
     }
 }
@@ -159,6 +161,7 @@ pub async fn process(
     input: &Value,
     rules: &Value,
     return_raw_output: bool,
+    jira: &JiraSettings,
 ) -> Result<Value> {
     let rule_list: &[Value] = match rules {
         Value::Array(items) => items,
@@ -236,7 +239,7 @@ pub async fn process(
     let deferred_outputs = join_all(pending_options.iter().map(|pending| async move {
         let outcome = pending
             .option
-            .evaluate(validator_context, input, pending.rule)
+            .evaluate(validator_context, input, pending.rule, jira)
             .await;
         output_for(validator_context, input, &pending.setting, outcome)
     }))
@@ -268,14 +271,21 @@ mod tests {
             &json!(["A", "C"]),
             &json!({"do": "label", "must_include": {"regex": "A"}}),
             false,
+            &crate::app_config::JiraSettings::default(),
         )
         .await
         .unwrap();
         assert_eq!(single["status"], "pass");
         let list = json!([{"do": "label", "must_include": {"regex": "A"}}, {"do": "label", "must_exclude": {"regex": "B"}}]);
-        let combined = process(&json!("label"), &json!(["A", "C"]), &list, false)
-            .await
-            .unwrap();
+        let combined = process(
+            &json!("label"),
+            &json!(["A", "C"]),
+            &list,
+            false,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(combined["status"], "pass");
     }
 
@@ -286,6 +296,7 @@ mod tests {
             &json!(["A"]),
             &json!({"do": "label", "must_be_include": {"regex": "A"}}),
             false,
+            &crate::app_config::JiraSettings::default(),
         )
         .await
         .unwrap();
@@ -303,6 +314,7 @@ mod tests {
             &json!("alice"),
             &json!({"do": "author", "team": ""}),
             false,
+            &crate::app_config::JiraSettings::default(),
         )
         .await
         .unwrap();
@@ -319,6 +331,7 @@ mod tests {
             &json!("A"),
             &json!({"do": "label", "must_include": {"regex": "A"}}),
             true,
+            &crate::app_config::JiraSettings::default(),
         )
         .await
         .unwrap();
@@ -333,6 +346,7 @@ mod tests {
             &json!("x"),
             &json!({"do": "title", "max": {"count": 1}}),
             false,
+            &crate::app_config::JiraSettings::default(),
         )
         .await
         .unwrap();
@@ -345,9 +359,15 @@ mod tests {
     #[tokio::test]
     async fn outputs_list_simple_options_before_and_or_results() {
         let rule = json!({"do": "title", "and": [{"must_include": {"regex": "x"}}], "begins_with": {"match": "x"}, "foo": 1, "must_include": {}});
-        let result = process(&label_context(), &json!("x"), &rule, true)
-            .await
-            .unwrap();
+        let result = process(
+            &label_context(),
+            &json!("x"),
+            &rule,
+            true,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap();
         let described: Vec<String> = result
             .as_array()
             .unwrap()
@@ -367,9 +387,15 @@ mod tests {
 
     #[tokio::test]
     async fn null_rule_is_a_type_error() {
-        let error = process(&label_context(), &json!("x"), &Value::Null, false)
-            .await
-            .unwrap_err();
+        let error = process(
+            &label_context(),
+            &json!("x"),
+            &Value::Null,
+            false,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             error.to_string(),
             "TypeError: Cannot convert undefined or null to object"

@@ -27,6 +27,7 @@ pub struct Scenario {
 }
 
 impl Scenario {
+    #[must_use]
     pub fn from_case(definition: &CaseDefinition) -> Scenario {
         Scenario {
             home_repository: definition.repository_full_name(),

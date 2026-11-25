@@ -1,3 +1,4 @@
+use crate::app_config::JiraSettings;
 use crate::error::Result;
 use crate::validators::options::and_or_processor::{self, Connective};
 use crate::validators::options::output::OptionResult;
@@ -7,8 +8,9 @@ pub async fn process(
     validator_context: &Value,
     input: &Value,
     rule: &Value,
+    jira: &JiraSettings,
 ) -> Result<OptionResult> {
-    and_or_processor::process(validator_context, input, rule, Connective::And).await
+    and_or_processor::process(validator_context, input, rule, Connective::And, jira).await
 }
 
 #[cfg(test)]
@@ -26,10 +28,15 @@ mod tests {
         let rule =
             json!({"and": [{"must_include": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
         assert_eq!(
-            process(&label_context(), &json!(["A", "C"]), &rule)
-                .await
-                .unwrap()
-                .status,
+            process(
+                &label_context(),
+                &json!(["A", "C"]),
+                &rule,
+                &crate::app_config::JiraSettings::default()
+            )
+            .await
+            .unwrap()
+            .status,
             Status::Pass
         );
     }
@@ -38,9 +45,14 @@ mod tests {
     async fn fails_when_one_sub_option_fails() {
         let rule =
             json!({"and": [{"must_include": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
-        let result = process(&label_context(), &json!(["B"]), &rule)
-            .await
-            .unwrap();
+        let result = process(
+            &label_context(),
+            &json!(["B"]),
+            &rule,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.status, Status::Fail);
         assert_eq!(
             result.description,
@@ -51,9 +63,14 @@ mod tests {
     #[tokio::test]
     async fn non_list_setting_is_an_input_type_error() {
         let rule = json!({"and": {"must_include": {"regex": "A"}}});
-        let error = process(&label_context(), &json!("the test"), &rule)
-            .await
-            .unwrap_err();
+        let error = process(
+            &label_context(),
+            &json!("the test"),
+            &rule,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             error.message(),
             "Input type invalid, expected array type as input"
@@ -65,19 +82,29 @@ mod tests {
         let wrong_sub_setting =
             json!({"and": [{"must_include": {"regexs": "A"}}, {"must_exclude": {"regex": "B"}}]});
         assert_eq!(
-            process(&label_context(), &json!(["B"]), &wrong_sub_setting)
-                .await
-                .unwrap()
-                .status,
+            process(
+                &label_context(),
+                &json!(["B"]),
+                &wrong_sub_setting,
+                &crate::app_config::JiraSettings::default()
+            )
+            .await
+            .unwrap()
+            .status,
             Status::Error
         );
         let unknown_option =
             json!({"and": [{"must_inclde": {"regex": "A"}}, {"must_exclude": {"regex": "B"}}]});
         assert_eq!(
-            process(&label_context(), &json!(["B"]), &unknown_option)
-                .await
-                .unwrap()
-                .status,
+            process(
+                &label_context(),
+                &json!(["B"]),
+                &unknown_option,
+                &crate::app_config::JiraSettings::default()
+            )
+            .await
+            .unwrap()
+            .status,
             Status::Error
         );
     }
@@ -86,9 +113,14 @@ mod tests {
     async fn every_unsupported_sub_option_is_listed_in_the_error() {
         let rule =
             json!({"and": [{"must_inclde": {"regex": "A"}}, {"must_excalude": {"regex": "B"}}]});
-        let result = process(&label_context(), &json!(["B"]), &rule)
-            .await
-            .unwrap();
+        let result = process(
+            &label_context(),
+            &json!(["B"]),
+            &rule,
+            &crate::app_config::JiraSettings::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.status, Status::Error);
         assert_eq!(
             result.description,

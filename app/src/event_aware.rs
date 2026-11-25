@@ -10,6 +10,7 @@ pub struct EventAttributes<'payload> {
     pub action: Option<&'payload Value>,
     pub repository: Option<&'payload Value>,
     pub sender: Option<&'payload Value>,
+    pub app_name: Option<&'payload str>,
 }
 
 impl<'payload> EventAttributes<'payload> {
@@ -19,6 +20,7 @@ impl<'payload> EventAttributes<'payload> {
             action: payload.get("action"),
             repository: payload.get("repository"),
             sender: payload.get("sender"),
+            app_name: None,
         }
     }
 
@@ -28,6 +30,7 @@ impl<'payload> EventAttributes<'payload> {
             action: Some(&EMPTY_STRING),
             repository: Some(&EMPTY_OBJECT),
             sender: Some(&EMPTY_OBJECT),
+            app_name: None,
         }
     }
 }
@@ -56,10 +59,15 @@ pub fn payload(context: &Context) -> Option<&Value> {
 
 #[must_use]
 pub fn event_attributes(context: &Context) -> EventAttributes<'_> {
-    if context.event_name == "schedule" {
-        return EventAttributes::of_schedule();
+    let attributes = if context.event_name == "schedule" {
+        EventAttributes::of_schedule()
+    } else {
+        EventAttributes::from_payload(&context.payload)
+    };
+    EventAttributes {
+        app_name: context.app.behavior.app_name.as_deref(),
+        ..attributes
     }
-    EventAttributes::from_payload(&context.payload)
 }
 
 #[cfg(test)]

@@ -40,8 +40,12 @@ Status: accepted
 Context: The observable behaviour of the app is the GitHub API traffic it produces for a webhook and the HTTP
 response it gives.
 Decision: A case is a webhook plus stubbed GitHub responses plus the expected calls and status
-(app-cases). The `replay` crate runs the binary behind a mock GitHub API and passes a case when the app
-makes the same calls (method, path, query, JSON body) in the same order and answers with the same status.
+(app-cases). Every case is a generated Rust test of `app` (`app/tests/contract_cases.rs`, `cargo nextest run`)
+that starts the server in-process behind the mock GitHub API of the `replay` library; it passes when the app
+makes the same calls (method, path, query, JSON body) and answers with the same status; a differing call
+order alone is reported but passes. The app reads its environment once into an immutable `Environment`
+snapshot, and caches are per server instance, so cases with different env run side by side in one process.
+`replay check --bin` still runs the cases against a built binary.
 Comment and check texts match byte for byte; ISO timestamps and the mock origin are normalised; logs are not
 compared. Expectations are written only by `replay record --reference-command <command>`, which records from
 any reference implementation, never by hand.

@@ -69,6 +69,6 @@ impl Validator for Author {
 
         let login =
             json_value::read(json_value::read(payload, "user")?, "login")?.unwrap_or(&Value::Null);
-        validators::process_options(&author_settings, login, None).await
+        validators::process_options(&author_settings, login, None, &context.app.behavior.jira).await
     }
 }

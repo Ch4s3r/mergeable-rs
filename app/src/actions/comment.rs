@@ -20,12 +20,8 @@ pub fn is_supported(event_name: &str) -> bool {
     event_aware::is_event_supported(&SUPPORTED_EVENTS, event_name)
 }
 
-fn bot_login() -> String {
-    let bot_name = match std::env::var("APP_NAME") {
-        Ok(name) if !name.is_empty() => name,
-        _ => "Mergeable".to_string(),
-    };
-    format!("{}[bot]", bot_name.to_lowercase())
+fn bot_login(app_name: Option<&str>) -> String {
+    format!("{}[bot]", app_name.unwrap_or("Mergeable").to_lowercase())
 }
 
 async fn fetch_comments_by_mergeable(
@@ -33,7 +29,7 @@ async fn fetch_comments_by_mergeable(
     issue_number: &Value,
 ) -> Result<Vec<Value>> {
     let comments = api::list_comments(context, issue_number).await?;
-    let bot = bot_login();
+    let bot = bot_login(context.app.behavior.app_name.as_deref());
     let mut by_bot = Vec::new();
     for comment in comments {
         let login = json_value::read_string(&comment, &["user", "login"])?;

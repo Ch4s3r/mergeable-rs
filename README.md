@@ -11,16 +11,18 @@ endpoint and the optional rate-limit and Prometheus routes. It reads `.github/me
 The workspace has two crates:
 
 - `app` (package `mergeable`): the server, the rule engine and the GitHub client.
-- `replay`: black-box contract tests that replay recorded webhook scenarios against the binary behind a mock
-  GitHub API (see [app-cases/README.md](app-cases/README.md)).
+- `replay`: library and CLI for the black-box contract tests: a mock GitHub API, case loading, webhook signing and
+  call comparison. Each recorded webhook scenario is an ordinary Rust test of `app` (`app/tests/contract_cases.rs`)
+  that runs the server in-process; the CLI records cases and benchmarks a binary (see
+  [app-cases/README.md](app-cases/README.md)).
 
 Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.md). Terms:
 [GLOSSARY.md](GLOSSARY.md). Performance: [BENCHMARK.md](BENCHMARK.md).
 
 ## Development
 
-The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-edit, git-cliff, pack and
-redis.
+The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-edit, cargo-nextest, git-cliff,
+pack and redis.
 
 ```sh
 devenv shell
@@ -88,9 +90,19 @@ or step by step inside `devenv shell`:
 
 ```sh
 cargo fmt --all --check
-cargo clippy --all-targets
-cargo test
-contract-tests            # 381 recorded webhook cases, 32 in parallel
+cargo clippy --all-targets -- -D warnings
+cargo nextest run --workspace     # unit tests and the 381 recorded webhook cases, 32 in parallel
+cargo test --doc --workspace
+```
+
+The contract cases are generated tests (one per `app-cases/cases/<name>.json`, named after the case with `-`
+replaced by `_`). Each starts the mock GitHub API and the app in-process, sends the signed webhook and compares
+the GitHub calls with the recording. Run them alone or pick one:
+
+```sh
+cargo nextest run --test contract_cases
+cargo nextest run --test contract_cases validator_title_must_include_fail
+cargo test --test contract_cases            # plain cargo test works too, in one process
 ```
 
 The Redis round trip test needs a local server and is ignored by default:
