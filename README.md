@@ -18,7 +18,7 @@ Architecture decisions: [DECISIONS.md](DECISIONS.md). Module map: [MAP.md](MAP.m
 ## Development
 
 The toolchain comes from [devenv](https://devenv.sh) (`devenv.nix`): Rust, cargo-edit, cargo-nextest, git-cliff,
-pack and redis.
+pack, redis and valkey.
 
 ```sh
 devenv shell
@@ -89,6 +89,15 @@ cargo fmt --all --check
 cargo clippy --all-targets -- -D warnings
 cargo nextest run                 # unit tests and the 381 recorded webhook cases, 32 in parallel
 cargo test --doc
+```
+
+`tests/github_data_cache.rs` replays recorded cases twice against one app (and once each against two app replicas
+sharing a [Valkey](https://valkey.io) server) and asserts which GitHub calls the cache saves. The Valkey test starts
+its own `valkey-server` on a free port when the binary is on `PATH` (it is in `devenv shell`, so `devenv test` runs
+it) and is skipped with a message otherwise:
+
+```sh
+cargo nextest run --test github_data_cache --no-capture
 ```
 
 The Redis round trip test needs a local server and is ignored by default:
@@ -185,7 +194,9 @@ recording new cases and the benchmark harness are no longer part of the reposito
 | `USE_CONFIG_CACHE`, `USE_SETTINGS_CACHE` | Cache config / settings per repository | off |
 | `USE_CONFIG_FROM_PULL_REQUEST` | Use the config changed in the pull request (always on; the variable cannot turn it off) | on |
 | `USE_ORG_AS_DEFAULT_CONFIG` | Merge the organisation `.github` repository config | off |
-| `CACHE_STORAGE` | `memory` or `redis` | `memory` |
+| `USE_GITHUB_DATA_CACHE` | `true` caches team members, team memberships, collaborators, repository topics and the organisation default config (see [Caching](#caching)) | off |
+| `GITHUB_DATA_CACHE_TTL` | Time to live in seconds of the GitHub data cache entries | `300` |
+| `CACHE_STORAGE` | `memory`, or `valkey` / `redis` for a shared Redis-protocol server (both use the `CACHE_REDIS_*` settings) | `memory` |
 | `CACHE_MEMORY_MAX`, `CACHE_TTL` | Memory cache size, entry time to live in seconds (also Redis `SETEX` ttl) | 500, none |
 | `CACHE_REDIS_HOST`, `CACHE_REDIS_PORT`, `CACHE_REDIS_DB` | Redis connection | `localhost`, `6379`, `0` |
 | `JIRA_HOST`, `JIRA_USERNAME`, `JIRA_PASSWORD`, `JIRA_PROTOCOL`, `JIRA_VERSION`, `JIRA_STRICT_SSL` | Jira option | - |
@@ -210,7 +221,28 @@ recording new cases and the benchmark harness are no longer part of the reposito
 - `GET /metrics`: `github_ratelimit_remaining_total` / `github_ratelimit_limit_total` gauges (label
   `installationId`, set from the `x-ratelimit-*` headers of every GitHub response), and the HTTP metrics
   `http_requests_total`, `http_request_duration_seconds`, `http_request_length_bytes`,
-  `http_response_length_bytes` with labels `route` (ids masked as `#val`), `method`, `status` (`2XX`..`5XX`).
+  `http_response_length_bytes` with labels `route` (ids masked as `#val`), `method`, `status` (`2XX`..`5XX`), and
+  `cache_lookups_total` with labels `cache` (`configuration`, `settings`, `topics`, `team_members`,
+  `team_memberships`, `collaborators`, `repository_topics`, `organization_config`) and `result` (`hit`, `miss`).
+
+## Caching
+
+Every cache uses the backend chosen by `CACHE_STORAGE`: `memory` keeps it per app instance, `valkey` (recommended)
+or `redis` shares it between replicas through one Redis-protocol server (`CACHE_REDIS_HOST`, `CACHE_REDIS_PORT`,
+`CACHE_REDIS_DB`). Valkey is open source and protocol compatible, so the same client is used for both.
+
+| Data | Switch | Key | Invalidation |
+|---|---|---|---|
+| Repository config (`.github/mergeable.yml`, merged) | `USE_CONFIG_CACHE` / `use_config_cache` | `owner/repo` | push changing the config file; `CACHE_TTL` |
+| Settings (`.github/mergeable.settings.yml`) | `USE_SETTINGS_CACHE` | `owner/repo/settings` | `CACHE_TTL` |
+| Repository topics | `use_config_cache` | `owner/repo/topics` | `CACHE_TTL` |
+| Team members, team memberships, collaborators, repository topics | `USE_GITHUB_DATA_CACHE` | `github-data:<cache>:<id>` | `GITHUB_DATA_CACHE_TTL` |
+| Organisation default config (`USE_ORG_AS_DEFAULT_CONFIG`) | `USE_GITHUB_DATA_CACHE` | `github-data:organization_config:owner/.github/<file>` | push to `owner/.github` changing the file; `GITHUB_DATA_CACHE_TTL` |
+| Installation tokens | always | per process | renewed shortly before they expire |
+
+Run Valkey locally with `devenv shell -- valkey-server --port 6379` and start the app with
+`CACHE_STORAGE=valkey USE_GITHUB_DATA_CACHE=true`. Compare `cache_lookups_total` and `github_ratelimit_remaining_total`
+on `/metrics` to see the saved requests.
 
 ## Scheduler
 

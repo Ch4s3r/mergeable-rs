@@ -35,6 +35,12 @@ static PATH_VALUE_MASKS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 type InstallationLabels = Vec<(String, String)>;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct CacheLookupLabels {
+    pub cache: String,
+    pub result: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct HttpRequestLabels {
     pub route: String,
     pub method: String,
@@ -78,6 +84,7 @@ pub struct Metrics {
     rate_limit_limit: Family<InstallationLabels, Gauge<f64, AtomicU64>>,
     http_requests: Family<HttpRequestLabels, Counter>,
     http_request_duration: Family<HttpRequestLabels, Histogram>,
+    cache_lookups: Family<CacheLookupLabels, Counter>,
 }
 
 fn new_duration_histogram() -> Histogram {
@@ -110,6 +117,7 @@ impl Metrics {
         let http_response_length = Family::<HttpRequestLabels, Histogram>::new_with_constructor(
             new_length_histogram as fn() -> Histogram,
         );
+        let cache_lookups = Family::<CacheLookupLabels, Counter>::default();
         let process_start_time = Gauge::<f64, AtomicU64>::default();
         process_start_time.set(
             SystemTime::now()
@@ -149,6 +157,11 @@ impl Metrics {
             http_response_length,
         );
         registry.register(
+            "cache_lookups",
+            "Cache lookups by cache and result (hit or miss)",
+            cache_lookups.clone(),
+        );
+        registry.register(
             "process_start_time_seconds",
             "Start time of the process since unix epoch in seconds",
             process_start_time,
@@ -159,7 +172,16 @@ impl Metrics {
             rate_limit_limit,
             http_requests,
             http_request_duration,
+            cache_lookups,
         }
+    }
+
+    pub fn record_cache_lookup(&self, cache: &str, hit: bool) {
+        let labels = CacheLookupLabels {
+            cache: cache.to_string(),
+            result: if hit { "hit" } else { "miss" }.to_string(),
+        };
+        self.cache_lookups.get_or_create(&labels).inc();
     }
 
     pub fn record_rate_limit(&self, installation_id: u64, headers: &HeaderMap) {

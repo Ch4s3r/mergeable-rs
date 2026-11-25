@@ -1,3 +1,5 @@
+use crate::app_state::GithubDataCaches;
+use crate::cache::NamedCache;
 use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::github::client::GithubResponse;
@@ -81,6 +83,30 @@ async fn call_treating_not_found_as_absent(
         Ok(response) => Ok(Some(response)),
         Err(error) if error.has_status(NOT_FOUND) => Ok(None),
         Err(error) => Err(log_failure(error, route)),
+    }
+}
+
+fn github_data_key(cache: &NamedCache, id: &str) -> String {
+    format!("github-data:{}:{id}", cache.name())
+}
+
+async fn through_github_data_cache(
+    context: &Context,
+    select_cache: impl FnOnce(&GithubDataCaches) -> &NamedCache,
+    id: &str,
+    fetch: impl Future<Output = Result<Value>>,
+) -> Result<Value> {
+    match context.app.github_data.as_ref().map(select_cache) {
+        Some(cache) => cache.get_or_fetch(&github_data_key(cache, id), fetch).await,
+        None => fetch.await,
+    }
+}
+
+fn into_list(value: Value) -> Vec<Value> {
+    match value {
+        Value::Array(items) => items,
+        Value::Null => Vec::new(),
+        single => vec![single],
     }
 }
 
@@ -278,6 +304,21 @@ pub async fn list_members_in_org(
     org: &str,
     team_slug: &str,
 ) -> Result<Vec<Value>> {
+    let members = through_github_data_cache(
+        context,
+        |caches| &caches.team_members,
+        &format!("{org}/{team_slug}"),
+        async {
+            fetch_members_in_org(context, org, team_slug)
+                .await
+                .map(Value::Array)
+        },
+    )
+    .await?;
+    Ok(into_list(members))
+}
+
+async fn fetch_members_in_org(context: &Context, org: &str, team_slug: &str) -> Result<Vec<Value>> {
     let response = call_treating_not_found_as_absent(
         context,
         "GET /orgs/{org}/teams/{team_slug}/members",
@@ -289,6 +330,29 @@ pub async fn list_members_in_org(
 }
 
 pub async fn fetch_membership_for_user_in_org(
+    context: &Context,
+    org: &str,
+    team_slug: &str,
+    username: &Value,
+) -> Result<bool> {
+    let is_active_member = through_github_data_cache(
+        context,
+        |caches| &caches.team_memberships,
+        &format!(
+            "{org}/{team_slug}/{}",
+            json_value::to_display_string(Some(username))
+        ),
+        async {
+            fetch_active_membership(context, org, team_slug, username)
+                .await
+                .map(Value::Bool)
+        },
+    )
+    .await?;
+    Ok(is_active_member == Value::Bool(true))
+}
+
+async fn fetch_active_membership(
     context: &Context,
     org: &str,
     team_slug: &str,
@@ -344,14 +408,70 @@ pub async fn search_issues_and_pull_requests(context: &Context, params: Value) -
     Ok(take_field(response.data, "items"))
 }
 
+fn repository_cache_id(params: &Value) -> String {
+    format!(
+        "{}/{}",
+        json_value::to_display_string(params.get("owner")),
+        json_value::to_display_string(params.get("repo"))
+    )
+}
+
 pub async fn list_collaborators(context: &Context, params: Value) -> Result<Vec<Value>> {
-    let response = call(context, "GET /repos/{owner}/{repo}/collaborators", params).await?;
-    take_from_each(response.data, "login")
+    let collaborators = through_github_data_cache(
+        context,
+        |caches| &caches.collaborators,
+        &repository_cache_id(&params),
+        async move {
+            let response = call(context, "GET /repos/{owner}/{repo}/collaborators", params).await?;
+            take_from_each(response.data, "login").map(Value::Array)
+        },
+    )
+    .await?;
+    Ok(into_list(collaborators))
 }
 
 pub async fn fetch_all_topics(context: &Context, params: Value) -> Result<Value> {
-    let response = call(context, "GET /repos/{owner}/{repo}/topics", params).await?;
-    Ok(take_field(response.data, "names"))
+    through_github_data_cache(
+        context,
+        |caches| &caches.repository_topics,
+        &repository_cache_id(&params),
+        async move {
+            let response = call(context, "GET /repos/{owner}/{repo}/topics", params).await?;
+            Ok(take_field(response.data, "names"))
+        },
+    )
+    .await
+}
+
+pub async fn fetch_organization_default_config(
+    context: &Context,
+    owner: &str,
+    file_path: &str,
+) -> Result<Option<String>> {
+    let cached_content = through_github_data_cache(
+        context,
+        |caches| &caches.organization_config,
+        &format!("{owner}/{file_path}"),
+        async {
+            let file_content = fetch_content(
+                context,
+                json!({"owner": owner, "repo": ".github", "path": file_path}),
+            )
+            .await?;
+            Ok(json!({ "content": file_content }))
+        },
+    )
+    .await?;
+    Ok(json_value::as_str(cached_content.get("content")).map(str::to_string))
+}
+
+pub async fn forget_organization_default_config(context: &Context, owner: &str, file_path: &str) {
+    if let Some(caches) = &context.app.github_data {
+        let cache = &caches.organization_config;
+        cache
+            .delete(&github_data_key(cache, &format!("{owner}/{file_path}")))
+            .await;
+    }
 }
 
 pub async fn compare_commits(context: &Context, params: Value) -> Result<Value> {

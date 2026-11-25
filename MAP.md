@@ -15,7 +15,7 @@
 | Validation results | `results` |
 | Templates, globs, YAML | `template`, `glob`, `yaml` |
 | JSON value helpers, value lists | `json_value`, `value_lists` |
-| Caches | `cache`, `redis_cache` |
+| Caches (`NamedCache`, memory or Redis/Valkey backend, hit/miss metrics; GitHub data caches in `app_state`, used by `github::api`) | `cache`, `redis_cache`, `app_state` |
 | Scheduler (incl. periodic installation resync) | `scheduler` |
 | Errors | `error` |
 

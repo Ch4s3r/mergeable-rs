@@ -317,20 +317,37 @@ fn config_path(context: &Context) -> Result<String> {
     })
 }
 
-pub async fn reset_cache(context: &Context) -> Result<()> {
+fn push_changes_config_file(context: &Context) -> Result<bool> {
     if context.event_name != "push" {
-        return Ok(());
+        return Ok(false);
     }
     let Some(head_commit) = context
         .payload
         .get("head_commit")
         .filter(|commit| json_value::is_truthy(commit))
     else {
-        return Ok(());
+        return Ok(false);
     };
     let config_file = Value::String(format!(".github/{}", config_path(context)?));
-    let added = json_value::includes(head_commit.get("added"), &config_file)?;
-    if !added && !json_value::includes(head_commit.get("modified"), &config_file)? {
+    Ok(
+        json_value::includes(head_commit.get("added"), &config_file)?
+            || json_value::includes(head_commit.get("modified"), &config_file)?,
+    )
+}
+
+async fn forget_changed_organization_config(context: &Context, config_file: &str) {
+    if context.app.github_data.is_none() || !matches!(push_changes_config_file(context), Ok(true)) {
+        return;
+    }
+    if let Ok(repository) = context.repository_name()
+        && repository.name == ".github"
+    {
+        api::forget_organization_default_config(context, &repository.owner, config_file).await;
+    }
+}
+
+pub async fn reset_cache(context: &Context) -> Result<()> {
+    if !push_changes_config_file(context)? {
         return Ok(());
     }
     let repository = context.repository_name()?;
@@ -425,11 +442,11 @@ async fn fetch_config_file(context: &Context) -> Result<Value, FetchError> {
     }
     let mut org_config = None;
     if context.global_setting("use_org_as_default_config")? == Some(&Value::Bool(true)) {
-        let org_config_content = api::fetch_content(
-            context,
-            json!({"owner": &repository.owner, "repo": ".github", "path": format!(".github/{config_path}")}),
-        )
-        .await?;
+        let org_config_file = format!(".github/{config_path}");
+        forget_changed_organization_config(context, &org_config_file).await;
+        let org_config_content =
+            api::fetch_organization_default_config(context, &repository.owner, &org_config_file)
+                .await?;
         org_config = parse_yaml(org_config_content.as_deref())?;
     }
     let config = repository_config::load(context, &config_path, org_config).await?;
@@ -473,6 +490,78 @@ pub async fn load(context: &Context) -> Configuration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_config::{BehaviorSettings, Environment};
+    use crate::app_state::AppState;
+    use crate::filters::test_context::context_for;
+    use std::sync::Arc;
+
+    async fn push_to_organization_repository_with_cached_org_config(
+        repository_name: &str,
+        modified_files: Value,
+    ) -> Context {
+        let mut context = context_for(
+            "push",
+            json!({
+                "repository": {"name": repository_name, "owner": {"login": "acme"}},
+                "head_commit": {"added": [], "modified": modified_files},
+            }),
+        );
+        context.app = Arc::new(AppState::new(BehaviorSettings::from_environment(
+            &Environment::from_iter([("USE_GITHUB_DATA_CACHE", "true")]),
+        )));
+        if let Some(caches) = &context.app.github_data {
+            caches
+                .organization_config
+                .set(
+                    "github-data:organization_config:acme/.github/mergeable.yml",
+                    json!({"content": "version: 2"}),
+                )
+                .await;
+        }
+        context
+    }
+
+    async fn cached_organization_config_keys(context: &Context) -> Vec<String> {
+        match &context.app.github_data {
+            Some(caches) => caches.organization_config.keys().await,
+            None => Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn push_changing_the_organization_config_forgets_its_cached_copy() {
+        let context = push_to_organization_repository_with_cached_org_config(
+            ".github",
+            json!([".github/mergeable.yml"]),
+        )
+        .await;
+        forget_changed_organization_config(&context, ".github/mergeable.yml").await;
+        assert_eq!(
+            cached_organization_config_keys(&context).await,
+            Vec::<String>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn unrelated_pushes_keep_the_cached_organization_config() {
+        let other_file =
+            push_to_organization_repository_with_cached_org_config(".github", json!(["README.md"]))
+                .await;
+        forget_changed_organization_config(&other_file, ".github/mergeable.yml").await;
+        assert_eq!(cached_organization_config_keys(&other_file).await.len(), 1);
+        let other_repository = push_to_organization_repository_with_cached_org_config(
+            "app",
+            json!([".github/mergeable.yml"]),
+        )
+        .await;
+        forget_changed_organization_config(&other_repository, ".github/mergeable.yml").await;
+        assert_eq!(
+            cached_organization_config_keys(&other_repository)
+                .await
+                .len(),
+            1
+        );
+    }
 
     #[test]
     fn pull_request_rule_without_outcomes_gets_default_checks() {

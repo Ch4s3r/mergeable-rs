@@ -9,6 +9,7 @@ const DEVELOPMENT_SCHEDULER_INTERVAL_SECONDS: &str = "2";
 const DEFAULT_SCHEDULER_INTERVAL_SECONDS: &str = "3600";
 const DEFAULT_SETTINGS_PATH: &str = "mergeable.settings.yml";
 const DEFAULT_CONFIG_FILE_NAME: &str = "mergeable.yml";
+const DEFAULT_GITHUB_DATA_CACHE_TTL_SECONDS: u64 = 300;
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Environment {
@@ -152,6 +153,19 @@ pub struct BehaviorSettings {
     pub log_config: bool,
     pub jira: JiraSettings,
     pub cache: CacheSettings,
+    pub github_data_cache_ttl: Option<Duration>,
+}
+
+fn github_data_cache_ttl(environment: &Environment) -> Option<Duration> {
+    if !environment.is_true("USE_GITHUB_DATA_CACHE") {
+        return None;
+    }
+    let seconds = environment
+        .non_empty("GITHUB_DATA_CACHE_TTL")
+        .and_then(|seconds| seconds.trim().parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+        .unwrap_or(DEFAULT_GITHUB_DATA_CACHE_TTL_SECONDS);
+    Some(Duration::from_secs(seconds))
 }
 
 impl Default for BehaviorSettings {
@@ -174,6 +188,7 @@ impl BehaviorSettings {
             log_config: environment.non_empty("LOG_CONFIG").is_some(),
             jira: JiraSettings::from_environment(environment),
             cache: CacheSettings::from_environment(environment),
+            github_data_cache_ttl: github_data_cache_ttl(environment),
         }
     }
 }
@@ -304,6 +319,25 @@ mod tests {
         let behavior = BehaviorSettings::from_environment(&environment);
         assert!(behavior.settings_file_defaults.use_config_cache);
         assert!(!behavior.use_settings_cache);
+    }
+
+    #[test]
+    fn github_data_cache_is_off_by_default_and_lives_five_minutes_when_enabled() {
+        let disabled = BehaviorSettings::from_environment(&Environment::default());
+        assert_eq!(disabled.github_data_cache_ttl, None);
+        let enabled = BehaviorSettings::from_environment(&Environment::from_iter([(
+            "USE_GITHUB_DATA_CACHE",
+            "true",
+        )]));
+        assert_eq!(
+            enabled.github_data_cache_ttl,
+            Some(Duration::from_secs(300))
+        );
+        let custom = BehaviorSettings::from_environment(&Environment::from_iter([
+            ("USE_GITHUB_DATA_CACHE", "true"),
+            ("GITHUB_DATA_CACHE_TTL", "60"),
+        ]));
+        assert_eq!(custom.github_data_cache_ttl, Some(Duration::from_secs(60)));
     }
 
     #[test]

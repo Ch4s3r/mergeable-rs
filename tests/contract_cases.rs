@@ -1,4 +1,5 @@
 mod contract;
+mod github_data_cache;
 mod installation_resync;
 
 use contract::case::Case;
