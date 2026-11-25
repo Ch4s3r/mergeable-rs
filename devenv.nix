@@ -7,6 +7,7 @@
     pkgs.cargo-edit
     pkgs.cargo-nextest
     pkgs.git-cliff
+    pkgs.nodejs_22
     pkgs.pack
     pkgs.redis
     pkgs.valkey
@@ -14,6 +15,10 @@
 
   scripts.build-image.exec = ''
     pack build "''${1:-mergeable-rs}" --path "$DEVENV_ROOT" "''${@:2}"
+  '';
+
+  scripts.docs-serve.exec = ''
+    cd "$DEVENV_ROOT/website" && npm ci && npm start
   '';
 
   enterTest = ''

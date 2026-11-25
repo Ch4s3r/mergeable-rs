@@ -1,0 +1,127 @@
+---
+title: Original project history
+---
+
+# Original project history
+
+The changelog of the original [mergeable](https://github.com/mergeability/mergeable) project (Node.js), up to the
+version that mergeable-rs reproduces. Pull request and issue numbers refer to the original repository.
+
+- July 10, 2024: feat: Add trigger 'issue_comment' in validators `age`, `assignee`, `author`, `description`, `label`, `title` [#766](https://github.com/mergeability/mergeable/pull/766)
+- June 25 2024: feat: Add buildpacks for building docker image [#764](https://github.com/mergeability/mergeable/pull/764)
+- June 20, 2024: feat: Add options 'one_of' and 'none_of'. Support in filters `payload`, `author`, and in action `lastComment` to filter comments authors [#757](https://github.com/mergeability/mergeable/pull/757)
+- June 20, 2024: feat: Add annotations @sender @bot @repository @action and template helper `{{formatDate}}` [#756](https://github.com/mergeability/mergeable/pull/756)
+- June 20, 2024: fix: Comments on Issues should not trigger `checks` action [#759](https://github.com/mergeability/mergeable/pull/759)
+- June 20, 2024: fix: Respect all comments in lastComment validator and comment action [#755](https://github.com/mergeability/mergeable/pull/755)
+- June 12, 2024: feat: Support `issue_comment` event as trigger for actions [#754](https://github.com/mergeability/mergeable/pull/754)
+- June 10, 2024: fix: Docker image not working [#753](https://github.com/mergeability/mergeable/pull/753)
+- June 10, 2024: feat: publish multi arch docker image to dockerhub [#751](https://github.com/mergeability/mergeable/pull/751)
+- April 29, 2024: fix: Always allow assigning author [#744](https://github.com/mergeability/mergeable/pull/744)
+- Mar 11, 2024: fix: bump dependencies probot, jest and nock to latest versions and update ci workflow to use node 20 [#738](https://github.com/mergeability/mergeable/pull/738)
+- Feb 27, 2024: fix: search and replace of special annotations [#735](https://github.com/mergeability/mergeable/pull/735)
+- May 12, 2023: fix: Loading teams for team option of author filter/validator [#713](https://github.com/mergeability/mergeable/pull/713)
+- May 11, 2023: fix: Send correct payload for changing labels [#715](https://github.com/mergeability/mergeable/pull/715)
+- April 25, 2023: feat: Add author validator [#710](https://github.com/mergeability/mergeable/pull/710)
+- March 13, 2023: fix: Replace delete with remove in changeset validator [#705](https://github.com/mergeability/mergeable/pull/705)
+- March 7, 2023: fix: Extend checks supported events [#700](https://github.com/mergeability/mergeable/pull/700)
+- March 1, 2023: feat:Added user information for commit validator [#682](https://github.com/mergeability/mergeable/pull/682)
+- February 3, 2023: feat: Add team option to author filter [#696](https://github.com/mergeability/mergeable/pull/696)
+- February 3, 2023: chore: Update node version for release workflow [#699](https://github.com/mergeability/mergeable/pull/699)
+- February 3, 2023: feat: Add Not operator [#695](https://github.com/mergeability/mergeable/pull/695)
+- September 28, 2022: feat: Add last comment validator [#668](https://github.com/mergeability/mergeable/pull/668)
+- August 26, 2022: set fallback for `no_empty` options processor [#657](https://github.com/mergeability/mergeable/pull/657)
+- August 25, 2022: fix: set fallback value for `description` payload [#655](https://github.com/mergeability/mergeable/pull/655)
+- August 20, 2022: fix: supported events for `request_review` action [#651](https://github.com/mergeability/mergeable/pull/651)
+- August 2, 2022: feat: Add newest_only commit validation setting [#649](https://github.com/mergeability/mergeable/pull/649)
+- April 7, 2022: feat: Support adding deployment labels from values [#631](https://github.com/mergeability/mergeable/pull/631)
+- March 22, 2022: fix: pass comment instance to removeErrorComments [#626](https://github.com/mergeability/mergeable/pull/626)
+- February 24, 2022: fix: correct indentation on documentation [#623](https://github.com/mergeability/mergeable/pull/623)
+- February 8, 2022: feat: Allow all option on must_include and must_include inside changeset validator [#611](https://github.com/mergeability/mergeable/pull/611)
+- February 6, 2022: feat: Add commit_title and commit_message options to merge action so the merge commit can be customized based on PR content [#612](https://github.com/mergeability/mergeable/pull/612)
+- December 12, 2021: feat: Add support for status events to baseRef validator [#395](https://github.com/mergeability/mergeable/issues/395#issuecomment-991904249)
+- November 25, 2021: feat: Add more supported events to baseRef validator [#395](https://github.com/mergeability/mergeable/issues/395#issuecomment-975763927)
+- November 12, 2021 : feat: Add baseRef filter [#596](https://github.com/mergeability/mergeable/pull/596)
+- October 19, 2021 : feat: Add validator approval option to exclude users [#594](https://github.com/mergeability/mergeable/pull/594)
+- October 12, 2021 : feat: Add boolean option for payload filter [#583](https://github.com/mergeability/mergeable/pull/583)
+- September 27, 2021 : fix: use node version 14.17.6 for the release action [#591](https://github.com/mergeability/mergeable/pull/591)
+- September 25, 2021 : feat: Support for objects in arrays in the payload filter [#589](https://github.com/mergeability/mergeable/pull/589)
+- September 20, 2021 : fix: Check that getRouter is defined before attempting to access it [#587](https://github.com/mergeability/mergeable/pull/587)
+- August 26, 2021 : fix: Await GithubAPI topics response [#585](https://github.com/mergeability/mergeable/pull/585)
+- August 10, 2021 : feat: New labels API [#577](https://github.com/mergeability/mergeable/pull/577)
+- August 6, 2021 : feat: Add team assignment to request_review action [#574](https://github.com/mergeability/mergeable/pull/574)
+- August 6, 2021 : feat: Support must_include and must_exclude regex as an array [#575](https://github.com/mergeability/mergeable/pull/575)
+- July 19, 2021 : feat: Add ignore_drafts option to ignore drafts in stale validator [#565](https://github.com/mergeability/mergeable/issues/565)
+- July 12, 2021 : feat: Filter specific status of files in changeset [#550](https://github.com/mergeability/mergeable/issues/550)
+- June 26, 2021 : feat: Add `payload` filter [#398](https://github.com/mergeability/mergeable/issues/398)
+- March 31, 2021 : feat: add chart support to prometheus servicemonitor [#535](https://github.com/mergeability/mergeable/pull/535)
+- March 30, 2021 : fix: codeowners team
+- March 25, 2021 : feat: Add rate limit related metrics/endpoint [#526](https://github.com/mergeability/mergeable/pull/526)
+- February 25, 2021 : feat: add feature to limit approval to a list of users [#509](https://github.com/mergeability/mergeable/issues/509)
+- February 25, 2021 : fix: minor bugs [#508](https://github.com/mergeability/mergeable/pull/508)
+- February 25, 2021 : fix: Correct use of cache env
+- February 22, 2021 : feat: add `age` validator [#367](https://github.com/mergeability/mergeable/issues/367)
+- February 22, 2021 : feat: add a info panel for 'limit' option in `approval` validator [#509](https://github.com/mergeability/mergeable/issues/509#issuecomment-783346365)
+- February 21, 2021 : feat: `name` sub-option for `repository` filter
+- February 18, 2021 : fix: Scheduler support [#499](https://github.com/mergeability/mergeable/issues/499)
+- February 12, 2021 : feat: Implemented redis as a dependency to the helm-chart
+- February 10, 2021 : feat: global cache manager [#502](https://github.com/mergeability/mergeable/pull/502)
+- February 10, 2021 : feat: Implement and/or filters support [#496](https://github.com/mergeability/mergeable/pull/504)
+- February 10, 2021 : feat: New Author filter [#496](https://github.com/mergeability/mergeable/pull/505)
+- January 28, 2021 : feat: global settings feature
+- January 28, 2021 : feat: Filters validators [#496](https://github.com/mergeability/mergeable/pull/496)
+- January 21, 2021 : fix: request_review action failing when the reviewer is PR author [#486](https://github.com/mergeability/mergeable/issues/486)
+- January 20, 2021 : fix: deep validation bug that is causing HttpError [#488](https://github.com/mergeability/mergeable/issues/488)
+- January 19, 2021 : feat: Async Options [#480](https://github.com/mergeability/mergeable/issues/480)
+- January 19, 2021 : feat: Support use organization-wide configuration as default [#470](https://github.com/mergeability/mergeable/issues/470)
+- January 19, 2021 : feat: Jira Validator Option [#482](https://github.com/mergeability/mergeable/issues/482)
+- January 17, 2021 : fix: `required-status-check` bug in merge action
+- January 15, 2021 : feat: add prometheus templates for easy alerting setup
+- January 14, 2021 : fix: validators not running in certain pull_request events [#431](https://github.com/mergeability/mergeable/issues/431)
+- January 14, 2021 : fix: remove unsupported settings from title, description and milestone validator
+- January 14, 2021 : feat: Allow to have pending checks [#454](https://github.com/mergeability/mergeable/issues/454)
+- January 13, 2021 : fix: GH Action workflows for pushing to dockerhub.
+- January 12, 2021 : feat: upgrade probot to v11.0.1
+- January 8, 2021 : fix: Prevent add comma on last list element
+- January 5, 2021 : fix: Shift fix in team slug pagination
+- January 4, 2021 : feat: GitHub actions [#450](https://github.com/mergeability/mergeable/issues/450)
+- December 18, 2020 : feat: Better logs for failures in PR home page without going to details [#446](https://github.com/mergeability/mergeable/issues/446)
+- December 17, 2020 : fix: Members in Org listing pagination bug [#442](https://github.com/mergeability/mergeable/issues/442)
+- December 17, 2020 : feat: Add docker image build and push [#427](https://github.com/mergeability/mergeable/issues/427)
+- December 14, 2020 : feat: Add branch validator [#438](https://github.com/mergeability/mergeable/issues/438)
+- December 11, 2020 : feat: Helm Chart implemantation for kubernetes [#435](https://github.com/mergeability/mergeable/issues/435)
+- December 11, 2020 : feat: Add env to control which configuration file to use [#429](https://github.com/mergeability/mergeable/issues/429)
+- October 20, 2020 : feat: Add a config cache which can be enabled via MERGEABLE_ENABLE_CONFIG_CACHE env var [#407](https://github.com/mergeability/mergeable/issues/407)
+- October 15, 2020 : feat: Add the ability to auto-merge pull requests [#395](https://github.com/mergeability/mergeable/issues/395)
+- October 8, 2020 : feat: added BaseRef-validator to enforce stricter rules on certain branches [#343](https://github.com/mergeability/mergeable/issues/343)
+- October 8, 2020 : feat: Do not load modified unsafe config files from forks [#406](https://github.com/mergeability/mergeable/issues/406)
+- October 6, 2020 : fix: Size validator - do not ignore hidden files by default [#401](https://github.com/mergeability/mergeable/issues/401)
+- October 6, 2020 : Do not attempt to merge a pull request if the status is blocked [#389](https://github.com/mergeability/mergeable/issues/389)
+- October 6, 2020 : fix: Fix undefined error with blank validators [#402](https://github.com/mergeability/mergeable/issues/402)
+- October 5, 2020 : fix Typo in header of labels action docs and corresponding rst file
+- October 4, 2020 : fix Typo in header of title validator docs
+- October 2, 2020 : Don't throw merge error if required status are are the cause of the error [#389](https://github.com/mergeability/mergeable/issues/389)
+- September 24, 2020 : Add ability to delete or replace the labels on an issue [#380](https://github.com/mergeability/mergeable/issues/380)
+- September 22, 2020 : Allow support for customizing the scheduler interval via an enviroment variable `MERGEABLE_SCHEDULER_INTERVAL` [#383](https://github.com/mergeability/mergeable/issues/383)
+- September 17, 2020 : Add support for `schedule.repository` event for `labels` and `close` actions [#377](https://github.com/mergeability/mergeable/issues/377)
+- September 17, 2020 : Fix the comment action to work correctly with the scheduler [#376](https://github.com/mergeability/mergeable/issues/376)
+- September 16, 2020 : Allow specifying files to `match` for the `size` validator [#371](https://github.com/mergeability/mergeable/issues/371)
+- September 16, 2020 : `stale` validator now supports optionally skipping items associated with a `project` or a `milestone` [#375](https://github.com/mergeability/mergeable/issues/375)
+- September 16, 2020 : `stale` validator now supports labels for `match` or `ignore` [#372](https://github.com/mergeability/mergeable/issues/372)
+- August 24, 2020: display files processed in `size` validator [#366](https://github.com/mergeability/mergeable/issues/366)
+- August 17, 2020: fix Error string in `merge failed` error
+- July 28, 2020 : owners file now support teams and limit.owners option added in `approvals` validator [#331](https://github.com/mergeability/mergeable/issues/331)
+- July 12, 2020 : Allow usage of special annotation `@author` in comments and checks [#328](https://github.com/mergeability/mergeable/issues/328)
+- July 1, 2020 : When config file is added/modified in base branch, mergeable will trigger for all PR against the base branch [#153](https://github.com/mergeability/mergeable/issues/153)
+- June 30, 2020 : Add `ignore_comment` option to `size` validator [#245](https://github.com/mergeability/mergeable/issues/245)
+- June 17, 2020 : Added new validator `contents` [#207](https://github.com/mergeability/mergeable/issues/207)
+- June 16, 2020 : Create an error comment if errors have occurred during execution of actions [#312](https://github.com/mergeability/mergeable/issues/312)
+- June 5, 2020 : For missing fields in 'checks', default values will be used [#233](https://github.com/mergeability/mergeable/issues/233#issuecomment-632211789)
+- May 30, 2020 : New Action `merge` added [#201](https://github.com/mergeability/mergeable/issues/201)
+- May 29, 2020 : throw `UnSupportedSettingError` if provided setting is not valid [#228](https://github.com/mergeability/mergeable/issues/228)
+- May 29, 2020 : Ability to Limit `stale` validator to certain days and time [#221](https://github.com/mergeability/mergeable/issues/221)
+- May 23, 2020 : Allow PRs/Issues to be assigned to their author by using `@author` in the `assign` action
+- May 14, 2020 : Delete obsolete comments by default [#157](https://github.com/mergeability/mergeable/issues/157)
+- May 12, 2020 : Limit so that only approval from team members will count, [#236](https://github.com/mergeability/mergeable/issues/236)
+- May 6, 2020 : Ability to create multiple checks with `named` recipe, [#225](https://github.com/mergeability/mergeable/issues/225)
+- May 5, 2020 : Added ability to configure config file name using `CONFIG_PATH` env variable, [#223](https://github.com/mergeability/mergeable/issues/223)
+- April 22, 2020 : readthedoc documentation added, start of CHANGELOG
