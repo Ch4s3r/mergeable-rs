@@ -76,7 +76,7 @@ and unthrottled numbers separately.
 Status: accepted
 Decision: tokio, axum, reqwest (rustls), async-trait, serde_json (`preserve_order`), an own YAML loader (`yaml`) whose
 parse errors are part of the check output, an own template interpreter (`template`), regex + fancy-regex
-(lookbehind in user patterns), an own glob matcher (`glob`), jiff (ADR-022), moka (memory cache and
+(lookbehind in user patterns), an own glob matcher (`glob`), jiff (ADR-023), moka (memory cache and
 compiled pattern cache), redis, prometheus-client, jsonwebtoken, hmac, sha1, sha2, tracing + tracing-subscriber.
 Consequences: the rustls stack pulls in aws-lc-rs and ring (assembly/C crypto) for TLS; no equally mature
 pure-Rust TLS provider exists, so this is accepted.
@@ -278,7 +278,20 @@ Consequences: The defaults are far above what the recorded cases and the retry t
 unchanged. Under overload GitHub sees `503` for some deliveries; GitHub does not redeliver on its own, so they have
 to be redelivered from the App's advanced settings. A Jira request that times out counts as an invalid ticket.
 
-## ADR-022: Dates and time zones with jiff
+## ADR-022: Separate Redis credentials and TLS, host-as-password only as fallback
+Status: accepted
+Context: The original sends the value of `CACHE_REDIS_HOST` as the Redis `AUTH` password over plain TCP, so a cache
+server could only be protected by a password equal to its host name and cached configuration travelled unencrypted
+(issue #29).
+Decision: `CACHE_REDIS_PASSWORD` and `CACHE_REDIS_USERNAME` set the `AUTH` credentials; only without
+`CACHE_REDIS_PASSWORD` the host name is sent, and only that fallback is retried without a password when the server
+rejects it. `CACHE_REDIS_TLS=true` connects with `ConnectionAddr::TcpTls` through the `redis` crate's
+`tokio-rustls-comp` feature (rustls, tokio-rustls and rustls-native-certs were already in the dependency tree through
+reqwest), verifying the certificate and host name against the system roots (`SSL_CERT_FILE` for a private CA).
+Consequences: Defaults and the recorded cases are unchanged. A wrong configured password or an untrusted certificate is
+logged and every lookup is a cache miss, like any other Redis error.
+
+## ADR-023: Dates and time zones with jiff
 Status: accepted
 Context: RustSec marks chrono (RUSTSEC-2026-0543) and chrono-tz (RUSTSEC-2026-0555) as unmaintained without a safe
 upgrade (issue #24). Dates are read in the `age` validator, the `stale` validator (`time_constraint`, search

@@ -19,7 +19,7 @@ fixes. Releases are cut automatically from `main`, so a fix is available as soon
   start without it. Use a long random value and set the same value in the GitHub App. Only the HMAC-SHA256 signature
   in `X-Hub-Signature-256` is accepted; it is compared in constant time against the raw request body before the body
   is parsed.
-- `PRIVATE_KEY` / `PRIVATE_KEY_PATH`, `WEBHOOK_SECRET`, `JIRA_PASSWORD`: pass them as secrets of your platform
+- `PRIVATE_KEY` / `PRIVATE_KEY_PATH`, `WEBHOOK_SECRET`, `JIRA_PASSWORD`, `CACHE_REDIS_PASSWORD`: pass them as secrets of your platform
   (Kubernetes secrets, Docker secrets, ...). They are not logged; the `Debug` output of the environment lists variable
   names only and the Jira and Redis settings redact their passwords.
 - `ENABLE_GITHUB_RATELIMIT_ENDPOINT` and `ENABLE_METRICS_ENDPOINT`: both routes are unauthenticated.
@@ -32,9 +32,11 @@ fixes. Releases are cut automatically from `main`, so a fix is available as soon
   (for example drop a required approval). Configurations from forks are never loaded. Turn it off with
   `use_config_from_pull_request: false` in the settings file, and do not rely on mergeable as the only merge gate: use
   branch protection or rulesets with required reviews as well.
-- `CACHE_STORAGE=redis` / `valkey`: the value of `CACHE_REDIS_HOST` is also sent as the Redis `AUTH` password
-  (behaviour of the original) and the connection is not encrypted. Run the cache server on a private network
-  reachable only by mergeable.
+- `CACHE_STORAGE=redis` / `valkey`: set `CACHE_REDIS_PASSWORD` (and `CACHE_REDIS_USERNAME` for an ACL user) as a
+  secret and `CACHE_REDIS_TLS=true` to encrypt the connection and verify the server certificate. Without
+  `CACHE_REDIS_PASSWORD` the value of `CACHE_REDIS_HOST` is sent as the `AUTH` password (behaviour of the original),
+  and without `CACHE_REDIS_TLS` cached configuration travels unencrypted; then run the cache server on a private
+  network reachable only by mergeable.
 - `GHE_HOST`, `GHE_PROTOCOL`, `JIRA_HOST`, `JIRA_PROTOCOL`: the outgoing hosts are read from environment variables
   only, never from repository configuration. The Jira ticket id taken from a pull request is percent-encoded as one
   path segment.
