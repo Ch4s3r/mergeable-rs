@@ -202,7 +202,7 @@ recording new cases and the benchmark harness are no longer part of the reposito
 | `JIRA_HOST`, `JIRA_USERNAME`, `JIRA_PASSWORD`, `JIRA_PROTOCOL`, `JIRA_VERSION`, `JIRA_STRICT_SSL` | Jira option | - |
 | `MERGEABLE_SCHEDULER` | `true` emits `schedule.repository` events for every installed repository | off |
 | `MERGEABLE_SCHEDULER_INTERVAL` | Scheduler interval in seconds | `3600` |
-| `MERGEABLE_INSTALLATION_RESYNC_INTERVAL` | Seconds between two scheduler resyncs of the installations and their repositories (fractions allowed; zero, negative or invalid values use the default) | `3600` |
+| `MERGEABLE_INSTALLATION_RESYNC_INTERVAL` | Seconds between two scheduler resyncs of the installations and their repositories (fractions allowed; zero, negative or invalid values use the default) | `604800` (one week) |
 | `IGNORED_ACCOUNTS` | Comma-separated account logins the scheduler skips (case-insensitive) | - |
 | `DISABLE_DELAY` | Any non-empty value disables the random initial scheduler delay | delay on |
 | `ENABLE_GITHUB_RATELIMIT_ENDPOINT` | `true` serves `GET /github-ratelimit/:installationId` | off |
@@ -255,7 +255,7 @@ installation at a time) and, after a random delay within one interval, runs the 
 repositories or the removed repositories.
 
 In case a webhook is missed, the scheduler resyncs every `MERGEABLE_INSTALLATION_RESYNC_INTERVAL` seconds (default one
-hour, first resync one interval after start): it lists the installations and their repositories again, schedules
+week, first resync one interval after start): it lists the installations and their repositories again, schedules
 repositories it does not know yet and stops scheduling repositories that are no longer listed, also those of
 uninstalled or ignored installations. Each resync logs `scheduler.resync.completed` with the counts `installations`,
 `repositories`, `added` and `removed`. When listing the installations fails, nothing changes; when listing one
