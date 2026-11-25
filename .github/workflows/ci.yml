@@ -28,3 +28,23 @@ jobs:
         run: nix profile install "github:cachix/devenv/$DEVENV_VERSION"
       - name: Format, lint, unit and contract tests
         run: devenv test
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v32
+        with:
+          extra_nix_config: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
+      - name: Restore and save the Nix store (devenv) in the GitHub cache
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('devenv.nix', 'devenv.lock', 'devenv.yaml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+      - name: Install devenv
+        run: nix profile install "github:cachix/devenv/$DEVENV_VERSION"
+      - name: Build the image with Paketo buildpacks
+        run: devenv shell -- build-image mergeable-rs:ci
