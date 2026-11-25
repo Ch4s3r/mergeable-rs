@@ -163,7 +163,19 @@ approving member no longer blocks approvals on its own. No recorded case (ADR-00
 the upstream test "returns proper error when team provided is not found" mocks a non-approving team member that
 the membership lookup cannot return, so its Rust port asserts the lifted limit instead.
 
-## ADR-015: Untrusted input limits and a mandatory webhook secret
+## ADR-015: Security fixes from Renovate, Dependabot only for alerts
+Status: accepted
+Context: Renovate already keeps the dependencies up to date and raises fix PRs for OSV vulnerabilities. Dependabot
+security updates would open a second, differently formatted PR for the same vulnerability.
+Decision: Dependabot alerts are enabled for the repository, Dependabot security updates stay disabled. Renovate reads
+the Dependabot alerts (the Mend Renovate app holds `read` on Dependabot alerts) next to `osvVulnerabilityAlerts` and
+opens the fix PRs. `vulnerabilityAlerts` labels them `security` and enables automerge, so a fix (also a major
+update) is squash-merged as soon as all required checks pass.
+Consequences: One PR per vulnerability, merged without waiting for review or the weekly schedule; the required
+checks are the only gate. A wrong alert could produce a bad automerged fix, which the release changelog makes
+visible.
+
+## ADR-016: Untrusted input limits and a mandatory webhook secret
 Status: accepted
 Context: Repository configuration (`.github/mergeable.yml`, also from same-repository pull requests) and pull request
 data are untrusted. The security review (#20) found that a template nested about 20 000 levels deep overflowed the
