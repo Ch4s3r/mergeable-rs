@@ -2,16 +2,20 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches-ignore:
-      - main
+
+env:
+  DEVENV_VERSION: v2.4.0
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: cachix/install-nix-action@v31
+      - uses: actions/checkout@v7
+      - uses: cachix/install-nix-action@v32
+        with:
+          extra_nix_config: |
+            extra-substituters = https://devenv.cachix.org
+            extra-trusted-public-keys = devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=
       - name: Restore and save the Nix store (devenv) in the GitHub cache
         uses: nix-community/cache-nix-action@v7
         with:
@@ -21,6 +25,6 @@ jobs:
       - name: Cache cargo registry and target directory
         uses: Swatinem/rust-cache@v2
       - name: Install devenv
-        run: nix profile install nixpkgs#devenv
+        run: nix profile install "github:cachix/devenv/$DEVENV_VERSION"
       - name: Format, lint, unit and contract tests
         run: devenv test

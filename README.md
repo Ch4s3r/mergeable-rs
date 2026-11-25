@@ -60,7 +60,23 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org). Ever
 3. `build-image` builds the image with Paketo and publishes `ghcr.io/<owner>/<repo>:<version>` and `:latest`.
 4. The tag `v<version>` and a GitHub release with the generated changelog are created.
 
-Pull requests and other branches run `.github/workflows/ci.yml` (`devenv test`).
+Pull requests run `.github/workflows/ci.yml` (`devenv test`). `main` is protected: every change goes through a pull
+request with a passing `test` check and is squash-merged, so the pull request title becomes the conventional commit.
+
+## Dependency updates
+
+[Renovate](https://docs.renovatebot.com) (`renovate.json`, built from presets) tracks Cargo crates, GitHub Actions, the
+Paketo builder and buildpacks in `project.toml`, the Dockerfile images, and devenv: the devenv version (CLI in the
+workflows and the module input in `devenv.yaml`) and the pinned `devenv-nixpkgs` commit. devenv re-locks
+`devenv.lock` when `devenv.yaml` changes. Updates are opened on Mondays before 04:00 UTC; patch, minor, digest and
+lock file updates are squash-merged automatically once all checks pass, major updates wait for review.
+
+Dry run locally:
+
+```sh
+GITHUB_COM_TOKEN="$(gh auth token)" RENOVATE_CONFIG_FILE=renovate.json \
+  nix shell nixpkgs#renovate -c renovate --platform=local --dry-run=lookup
+```
 
 ## Test
 
@@ -74,7 +90,7 @@ or step by step inside `devenv shell`:
 cargo fmt --all --check
 cargo clippy --all-targets
 cargo test
-contract-tests --jobs 8
+contract-tests            # 381 recorded webhook cases, 32 in parallel
 ```
 
 The Redis round trip test needs a local server and is ignored by default:

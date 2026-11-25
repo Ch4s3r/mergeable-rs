@@ -3,17 +3,17 @@ schema-version = "0.2"
 id = "mergeable-rust"
 
 [io.buildpacks]
-builder = "paketobuildpacks/ubuntu-noble-builder-buildpackless"
+builder = "paketobuildpacks/ubuntu-noble-builder-buildpackless:0.0.231"
 exclude = ["target", "app-cases", "*.md", ".devenv*", ".direnv", ".github"]
 
 [[io.buildpacks.group]]
-uri = "docker.io/paketocommunity/rust"
+uri = "docker.io/paketocommunity/rust:0.92.4"
 
 [[io.buildpacks.group]]
-uri = "docker.io/paketobuildpacks/procfile"
+uri = "docker.io/paketobuildpacks/procfile:5.15.10"
 
 [[io.buildpacks.group]]
-uri = "docker.io/paketobuildpacks/image-labels"
+uri = "docker.io/paketobuildpacks/image-labels:4.14.9"
 
 [[io.buildpacks.build.env]]
 name = "BP_CARGO_WORKSPACE_MEMBERS"
