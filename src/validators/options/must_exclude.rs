@@ -186,4 +186,82 @@ mod tests {
             Status::Pass
         );
     }
+
+    fn label_validator_context() -> Value {
+        json!({"name": "label", "supportedOptions": ["and", "or", "begins_with", "ends_with", "max", "min", "must_exclude", "must_include", "no_empty", "required"]})
+    }
+
+    fn must_exclude_status(rule: &Value, input: &Value) -> Status {
+        process(&label_validator_context(), input, rule)
+            .unwrap()
+            .status
+    }
+
+    #[test]
+    fn return_pass_if_input_meets_the_criteria() {
+        let rule = json!({"must_exclude": {"regex": "test"}});
+        assert_eq!(
+            must_exclude_status(&rule, &json!(["A", "B", "C"])),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn return_fail_if_input_does_not_meet_the_criteria() {
+        let rule = json!({"must_exclude": {"regex": "test"}});
+        assert_eq!(
+            must_exclude_status(&rule, &json!(["A", "B", "the test"])),
+            Status::Fail
+        );
+    }
+
+    #[test]
+    fn return_error_if_inputs_are_not_in_expected_format() {
+        let rule = json!({"must_exclude": {"count": "test"}});
+        let error = process(&label_validator_context(), &json!(["the test"]), &rule).unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Failed to run the test because 'regex' is not provided for 'must_exclude' option. Please check README for more information about configuration"
+        );
+    }
+
+    #[test]
+    fn check_all_sub_option_works() {
+        let rule = json!({"must_exclude": {"regex": "test", "all": true}});
+        assert_eq!(
+            must_exclude_status(&rule, &json!(["A", "B", "the test"])),
+            Status::Fail
+        );
+        assert_eq!(
+            must_exclude_status(&rule, &json!(["A", "B", "the"])),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn that_regex_flag_works_as_expected() {
+        let rule = json!({"must_exclude": {"regex": "test", "regex_flag": "none"}});
+        assert_eq!(
+            must_exclude_status(&rule, &json!(["A", "B", "Test"])),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn return_pass_if_input_array_meets_the_criteria() {
+        let rule = json!({"must_exclude": {"regex": ["test", "D"]}});
+        assert_eq!(
+            must_exclude_status(&rule, &json!(["A", "B", "C"])),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn return_fail_if_input_array_does_not_meet_the_criteria() {
+        let rule = json!({"must_exclude": {"regex": ["^the", "F", "G"]}});
+        assert_eq!(
+            must_exclude_status(&rule, &json!(["A", "B", "the test"])),
+            Status::Fail
+        );
+    }
 }

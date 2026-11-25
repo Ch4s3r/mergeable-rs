@@ -112,4 +112,90 @@ mod tests {
         .unwrap();
         assert_eq!(result.description, json!("label count is more than \"1\""));
     }
+
+    fn label_validator_context() -> Value {
+        json!({"name": "label", "supportedOptions": ["and", "or", "begins_with", "ends_with", "max", "min", "must_exclude", "must_include", "no_empty", "required"]})
+    }
+
+    fn max_status(rule: &Value, input: &Value) -> Status {
+        process(&label_validator_context(), input, rule)
+            .unwrap()
+            .status
+    }
+
+    #[test]
+    fn max_option_applied_to_arrays_return_pass_if_input_meets_the_criteria() {
+        assert_eq!(
+            max_status(&json!({"max": {"count": 3}}), &json!(["A", "B"])),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn max_option_applied_to_arrays_return_pass_if_input_exactly_meets_the_criteria() {
+        assert_eq!(
+            max_status(&json!({"max": {"count": 3}}), &json!(["A", "B", "C"])),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn max_option_applied_to_arrays_return_fail_if_input_does_not_meet_the_criteria() {
+        assert_eq!(
+            max_status(&json!({"max": {"count": 3}}), &json!(["A", "B", "C", "D"])),
+            Status::Fail
+        );
+    }
+
+    #[test]
+    fn max_option_applied_to_integers_return_pass_if_input_meets_the_criteria() {
+        assert_eq!(
+            max_status(&json!({"max": {"count": 20}}), &json!(10)),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn max_option_applied_to_integers_return_pass_if_input_exactly_meets_criteria() {
+        assert_eq!(
+            max_status(&json!({"max": {"count": 10}}), &json!(10)),
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn max_option_applied_to_integers_return_fail_if_input_does_not_meet_the_criteria() {
+        assert_eq!(
+            max_status(&json!({"max": {"count": 10}}), &json!(20)),
+            Status::Fail
+        );
+    }
+
+    #[test]
+    fn max_option_configured_incorrectly_return_error_if_rule_config_is_not_in_expected_format() {
+        let error = process(
+            &label_validator_context(),
+            &json!(["the test"]),
+            &json!({"max": {"regex": 3}}),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Failed to run the test because 'count' is not provided for 'max' option. Please check README for more information about configuration"
+        );
+    }
+
+    #[test]
+    fn max_option_configured_incorrectly_return_error_if_input_is_not_supported_type() {
+        let error = process(
+            &label_validator_context(),
+            &json!("hello"),
+            &json!({"max": {"count": 3}}),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Input type invalid, expected Array or Integer as input"
+        );
+    }
 }

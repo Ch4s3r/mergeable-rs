@@ -228,4 +228,79 @@ mod tests {
         let result = run(&json!({"regex": ["a", "b"], "all": true}), &json!(["a"]));
         assert_eq!(result.description, json!("label allmust include 'a, b'"));
     }
+
+    fn label_validator_context() -> Value {
+        json!({"name": "label", "supportedOptions": ["and", "or", "begins_with", "ends_with", "max", "min", "must_exclude", "must_include", "no_empty", "required"]})
+    }
+
+    fn must_include_result(rule: &Value, input: &Value) -> OptionResult {
+        process(&label_validator_context(), input, rule).unwrap()
+    }
+
+    #[test]
+    fn return_pass_if_input_meets_the_criteria() {
+        let rule = json!({"must_include": {"regex": "test"}});
+        assert_eq!(
+            must_include_result(&rule, &json!(["A", "B", "the test"])).status,
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn return_fail_if_input_does_not_meet_the_criteria() {
+        let rule = json!({"must_include": {"regex": "test", "message": "failed Test"}});
+        let result = must_include_result(&rule, &json!(["A", "B"]));
+        assert_eq!(result.status, Status::Fail);
+        assert_eq!(result.description, json!("failed Test"));
+    }
+
+    #[test]
+    fn return_error_if_inputs_are_not_in_expected_format() {
+        let rule = json!({"must_include": {"count": "test"}});
+        let error = process(&label_validator_context(), &json!(["the test"]), &rule).unwrap_err();
+        assert_eq!(
+            error.message(),
+            "Failed to run the test because 'regex' is not provided for 'must_include' option. Please check README for more information about configuration"
+        );
+    }
+
+    #[test]
+    fn check_all_sub_option_works() {
+        let rule = json!({"must_include": {"regex": "test", "all": true}});
+        assert_eq!(
+            must_include_result(&rule, &json!(["A test", "B", "the test"])).status,
+            Status::Fail
+        );
+        assert_eq!(
+            must_include_result(&rule, &json!(["A test", "B test", "the test"])).status,
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn that_regex_flag_works_as_expected() {
+        let rule = json!({"must_include": {"regex": "test", "regex_flag": "none"}});
+        assert_eq!(
+            must_include_result(&rule, &json!(["A", "B", "Test"])).status,
+            Status::Fail
+        );
+    }
+
+    #[test]
+    fn return_pass_if_input_array_meets_the_criteria() {
+        let rule = json!({"must_include": {"regex": ["^the\\stest$", "nothing"]}});
+        assert_eq!(
+            must_include_result(&rule, &json!(["A", "B", "the test"])).status,
+            Status::Pass
+        );
+    }
+
+    #[test]
+    fn return_fail_if_input_array_does_not_meet_the_criteria() {
+        let rule =
+            json!({"must_include": {"regex": ["test", "another"], "message": "failed array Test"}});
+        let result = must_include_result(&rule, &json!(["E", "F"]));
+        assert_eq!(result.status, Status::Fail);
+        assert_eq!(result.description, json!("failed array Test"));
+    }
 }
