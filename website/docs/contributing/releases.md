@@ -41,9 +41,10 @@ Because pull requests are squash-merged, the pull request title is the commit th
 ## Dependency updates
 
 [Renovate](https://docs.renovatebot.com) (`renovate.json`, built from presets) keeps the dependencies up to date: Cargo
-crates, GitHub Actions, the Paketo builder and buildpacks in `project.toml`, the Dockerfile images, devenv (the devenv
-version and the pinned `devenv-nixpkgs` commit) and the npm dependencies of this documentation site
-(`website/package.json`). Updates are opened on Mondays before 04:00 UTC; patch, minor, digest and lock file updates
+crates, GitHub Actions, the Paketo builder, buildpacks and run image in `project.toml`, the Dockerfile images, devenv
+(the devenv version and the pinned `devenv-nixpkgs` commit) and the npm dependencies of this documentation site
+(`website/package.json`). The Paketo updates are grouped and committed as `build(deps)`, so each of them releases a
+new image on the updated run image with the latest Ubuntu security fixes, at most once a week. Updates are opened on Mondays before 04:00 UTC; patch, minor, digest and lock file updates
 are squash-merged automatically once all checks pass, major updates wait for review. Renovate also opens pull requests
 for direct dependencies with known vulnerabilities in the [OSV database](https://osv.dev) as soon as a fix is available,
 regardless of the schedule.

@@ -51,3 +51,18 @@ jobs:
         run: nix profile install "github:cachix/devenv/$DEVENV_VERSION"
       - name: Build the image with Paketo buildpacks
         run: devenv shell -- build-image mergeable-rs:ci
+      - name: Start the image and wait for /ping
+        run: |
+          openssl genpkey -algorithm RSA -out smoke-test-key.pem
+          docker run -d --name mergeable-smoke-test -p 3000:3000 \
+            -e APP_ID=1 -e WEBHOOK_SECRET=smoke-test -e PRIVATE_KEY="$(base64 -w 0 smoke-test-key.pem)" \
+            mergeable-rs:ci
+          for attempt in $(seq 1 30); do
+            if [[ "$(curl -fsS http://localhost:3000/ping)" == "PONG" ]]; then
+              echo "answered /ping after $attempt attempt(s)"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs mergeable-smoke-test
+          exit 1

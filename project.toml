@@ -2,6 +2,9 @@
 schema-version = "0.2"
 id = "mergeable-rust"
 
+[_.metadata]
+run-image = "docker.io/paketobuildpacks/ubuntu-noble-run-tiny:0.0.163"
+
 [io.buildpacks]
 builder = "paketobuildpacks/ubuntu-noble-builder-buildpackless:0.0.231"
 exclude = ["target", "tests", "website", "*.md", ".devenv*", ".direnv", ".github"]
@@ -14,6 +17,10 @@ uri = "docker.io/paketobuildpacks/procfile:5.15.10"
 
 [[io.buildpacks.group]]
 uri = "docker.io/paketobuildpacks/image-labels:4.14.9"
+
+[[io.buildpacks.build.env]]
+name = "BP_DIRECT_PROCESS"
+value = "true"
 
 [[io.buildpacks.build.env]]
 name = "BP_OCI_TITLE"
