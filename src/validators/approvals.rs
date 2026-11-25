@@ -11,6 +11,7 @@ use crate::validators::{self, DEFAULT_SUPPORTED_OPTIONS, Validator};
 use crate::value_lists;
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
+use std::borrow::Borrow;
 
 const NO_CHANGES_REQUESTED_MESSAGE: &str = "No Changes are Requested";
 const DEFAULT_BLOCK_MESSAGE: &str = "Please resolve all the changes requested";
@@ -230,6 +231,20 @@ pub fn exclude_users(
     approved_reviewers
 }
 
+#[must_use]
+pub fn only_allowed_reviewers<Member: Borrow<Value>>(
+    approved_reviewers: Vec<Value>,
+    allowed_members: &[Member],
+) -> Vec<Value> {
+    if allowed_members.is_empty() {
+        return approved_reviewers;
+    }
+    value_lists::intersection(&approved_reviewers, allowed_members)
+        .into_iter()
+        .cloned()
+        .collect()
+}
+
 async fn limit_to_allowed_sources(
     context: &Context,
     limit_option: &Value,
@@ -252,11 +267,7 @@ async fn limit_to_allowed_sources(
         allowed_members =
             value_lists::union(allowed_members, value_lists::array_items(Some(limit_users)));
     }
-    let counted_reviewers: Vec<Value> =
-        value_lists::intersection(&approved_reviewers, &allowed_members)
-            .into_iter()
-            .cloned()
-            .collect();
+    let counted_reviewers = only_allowed_reviewers(approved_reviewers, &allowed_members);
     let info = results::construct_info_output(
         &validator_context(),
         Value::Array(counted_reviewers.clone()),
@@ -457,6 +468,24 @@ mod tests {
         assert_eq!(
             json_value::stringify(&resolved),
             r#"{"do":"approvals","required":{"owners":[],"assignees":["carol"],"reviewers":["bob","carol"],"requested_reviewers":[]},"min":{"count":1}}"#
+        );
+    }
+
+    #[test]
+    fn empty_allowed_set_does_not_limit_approvals() {
+        let approved = vec![json!("bob"), json!("carol")];
+        assert_eq!(
+            only_allowed_reviewers::<Value>(approved.clone(), &[]),
+            approved
+        );
+    }
+
+    #[test]
+    fn allowed_set_limits_approvals_to_its_members() {
+        let approved = vec![json!("bob"), json!("carol")];
+        assert_eq!(
+            only_allowed_reviewers(approved, &[json!("carol"), json!("dave")]),
+            vec![json!("carol")]
         );
     }
 

@@ -547,9 +547,10 @@ async fn returns_proper_error_when_team_provided_is_not_found() {
         .process_validate("approvals", &settings)
         .await;
     assert_eq!(validation["validations"].as_array().map(Vec::len), Some(2));
+    assert_eq!(validation["status"], "pass");
     assert_eq!(
         validation["validations"][1]["description"],
-        "approval: userA required"
+        "approval: all required reviewers have approved"
     );
 }
 
@@ -626,5 +627,57 @@ async fn required_owners_limit_option_will_create_an_info_validation() {
     assert_eq!(
         first_description(&validation),
         "Only approvals from following sources are counted"
+    );
+}
+
+#[tokio::test]
+async fn required_owners_limit_owners_passes_when_codeowners_file_is_missing() {
+    let settings = json!({"do": "approval", "limit": {"owners": true}, "min": {"count": 1}});
+    let reviews = vec![review("userA", "APPROVED", now_milliseconds())];
+    let validation = reviewed(reviews)
+        .await
+        .process_validate("approvals", &settings)
+        .await;
+    assert_eq!(validation["status"], "pass");
+    assert_eq!(
+        first_description(&validation),
+        "Only approvals from following sources are counted"
+    );
+    assert_eq!(
+        validation["validations"][1]["description"],
+        "approval does have a minimum of '1'"
+    );
+}
+
+#[tokio::test]
+async fn required_owners_limit_owners_passes_when_codeowner_approved_and_teams_are_empty() {
+    let settings = json!({"do": "approval", "limit": {"owners": true}, "min": {"count": 1}});
+    let reviews = vec![review("userA", "APPROVED", now_milliseconds())];
+    let github = reviewed_with(&code_owner_options("userA"), reviews, Vec::new()).await;
+    let validation = github.process_validate("approvals", &settings).await;
+    assert_eq!(validation["status"], "pass");
+    assert_eq!(
+        first_description(&validation),
+        "Only approvals from following sources are counted"
+    );
+    assert_eq!(
+        validation["validations"][1]["description"],
+        "approval does have a minimum of '1'"
+    );
+}
+
+#[tokio::test]
+async fn required_owners_required_owners_passes_when_codeowners_file_is_missing_and_other_reviewers_have_approved()
+ {
+    let settings = json!({"do": "approval", "required": {"owners": true, "reviewers": ["userA"]}});
+    let reviews = vec![review("userA", "APPROVED", now_milliseconds())];
+    let validation = reviewed(reviews)
+        .await
+        .process_validate("approvals", &settings)
+        .await;
+    assert_eq!(validation["status"], "pass");
+    assert_eq!(
+        first_description(&validation),
+        "approval: all required reviewers have approved"
     );
 }
