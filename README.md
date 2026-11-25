@@ -114,6 +114,10 @@ cargo nextest run --test contract_cases validator_title_must_include_fail
 cargo test --test contract_cases            # plain cargo test works too, in one process
 ```
 
+The same test binary holds the scheduler resync tests (`tests/installation_resync/`), which drive the mock directly:
+they change the stubbed installation and repository lists while the app runs and check which repositories the
+scheduler keeps running (`cargo nextest run -E 'test(installation_resync)'`).
+
 The 381 cases were recorded from the reference implementation. The former `replay` crate, whose CLI recorded new
 cases (`replay record`), ran them against a built binary and benchmarked it (`replay bench`), has been removed;
 recording new cases and the benchmark harness are no longer part of the repository.
@@ -150,7 +154,8 @@ recording new cases and the benchmark harness are no longer part of the reposito
 - Served under `/api/v3` (the app gets `GHE_HOST=127.0.0.1:<port>`, `GHE_PROTOCOL=http`); paths are stored without the
   prefix, percent-decoded (`%2F` -> `/`), query as an object with sorted keys.
 - `POST /app/installations/{id}/access_tokens` and `GET /app/installations/...` are answered by the mock (token
-  `ghs_test`) and are not recorded.
+  `ghs_test`) and are not recorded. A stub for `GET /app/installations` (the installation list) replaces the mock's
+  default answer; the mock counts these list requests.
 - Every response carries `x-ratelimit-limit`, `x-ratelimit-remaining` and `x-ratelimit-reset` headers.
 - Anything unmatched answers `404 {"message":"Not Found","documentation_url":"https://docs.github.com/rest"}`.
 - Recorded bodies: JSON parsed; ISO-8601 timestamps replaced by `"<timestamp>"`.
@@ -186,6 +191,7 @@ recording new cases and the benchmark harness are no longer part of the reposito
 | `JIRA_HOST`, `JIRA_USERNAME`, `JIRA_PASSWORD`, `JIRA_PROTOCOL`, `JIRA_VERSION`, `JIRA_STRICT_SSL` | Jira option | - |
 | `MERGEABLE_SCHEDULER` | `true` emits `schedule.repository` events for every installed repository | off |
 | `MERGEABLE_SCHEDULER_INTERVAL` | Scheduler interval in seconds | `3600` |
+| `MERGEABLE_INSTALLATION_RESYNC_INTERVAL` | Seconds between two scheduler resyncs of the installations and their repositories (fractions allowed; zero, negative or invalid values use the default) | `3600` |
 | `IGNORED_ACCOUNTS` | Comma-separated account logins the scheduler skips (case-insensitive) | - |
 | `DISABLE_DELAY` | Any non-empty value disables the random initial scheduler delay | delay on |
 | `ENABLE_GITHUB_RATELIMIT_ENDPOINT` | `true` serves `GET /github-ratelimit/:installationId` | off |
@@ -212,7 +218,16 @@ With `MERGEABLE_SCHEDULER=true` the app lists its installations (`GET /app/insta
 App) at start, lists each installation's repositories (`GET /installation/repositories?per_page=100`, one
 installation at a time) and, after a random delay within one interval, runs the rules for the event
 `schedule.repository` with the payload `{action: "repository", installation, repository}` every interval.
-`installation.created` and `installation_repositories.added` webhooks schedule new repositories the same way.
+`installation.created` and `installation_repositories.added` webhooks schedule new repositories the same way;
+`installation.deleted` and `installation_repositories.removed` webhooks stop scheduling the installation's
+repositories or the removed repositories.
+
+In case a webhook is missed, the scheduler resyncs every `MERGEABLE_INSTALLATION_RESYNC_INTERVAL` seconds (default one
+hour, first resync one interval after start): it lists the installations and their repositories again, schedules
+repositories it does not know yet and stops scheduling repositories that are no longer listed, also those of
+uninstalled or ignored installations. Each resync logs `scheduler.resync.completed` with the counts `installations`,
+`repositories`, `added` and `removed`. When listing the installations fails, nothing changes; when listing one
+installation's repositories fails, that installation's repositories stay scheduled (ADR-012).
 
 ## Behaviour notes
 

@@ -100,3 +100,19 @@ Status: accepted
 Decision: `clippy::pedantic` at warn crate-wide (`[lints.clippy]` in Cargo.toml) (`missing_errors_doc`, `missing_panics_doc` allowed);
 deliberate exceptions use scoped `#[expect(lint, reason = "...")]`, never `#[allow]`.
 Consequences: New warnings are fixed or justified at the site.
+
+## ADR-012: Periodic resync of the scheduled installations and repositories
+Status: accepted
+Context: With `MERGEABLE_SCHEDULER=true` the scheduler listed installations and repositories only at start and then
+relied on the `installation` and `installation_repositories` webhooks. A missed webhook left a new repository
+unscheduled, and removed repositories or uninstalled installations stayed scheduled until a restart.
+Decision: The scheduler also handles `installation.deleted` and `installation_repositories.removed`, and every
+`MERGEABLE_INSTALLATION_RESYNC_INTERVAL` seconds (default 3600) lists all installations and their repositories again
+with the same requests as at start. Unknown repositories are scheduled, scheduled repositories that were not listed
+are unscheduled (their timer task is aborted). The resync is conservative: a failed installation list changes
+nothing, a failed repository list keeps that installation's repositories, and a repository scheduled by a webhook
+while the resync was listing is kept (every scheduling gets a sequence number; only repositories scheduled before
+the resync started can be removed). The scheduled payload of a repository that stays is not refreshed.
+Consequences: Missed webhooks heal within one resync interval at the cost of one installation list plus one
+repository list per installation per interval. Without `MERGEABLE_SCHEDULER` nothing changes, so the recorded
+cases are unaffected.

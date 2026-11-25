@@ -11,12 +11,14 @@ use base64::Engine;
 use percent_encoding::percent_decode_str;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 use tokio::task::JoinHandle;
 
 const API_PREFIX: &str = "/api/v3";
 const INSTALLATION_PATH_PREFIX: &str = "/app/installations";
+const INSTALLATION_LIST_PATH: &str = "/app/installations";
 
 #[derive(Debug, Clone)]
 pub struct Scenario {
@@ -73,6 +75,7 @@ struct MockState {
 pub struct MockGithub {
     state: Mutex<MockState>,
     last_request_at: Mutex<Instant>,
+    installation_list_requests: AtomicUsize,
     normalizer: RecordedValueNormalizer,
 }
 
@@ -129,6 +132,7 @@ impl MockGithub {
                 calls: Vec::new(),
             }),
             last_request_at: Mutex::new(Instant::now()),
+            installation_list_requests: AtomicUsize::new(0),
             normalizer: RecordedValueNormalizer::new(mock_origin)?,
         })
     }
@@ -147,6 +151,27 @@ impl MockGithub {
 
     pub fn take_calls(&self) -> Vec<Value> {
         std::mem::take(&mut self.locked_state().calls)
+    }
+
+    pub fn recorded_calls(&self) -> Vec<Value> {
+        self.locked_state().calls.clone()
+    }
+
+    pub fn installation_list_request_count(&self) -> usize {
+        self.installation_list_requests.load(Ordering::SeqCst)
+    }
+
+    fn reply_as_app(&self, method: &str, path: &str, query: &Map<String, Value>) -> MockReply {
+        if method == "GET" && path == INSTALLATION_LIST_PATH {
+            self.installation_list_requests
+                .fetch_add(1, Ordering::SeqCst);
+            if let Some(scenario) = &self.locked_state().scenario
+                && let Some(stub) = scenario.matching_stub(method, path, query)
+            {
+                return stub_reply(stub);
+            }
+        }
+        installation_reply(method, path)
     }
 
     pub fn recorded_call_count(&self) -> usize {
@@ -328,7 +353,7 @@ async fn handle_request(
         .decode_utf8_lossy()
         .into_owned();
     if path.starts_with(INSTALLATION_PATH_PREFIX) {
-        return installation_reply(method.as_str(), &path);
+        return github.reply_as_app(method.as_str(), &path, &parse_query(uri.query()));
     }
     let accept = headers
         .get(ACCEPT)

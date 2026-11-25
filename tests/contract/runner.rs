@@ -37,6 +37,13 @@ fn test_signing_key_pem() -> Result<&'static str> {
 }
 
 pub fn in_process_app_environment(mock_port: u16, case: &Case) -> Result<BTreeMap<String, String>> {
+    app_environment_with(mock_port, &case.definition.env)
+}
+
+pub fn app_environment_with(
+    mock_port: u16,
+    extra_variables: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>> {
     let mut environment = BTreeMap::from(
         [
             ("APP_ID", "1"),
@@ -51,7 +58,7 @@ pub fn in_process_app_environment(mock_port: u16, case: &Case) -> Result<BTreeMa
         ]
         .map(|(name, value)| (name.to_owned(), value.to_owned())),
     );
-    environment.extend(case.definition.env.clone());
+    environment.extend(extra_variables.clone());
     Ok(environment)
 }
 
